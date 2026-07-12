@@ -1,0 +1,18 @@
+# Vivado自動生成ディレクトリ(合成・実装・IP生成のたびに再生成される)
+.Xil/
+mypc.cache/
+mypc.gen/
+mypc.hw/
+mypc.ip_user_files/
+mypc.runs/
+mypc.sim/
+
+# Vivadoログ・ジャーナル
+vivado*.log
+vivado*.jou
+
+# mypc.srcs内のVivado管理ディレクトリ(GUI操作で変更されるため編集禁止．詳細はCLAUDE.md参照)
+mypc.srcs/sim_1/
+mypc.srcs/sources_1/bd/
+mypc.srcs/sources_1/imports/
+mypc.srcs/utils_1/

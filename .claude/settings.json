@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(C:\\D\\program\\xilinx\\pynq-z2\\pc\\specification\\**)",
+      "Glob(C:\\D\\program\\xilinx\\pynq-z2\\pc\\specification\\**)",
+      "Grep(C:\\D\\program\\xilinx\\pynq-z2\\pc\\specification\\**)"
+    ],
+    "additionalDirectories": [
+      "C:\\D\\program\\xilinx\\pynq-z2\\pc\\specification"
+    ]
+  }
+}
