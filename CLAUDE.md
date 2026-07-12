@@ -145,6 +145,10 @@ top_wrapper.v (Vivado自動生成)
 - インターフェース: `xx_if`
 - 変数の型: `xx_t`
 
+## Issue対応の徹底
+
+ファイルを修正する場合は，必ず対応するGitHub issueを起票し，そのissue用のブランチ(`fix/issue-<番号>-<内容を表す短い語句>`)を作成してから行う．デフォルトブランチを直接編集しない．
+
 ## 開発上の注意点
 
 - 新しい命令を追加する場合は `machine.svh` → `decorder_sv.sv` → `alu_sv.sv` の順に変更が必要。
