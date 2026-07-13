@@ -1,12 +1,13 @@
 ---
 name: issue-resolve
 description: GitHub issueに対応する。1issue=1回の実行で，複数リポジトリにまたがる修正もスキル内部で完結させる。「issue #Nに対応して」で起動。
-allowed-tools: Edit, Write, Bash(git add *) Bash(git commit *) Bash(git push *) Bash(git checkout *) Bash(git pull) Bash(git branch -d *) Bash(git branch --show-current) Bash(git status *) Bash(git diff *) Bash(gh pr create *) Bash(gh pr edit *) Bash(gh api *) Bash(gh issue view *) Bash(claude -p --allowedTools "Read,Grep,Glob,Skill(issue-create),Bash(git status:*),Bash(git diff:*),Bash(gh issue view:*)" -- "*" > review.md)
 ---
 
 # 概要
 
 GitHub issueへの対応 (調査・ブランチ作成・修正・PR作成) を行う．粒度は1issue=1回の実行．対応が複数リポジトリにまたがる場合も，このスキル内で完結させる．
+
+このスキルが使用するツールの許可は，このリポジトリの`.claude/settings.json`で管理する(このファイルの`allowed-tools`には記載しない)．
 
 # 手順
 

@@ -3,7 +3,24 @@
     "allow": [
       "Read(C:\\D\\program\\xilinx\\pynq-z2\\pc\\specification\\**)",
       "Glob(C:\\D\\program\\xilinx\\pynq-z2\\pc\\specification\\**)",
-      "Grep(C:\\D\\program\\xilinx\\pynq-z2\\pc\\specification\\**)"
+      "Grep(C:\\D\\program\\xilinx\\pynq-z2\\pc\\specification\\**)",
+      "Edit",
+      "Write",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git checkout:*)",
+      "Bash(git pull)",
+      "Bash(git branch -d:*)",
+      "Bash(git branch --show-current)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(gh api:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue create:*)",
+      "Bash(claude -p:*)"
     ],
     "additionalDirectories": [
       "C:\\D\\program\\xilinx\\pynq-z2\\pc\\specification"
