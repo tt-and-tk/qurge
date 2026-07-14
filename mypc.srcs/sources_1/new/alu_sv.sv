@@ -110,9 +110,14 @@ module alu_sv (
     assign prefetch_fires = (cpu_phase == CPU_EXECUTE) && !ir_next_valid
         && (command.m_type != F_TYPE) && (command.m_type != J_TYPE);
 
+    // 今サイクルにretire()が呼ばれたかどうかを示すスクラッチ変数(ブロッキング代入で使用)．
+    // CPU_EXECUTE突入のたびに先頭で0へ戻し，末尾の先読みトリガーの可否判定にのみ使う．
+    logic retiring;
+
     // 命令完了時，次の命令へ遷移する処理をまとめたタスク．
     // 先読み済みの命令があればFETCHフェーズを省略し，直接CHECKへ進む．
     task automatic retire();
+        retiring = 1'b1;
         if (ir_next_valid) begin
             // 前サイクル以前に先読みが完了している場合，それを採用する
             ir <= ir_next;
@@ -501,11 +506,8 @@ module alu_sv (
 
                 // 処理の実行
                 CPU_EXECUTE: begin
-                    // 分岐・ジャンプでなければ，実行中に次の命令を先読みしておく
-                    if (prefetch_fires) begin
-                        ir_next <= rom_read.machine;
-                        ir_next_valid <= 1'b1;
-                    end
+                    // retire()が呼ばれたかどうかをこのサイクルの判定用にリセットする
+                    retiring = 1'b0;
 
                     // 関数タイプごとに実行
                     unique case (command.m_type)
@@ -950,6 +952,12 @@ module alu_sv (
                             force_reset <= 1'b1;
                         end
                     endcase
+
+                    // 分岐・ジャンプでなく，かつ今サイクルにretireしないなら次の命令を先読みする
+                    if (prefetch_fires && !retiring) begin
+                        ir_next <= rom_read.machine;
+                        ir_next_valid <= 1'b1;
+                    end
                 end
             endcase
         end
