@@ -81,6 +81,9 @@ module alu_sv (
 
     // 実行前のものをいったん保存しておく
     machine_p::machine_t ir = nop();     // 命令
+    // 実行中に先読みした次の命令(分岐・ジャンプ命令の実行中は先読みしない)
+    machine_p::machine_t ir_next = nop();
+    logic ir_next_valid = 1'b0;
     register_t rs1_val_r = '0;
     register_t rs2_val_r = '0;
     machine_p::addr_t rd_addr_r = '0;
@@ -102,6 +105,31 @@ module alu_sv (
     // 強制リセット
     logic force_reset = 1'b0;
 
+    // 分岐・ジャンプが確定するまでは次命令のPCが定まらないため，先読みしない
+    logic prefetch_fires;
+    assign prefetch_fires = (cpu_phase == CPU_EXECUTE) && !ir_next_valid
+        && (command.m_type != F_TYPE) && (command.m_type != J_TYPE);
+
+    // 命令完了時，次の命令へ遷移する処理をまとめたタスク．
+    // 先読み済みの命令があればFETCHフェーズを省略し，直接CHECKへ進む．
+    task automatic retire();
+        if (ir_next_valid) begin
+            // 前サイクル以前に先読みが完了している場合，それを採用する
+            ir <= ir_next;
+            cpu_phase <= CPU_CHECK;
+        end
+        else if (prefetch_fires) begin
+            // 今サイクルに先読みが完了する場合，レジスタを経由せず直接採用する
+            ir <= rom_read.machine;
+            cpu_phase <= CPU_CHECK;
+        end
+        else begin
+            // 分岐・ジャンプ直後など，先読みできなかった場合は通常通りFETCHへ
+            cpu_phase <= CPU_FETCH;
+        end
+        ir_next_valid <= 1'b0;
+    endtask
+
     // 組み合わせ回路
     always_comb begin
         // 機械語を分解してもらう
@@ -118,8 +146,13 @@ module alu_sv (
         // number  = register[PC_ADDR][7:0];
         number  = register[6'h31][7:0];
 
-        // pcを出力する
-        rom_read.pc = register[PC_ADDR];
+        // pcを出力する．実行中の命令が分岐・ジャンプでなければ次命令を先読みする
+        if (prefetch_fires) begin
+            rom_read.pc = register[PC_ADDR] + 1;
+        end
+        else begin
+            rom_read.pc = register[PC_ADDR];
+        end
 
         // 標準入出力
         stdout_tkeep = 4'hf;
@@ -133,6 +166,8 @@ module alu_sv (
             // 実行状態をリセット
             cpu_phase <= CPU_FETCH;
             ir <= nop();
+            ir_next <= nop();
+            ir_next_valid <= 1'b0;
             rs1_val_r <= '0;
             rs2_val_r <= '0;
             rd_addr_r <= '0;
@@ -466,6 +501,12 @@ module alu_sv (
 
                 // 処理の実行
                 CPU_EXECUTE: begin
+                    // 分岐・ジャンプでなければ，実行中に次の命令を先読みしておく
+                    if (prefetch_fires) begin
+                        ir_next <= rom_read.machine;
+                        ir_next_valid <= 1'b1;
+                    end
+
                     // 関数タイプごとに実行
                     unique case (command.m_type)
                         // 処理を実行しない(N系)
@@ -473,8 +514,8 @@ module alu_sv (
                             // pcをカウントアップ
                             register[PC_ADDR] <= register[PC_ADDR] + 1;
 
-                            // フェッチに戻る
-                            cpu_phase <= CPU_FETCH;
+                            // 次の命令へ
+                            retire();
 
                             // 不正な値が入っても全て無視する
                         end
@@ -522,7 +563,7 @@ module alu_sv (
                                                 end
                                                 div_state <= IDLE;
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
-                                                cpu_phase <= CPU_FETCH;
+                                                retire();
                                             end
                                         end
                                         default: force_reset <= 1'b1;
@@ -531,10 +572,10 @@ module alu_sv (
                                 default: force_reset <= 1'b1;
                             endcase
 
-                            // DIV以外はここでPCインクリメントとFETCH遷移
+                            // DIV以外はここでPCインクリメントと次命令への遷移
                             if (func_r != DIV) begin
                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
-                                cpu_phase <= CPU_FETCH;
+                                retire();
                             end
                         end
 
@@ -564,8 +605,8 @@ module alu_sv (
                                 endcase
                             end
 
-                            // フェッチに戻る
-                            cpu_phase <= CPU_FETCH;
+                            // 次の命令へ
+                            retire();
                         end
 
                         // 代入系
@@ -586,8 +627,8 @@ module alu_sv (
                                 force_reset <= 1'b1;
                             end
 
-                            // フェッチに戻る
-                            cpu_phase <= CPU_FETCH;
+                            // 次の命令へ
+                            retire();
                         end
 
                         // 分岐系
@@ -635,8 +676,8 @@ module alu_sv (
                                 end
                             endcase
 
-                            // フェッチに戻る
-                            cpu_phase <= CPU_FETCH;
+                            // 次の命令へ(分岐命令のため先読みは行われない)
+                            retire();
                         end
 
                         // ジャンプ系
@@ -653,8 +694,8 @@ module alu_sv (
                                         register[PC_ADDR] <= rs1_val_r;
                                     end
 
-                                    // フェッチに戻る
-                                    cpu_phase <= CPU_FETCH;
+                                    // 次の命令へ(ジャンプ命令のため先読みは行われない)
+                                    retire();
                                 end
 
                                 // 関数呼び出し
@@ -671,8 +712,8 @@ module alu_sv (
                                         register[PC_ADDR] <= rs1_val_r;
                                     end
 
-                                    // フェッチに戻る
-                                    cpu_phase <= CPU_FETCH;
+                                    // 次の命令へ(CALL命令のため先読みは行われない)
+                                    retire();
                                 end
 
                                 // 関数リターン
@@ -682,8 +723,8 @@ module alu_sv (
                                     // スタックポインタを戻す
                                     register[SP_ADDR] <= register[SP_ADDR] - 1;
 
-                                    // フェッチに戻る
-                                    cpu_phase <= CPU_FETCH;
+                                    // 次の命令へ(RET命令のため先読みは行われない)
+                                    retire();
                                 end
 
                                 // それ以外はオミット
@@ -734,8 +775,8 @@ module alu_sv (
                                                 // プログラムカウンタをインクリメント
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
 
-                                                // フェッチに戻る
-                                                cpu_phase <= CPU_FETCH;
+                                                // 次の命令へ
+                                                retire();
                                             end
                                         end
 
@@ -783,8 +824,8 @@ module alu_sv (
                                                 // プログラムカウンタをインクリメント
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
 
-                                                // フェッチに戻る
-                                                cpu_phase <= CPU_FETCH;
+                                                // 次の命令へ
+                                                retire();
                                             end
                                         end
 
@@ -836,8 +877,8 @@ module alu_sv (
                                                 // プログラムカウンタをインクリメント
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
 
-                                                // フェッチに戻る
-                                                cpu_phase <= CPU_FETCH;
+                                                // 次の命令へ
+                                                retire();
                                             end
                                             else begin
                                                 // 読み取り準備が整っていることを送る
@@ -883,8 +924,8 @@ module alu_sv (
                                                 // プログラムカウンタをインクリメント
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
 
-                                                // フェッチに戻る
-                                                cpu_phase <= CPU_FETCH;
+                                                // 次の命令へ
+                                                retire();
                                             end
                                             else begin
                                                 // 書き込み準備が終わっていることを送る
