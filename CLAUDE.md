@@ -156,7 +156,7 @@ top_wrapper.v (Vivado自動生成)
 - 新しい命令を追加する場合は `machine.svh` → `decorder_sv.sv` → `alu_sv.sv` の順に変更が必要。
 - ROMのプログラム変更は `rom_sv.sv` 内の命令配列を直接書き換える。
 - `mother_board.v` はVerilogラッパーで、SystemVerilogの `mother_board_sv.sv` を呼び出す構造になっている（Vivado IPとの互換性のため）。
-- `alu_sv.sv`のCPU_EXECUTEフェーズで命令完了時に次命令へ遷移する箇所は，`cpu_phase <= CPU_FETCH;`を直接書かず`retire()`タスクを呼ぶこと．実行中に次命令を先読みする機構(`ir_next`/`prefetch_fires`)と連動しているため，直接代入すると先読み結果が反映されない．分岐(F系)・ジャンプ(J系)命令は先読み対象外のため，これらの命令に関しては`retire()`を呼んでも常にFETCHフェーズへ戻る．
+- `alu_sv.sv`のCPU_EXECUTEフェーズで命令完了時に次命令へ遷移する箇所は，`cpu_phase <= CPU_FETCH;`を直接書かず`advance_to_next_instruction()`タスクを呼ぶこと．実行中に次命令を先読みする機構(`ir_next`/`can_prefetch`)と連動しているため，直接代入すると先読み結果が反映されない．分岐(F系)・ジャンプ(J系)命令は先読み対象外のため，これらの命令に関しては`advance_to_next_instruction()`を呼んでも常にFETCHフェーズへ戻る．
 
 ## このプロジェクトの残件・既知課題(ハードウェア)
 

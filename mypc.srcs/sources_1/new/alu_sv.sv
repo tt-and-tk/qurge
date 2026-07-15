@@ -83,7 +83,7 @@ module alu_sv (
     machine_p::machine_t ir = nop();     // 命令
     // 実行中に先読みした次の命令(分岐・ジャンプ命令の実行中は先読みしない)
     machine_p::machine_t ir_next = nop();
-    logic ir_next_valid = 1'b0;
+    logic ir_next_valid = 1'b0;    // ir_nextが先読み済みの有効な命令かどうか
     register_t rs1_val_r = '0;
     register_t rs2_val_r = '0;
     machine_p::addr_t rd_addr_r = '0;
@@ -105,25 +105,27 @@ module alu_sv (
     // 強制リセット
     logic force_reset = 1'b0;
 
-    // 分岐・ジャンプが確定するまでは次命令のPCが定まらないため，先読みしない
-    logic prefetch_fires;
-    assign prefetch_fires = (cpu_phase == CPU_EXECUTE) && !ir_next_valid
-        && (command.m_type != F_TYPE) && (command.m_type != J_TYPE);
+    // 次命令を先読みしてよいかどうかを示すフラグ(分岐・ジャンプは次のPCが未確定のため先読み不可)
+    logic can_prefetch;
+    assign can_prefetch = (cpu_phase == CPU_EXECUTE)   // 実行フェーズの間のみ先読みが可能
+        && !ir_next_valid                              // 既に先読み済みの命令があれば行わない
+        && (command.m_type != F_TYPE)                   // 分岐命令は次のPCがまだ確定しない
+        && (command.m_type != J_TYPE);                   // ジャンプ命令も次のPCがまだ確定しない
 
-    // 今サイクルにretire()が呼ばれたかどうかを示すスクラッチ変数(ブロッキング代入で使用)．
+    // 今サイクルにadvance_to_next_instruction()が呼ばれたかどうかを示すスクラッチ変数(ブロッキング代入で使用)．
     // CPU_EXECUTE突入のたびに先頭で0へ戻し，末尾の先読みトリガーの可否判定にのみ使う．
-    logic retiring;
+    logic advancing;
 
     // 命令完了時，次の命令へ遷移する処理をまとめたタスク．
     // 先読み済みの命令があればFETCHフェーズを省略し，直接CHECKへ進む．
-    task automatic retire();
-        retiring = 1'b1;
+    task automatic advance_to_next_instruction();
+        advancing = 1'b1;
         if (ir_next_valid) begin
             // 前サイクル以前に先読みが完了している場合，それを採用する
             ir <= ir_next;
             cpu_phase <= CPU_CHECK;
         end
-        else if (prefetch_fires) begin
+        else if (can_prefetch) begin
             // 今サイクルに先読みが完了する場合，レジスタを経由せず直接採用する
             ir <= rom_read.machine;
             cpu_phase <= CPU_CHECK;
@@ -152,7 +154,7 @@ module alu_sv (
         number  = register[6'h31][7:0];
 
         // pcを出力する．実行中の命令が分岐・ジャンプでなければ次命令を先読みする
-        if (prefetch_fires) begin
+        if (can_prefetch) begin
             rom_read.pc = register[PC_ADDR] + 1;
         end
         else begin
@@ -506,8 +508,8 @@ module alu_sv (
 
                 // 処理の実行
                 CPU_EXECUTE: begin
-                    // retire()が呼ばれたかどうかをこのサイクルの判定用にリセットする
-                    retiring = 1'b0;
+                    // advance_to_next_instruction()が呼ばれたかどうかをこのサイクルの判定用にリセットする
+                    advancing = 1'b0;
 
                     // 関数タイプごとに実行
                     unique case (command.m_type)
@@ -517,7 +519,7 @@ module alu_sv (
                             register[PC_ADDR] <= register[PC_ADDR] + 1;
 
                             // 次の命令へ
-                            retire();
+                            advance_to_next_instruction();
 
                             // 不正な値が入っても全て無視する
                         end
@@ -565,7 +567,7 @@ module alu_sv (
                                                 end
                                                 div_state <= IDLE;
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
-                                                retire();
+                                                advance_to_next_instruction();
                                             end
                                         end
                                         default: force_reset <= 1'b1;
@@ -577,7 +579,7 @@ module alu_sv (
                             // DIV以外はここでPCインクリメントと次命令への遷移
                             if (func_r != DIV) begin
                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
-                                retire();
+                                advance_to_next_instruction();
                             end
                         end
 
@@ -608,7 +610,7 @@ module alu_sv (
                             end
 
                             // 次の命令へ
-                            retire();
+                            advance_to_next_instruction();
                         end
 
                         // 代入系
@@ -630,7 +632,7 @@ module alu_sv (
                             end
 
                             // 次の命令へ
-                            retire();
+                            advance_to_next_instruction();
                         end
 
                         // 分岐系
@@ -679,7 +681,7 @@ module alu_sv (
                             endcase
 
                             // 次の命令へ(分岐命令のため先読みは行われない)
-                            retire();
+                            advance_to_next_instruction();
                         end
 
                         // ジャンプ系
@@ -697,7 +699,7 @@ module alu_sv (
                                     end
 
                                     // 次の命令へ(ジャンプ命令のため先読みは行われない)
-                                    retire();
+                                    advance_to_next_instruction();
                                 end
 
                                 // 関数呼び出し
@@ -715,7 +717,7 @@ module alu_sv (
                                     end
 
                                     // 次の命令へ(CALL命令のため先読みは行われない)
-                                    retire();
+                                    advance_to_next_instruction();
                                 end
 
                                 // 関数リターン
@@ -726,7 +728,7 @@ module alu_sv (
                                     register[SP_ADDR] <= register[SP_ADDR] - 1;
 
                                     // 次の命令へ(RET命令のため先読みは行われない)
-                                    retire();
+                                    advance_to_next_instruction();
                                 end
 
                                 // それ以外はオミット
@@ -778,7 +780,7 @@ module alu_sv (
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
 
                                                 // 次の命令へ
-                                                retire();
+                                                advance_to_next_instruction();
                                             end
                                         end
 
@@ -827,7 +829,7 @@ module alu_sv (
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
 
                                                 // 次の命令へ
-                                                retire();
+                                                advance_to_next_instruction();
                                             end
                                         end
 
@@ -880,7 +882,7 @@ module alu_sv (
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
 
                                                 // 次の命令へ
-                                                retire();
+                                                advance_to_next_instruction();
                                             end
                                             else begin
                                                 // 読み取り準備が整っていることを送る
@@ -927,7 +929,7 @@ module alu_sv (
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
 
                                                 // 次の命令へ
-                                                retire();
+                                                advance_to_next_instruction();
                                             end
                                             else begin
                                                 // 書き込み準備が終わっていることを送る
@@ -953,8 +955,8 @@ module alu_sv (
                         end
                     endcase
 
-                    // 分岐・ジャンプでなく，かつ今サイクルにretireしないなら次の命令を先読みする
-                    if (prefetch_fires && !retiring) begin
+                    // 分岐・ジャンプでなく，かつ今サイクルに次の命令へ進まないなら次の命令を先読みする
+                    if (can_prefetch && !advancing) begin
                         ir_next <= rom_read.machine;
                         ir_next_valid <= 1'b1;
                     end
