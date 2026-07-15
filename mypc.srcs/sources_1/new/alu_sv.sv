@@ -955,7 +955,15 @@ module alu_sv (
                         end
                     endcase
 
-                    // 分岐・ジャンプでなく，かつ今サイクルに次の命令へ進まないなら次の命令を先読みする
+                    // 分岐・ジャンプでなく，かつ今サイクルに次の命令へ進まないなら次の命令を先読みする．
+                    // このブロックはunique caseの後(CPU_EXECUTE末尾)に置く必要がある．先頭に置くと，
+                    // ここでのir_next_valid <= 1'b1と，advance_to_next_instruction()内で無条件に行う
+                    // ir_next_valid <= 1'b0が同一サイクルで両方予約されてしまう．ノンブロッキング代入は
+                    // 異なる信号同士なら実行順序に依存しないが，同一信号へ複数回代入した場合は最後に
+                    // 実行された代入が反映されるため，位置を変えると意図しない方が勝つ状態になる．
+                    // !advancingの条件も同じ理由で必要．今サイクルにadvance_to_next_instruction()が
+                    // 呼ばれた場合，次に採用する命令は同タスク内で既に確定しているため，ここで重ねて
+                    // 先読みするとir_next_validへの二重代入が発生してしまう．
                     if (can_prefetch && !advancing) begin
                         ir_next <= rom_read.machine;
                         ir_next_valid <= 1'b1;
