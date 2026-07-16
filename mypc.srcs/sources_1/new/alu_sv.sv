@@ -107,10 +107,10 @@ module alu_sv (
 
     // 次命令を先読みしてよいかどうかを示すフラグ(分岐・ジャンプは次のPCが未確定のため先読み不可)
     logic can_prefetch;
-    assign can_prefetch = (cpu_phase == CPU_EXECUTE)   // 実行フェーズの間のみ先読みが可能
-        && !ir_next_valid                              // 既に先読み済みの命令があれば行わない
+    assign can_prefetch = (cpu_phase == CPU_EXECUTE)    // 実行フェーズの間のみ先読みが可能
+        && !ir_next_valid                               // 既に先読み済みの命令があれば行わない
         && (command.m_type != F_TYPE)                   // 分岐命令は次のPCがまだ確定しない
-        && (command.m_type != J_TYPE);                   // ジャンプ命令も次のPCがまだ確定しない
+        && (command.m_type != J_TYPE);                  // ジャンプ命令も次のPCがまだ確定しない
 
     // 今サイクルにadvance_to_next_instruction()が呼ばれたかどうかを示すスクラッチ変数(ブロッキング代入で使用)．
     // CPU_EXECUTE突入のたびに先頭で0へ戻し，末尾の先読みトリガーの可否判定にのみ使う．
@@ -126,7 +126,8 @@ module alu_sv (
             cpu_phase <= CPU_CHECK;
         end
         else if (can_prefetch) begin
-            // 今サイクルに先読みが完了する場合，レジスタを経由せず直接採用する
+            // 今サイクルに先読みが完了する場合，レジスタを経由せず直接採用する．
+            // このときrom_read.pcは既にPC+1を指しているため，rom_read.machineには次の命令が入っている
             ir <= rom_read.machine;
             cpu_phase <= CPU_CHECK;
         end
@@ -134,6 +135,8 @@ module alu_sv (
             // 分岐・ジャンプ直後など，先読みできなかった場合は通常通りFETCHへ
             cpu_phase <= CPU_FETCH;
         end
+
+        // 先読み済みだった命令は消費し終えたので無効化する(今サイクルに新たに先読みが成立すれば，末尾のブロックで改めて1にする)
         ir_next_valid <= 1'b0;
     endtask
 
@@ -508,7 +511,7 @@ module alu_sv (
 
                 // 処理の実行
                 CPU_EXECUTE: begin
-                    // advance_to_next_instruction()が呼ばれたかどうかをこのサイクルの判定用にリセットする
+                    // このサイクルではまだ次の命令へ進んでいない状態から判定を始めるため，advancingを一旦0に戻す(advance_to_next_instruction()が呼ばれると1になる)
                     advancing = 1'b0;
 
                     // 関数タイプごとに実行
@@ -955,7 +958,11 @@ module alu_sv (
                         end
                     endcase
 
-                    // 分岐・ジャンプでなく，かつ今サイクルに次の命令へ進まないなら次の命令を先読みする．
+                    // 次の命令を先読みしてよい状態(can_prefetch)で，かつ今サイクルにはまだ次の命令へ
+                    // 進んでいない(!advancing)場合に，次の命令をir_nextへ先読みする．
+                    // これに該当するのは，DIVの完了待ちやRM/WM/SCAN/PRINTの応答待ちなど，命令の実行が
+                    // 複数サイクルにまたがりまだ完了(advance_to_next_instruction()の呼び出し)に至って
+                    // いないサイクル．
                     // このブロックはunique caseの後(CPU_EXECUTE末尾)に置く必要がある．先頭に置くと，
                     // ここでのir_next_valid <= 1'b1と，advance_to_next_instruction()内で無条件に行う
                     // ir_next_valid <= 1'b0が同一サイクルで両方予約されてしまう．ノンブロッキング代入は
