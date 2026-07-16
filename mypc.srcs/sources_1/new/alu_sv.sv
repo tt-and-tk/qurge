@@ -963,14 +963,11 @@ module alu_sv (
                     // これに該当するのは，DIVの完了待ちやRM/WM/SCAN/PRINTの応答待ちなど，命令の実行が
                     // 複数サイクルにまたがりまだ完了(advance_to_next_instruction()の呼び出し)に至って
                     // いないサイクル．
-                    // このブロックはunique caseの後(CPU_EXECUTE末尾)に置く必要がある．先頭に置くと，
-                    // ここでのir_next_valid <= 1'b1と，advance_to_next_instruction()内で無条件に行う
-                    // ir_next_valid <= 1'b0が同一サイクルで両方予約されてしまう．ノンブロッキング代入は
-                    // 異なる信号同士なら実行順序に依存しないが，同一信号へ複数回代入した場合は最後に
-                    // 実行された代入が反映されるため，位置を変えると意図しない方が勝つ状態になる．
-                    // !advancingの条件も同じ理由で必要．今サイクルにadvance_to_next_instruction()が
-                    // 呼ばれた場合，次に採用する命令は同タスク内で既に確定しているため，ここで重ねて
-                    // 先読みするとir_next_validへの二重代入が発生してしまう．
+                    // このブロックはunique caseの後(CPU_EXECUTE末尾)に置き，かつ!advancingで
+                    // 排他制御する必要がある．今サイクルにadvance_to_next_instruction()が呼ばれて
+                    // いる(advancing==1)場合，そちらの中で既にir_next_valid <= 1'b0が予約されており，
+                    // ここでもir_next_valid <= 1'b1を予約すると同一サイクル内で同じ信号への代入が
+                    // 競合してしまうため．
                     if (can_prefetch && !advancing) begin
                         ir_next <= rom_read.machine;
                         ir_next_valid <= 1'b1;
