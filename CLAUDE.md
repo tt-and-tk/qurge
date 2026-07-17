@@ -2,18 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## プロジェクト概要
+## このリポジトリについて
 
-PYNQ-Z2 (Xilinx Zynq-7020 FPGA) 上で動作するカスタムCPUの，ハードウェア実装(Vivadoプロジェクト)．自作PC全体のうち，**ハードウェア部分の実装のみ**を担当する(全体のロードマップは`../CLAUDE.md`を参照)．CALL/RET命令まで実装・実機動作確認済み．
+GitHubリポジトリ名: `tt-and-tk/qurge`．
 
-このリポジトリはVivadoプロジェクトのルート(`mypc.xpr`のあるディレクトリ)そのものをGit管理する．Vivadoが合成・実装のたびに再生成するディレクトリ(`mypc.cache/`・`mypc.gen/`・`mypc.hw/`・`mypc.ip_user_files/`・`mypc.runs/`・`mypc.sim/`・`.Xil/`・ログ/ジャーナル)は`.gitignore`で除外している．
+PYNQ-Z2(Zynq-7000)上に実装する自作CPUと，それを動かすソフトウェア群(アセンブラ・コンパイラ)からなる自作PCプロジェクトの一部．プロジェクト全体は以下の独立したGitHubリポジトリで構成される．
+
+| リポジトリ(GitHub) | ディレクトリ(`pc/`配下) | 役割 |
+|:-|:-|:-|
+| `specification` | `specification/` | CPUアーキテクチャ・ISA・アセンブリ言語・コンパイラ仕様のドキュメント(唯一の一次情報源) |
+| `pyntaxis` | `assembler/` | 自作アセンブリ言語Pyntaxis(`.pt`) → SystemVerilog ROM(`.sv`)へのアセンブラ |
+| `pynesis` | `compiler/` | 自作プログラミング言語Pynesis(`.pn`) → アセンブリ言語Pyntaxisへのコンパイラ．`pyntaxis`のソースファイルをincludeして使用し，`.sv`まで一貫変換も可能 |
+| `qurge`(本リポジトリ) | `mypc/` | CPU・メモリ・ROM等のハードウェア全体のVivadoプロジェクト(SystemVerilog + PS側C++) |
+
+```
+入力(.pn) → [pynesisのコンパイラ] → アセンブリ(.pt) → [pyntaxisのアセンブラ] → SystemVerilog ROM(.sv) → [Vivado] → PYNQ-Z2上のハードウェア(qurge，本リポジトリ)
+```
 
 ## ビルド・シミュレーション方法
 
 本プロジェクトはコマンドラインビルドシステムを持たず、**Xilinx Vivado IDE** で操作する。
 
 - **合成・実装・ビットストリーム生成**: Vivado GUI で `Generate Bitstream` を実行
-- **シミュレーション**: Vivado のシミュレーション機能で `sim_1/new/top_sim.v` を使用
 - **プロジェクトファイル**: リポジトリ直下の `mypc.xpr` をVivadoで開く
 
 ## ディレクトリ構造
@@ -23,7 +33,7 @@ mypc/                                  # リポジトリルート(Vivadoプロ�
 ├── mypc.xpr                           # Vivadoプロジェクトファイル
 └── mypc.srcs/
     ├── constrs_1/new/top.xdc          # PYNQ-Z2ボードのピン制約  ← 編集可
-    ├── cpp/                           # PS(ARM)側のC++プログラム ← 編集可
+    ├── cpp/                           # PS(ARM)側のC++プログラム ← 編集可(Vivado標準構成にはなく，独自に追加したディレクトリ)
     ├── sim_1/                         # テストベンチ             ← 編集禁止
     ├── sources_1/
     │   ├── bd/                        # Vivadoブロックダイアグラム ← 編集禁止
@@ -49,7 +59,7 @@ mypc/                                  # リポジトリルート(Vivadoプロ�
 |-------------|------|
 | `mypc.srcs/sources_1/new/` | カスタムCPUのHDLソース（主な作業対象） |
 | `mypc.srcs/constrs_1/new/` | PYNQ-Z2ボードのピン制約 (top.xdc) |
-| `mypc.srcs/cpp/` | PS(ARM)側のC++プログラム(`run.cpp`が現行版。`run1.cpp`〜`run4.cpp`は開発初期の試作版) |
+| `mypc.srcs/cpp/` | PS(ARM)側のC++プログラム(`run.cpp`が現行版。`run1.cpp`〜`run4.cpp`は開発途中のスナップショット) |
 
 ## アーキテクチャ
 
@@ -108,7 +118,7 @@ top_wrapper.v (Vivado自動生成)
 - **stdin/stdout**: AXI Stream インターフェース経由でPS(ARM)と通信
 - **btn/sw/led**: GPIO直結
 - **rgb_led**: RGB LED
-- **number**: 7セグメントディスプレイへの8ビット出力
+- **number**: 7セグメントディスプレイへの8ビット出力(デバッグ用)
 
 ### メモリ
 
@@ -166,19 +176,3 @@ top_wrapper.v (Vivado自動生成)
 - rom_sv.sv は現在 CALL/RET 動作確認用のテストプログラム (ABCDE出力)．シェル実装時に差し替える
 - run.cpp は現在ABCDE受信用．シェル実装時にターミナルエミュレータに改修する
 - ROMの`ROM_SIZE`はハードウェア側の固定値ではなく，コンパイル対象プログラムのサイズに応じてアセンブラが自動算出する．現在のROM読み出し回路(`rom_sv.sv`)は組合せ論理(非同期読み出し)であり，この方式のままではVivado合成時にBlock RAM(BRAM)には推論されずLUT資源(XC7Z020: 53,200 LUT)を消費する形になる．PYNQ-Z2搭載のZynq-7020のBRAM容量(4.9Mbit)を活用してより大きなプログラムを収容するには，ROM読み出し回路を同期(クロック同期)方式に変更しBRAM推論可能な設計にするハードウェア変更が必要(CPUのフェッチ段のタイミングにも影響するため要検証．優先度は高くないが#6で管理)
-
-## 仕様書
-
-`../specification/` (絶対パス: `C:\D\program\xilinx\pynq-z2\pc\specification\`) に仕様書が置かれている．
-
-| ファイル | 内容 |
-|---------|------|
-| `index.md` | 目次・概要 |
-| `isa.md` | 命令セットアーキテクチャ |
-| `register.md` | レジスタ定義 |
-| `memory.md` | メモリ仕様 |
-| `circuit.md` | 回路仕様 |
-| `rom.md` | ROM仕様 |
-| `assembler.md` | アセンブラ仕様 |
-| `compiler.md` | 自作C系言語・コンパイラ仕様 |
-| `limitations.md` | 通常CPUとの差分・非対応事項 |
