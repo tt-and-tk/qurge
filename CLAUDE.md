@@ -2,6 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## このリポジトリについて
+
+GitHubリポジトリ名: `tt-and-tk/qurge`．
+
+PYNQ-Z2(Zynq-7000)上に実装する自作CPUと，それを動かすソフトウェア群(アセンブラ・コンパイラ)からなる自作PCプロジェクトの一部．プロジェクト全体は以下の独立したGitHubリポジトリで構成される．
+
+| リポジトリ(GitHub) | ディレクトリ(`pc/`配下) | 役割 |
+|:-|:-|:-|
+| `specification` | `specification/` | CPUアーキテクチャ・ISA・アセンブリ言語・コンパイラ仕様のドキュメント(唯一の一次情報源) |
+| `pyntaxis` | `assembler/` | 自作アセンブリ言語Pyntaxis(`.pt`) → SystemVerilog ROM(`.sv`)へのアセンブラ |
+| `pynesis` | `compiler/` | 自作プログラミング言語Pynesis(`.pn`) → アセンブリ言語Pyntaxisへのコンパイラ．`pyntaxis`のソースファイルをincludeして使用し，`.sv`まで一貫変換も可能 |
+| `qurge`(本リポジトリ) | `mypc/` | CPU・メモリ・ROM等のハードウェア全体のVivadoプロジェクト(SystemVerilog + PS側C++) |
+
+```
+入力(.pn) → [pynesisのコンパイラ] → アセンブリ(.pt) → [pyntaxisのアセンブラ] → SystemVerilog ROM(.sv) → [Vivado] → PYNQ-Z2上のハードウェア(qurge，本リポジトリ)
+```
+
 ## プロジェクト概要
 
 PYNQ-Z2 (Xilinx Zynq-7020 FPGA) 上で動作するカスタムCPUの，ハードウェア実装(Vivadoプロジェクト)．自作PC全体のうち，**ハードウェア部分の実装のみ**を担当する(全体のロードマップは`../CLAUDE.md`を参照)．CALL/RET命令まで実装・実機動作確認済み．
