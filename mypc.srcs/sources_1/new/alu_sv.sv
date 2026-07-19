@@ -122,6 +122,12 @@ module alu_sv (
     register_t shift_result = '0;    // S_TYPEのシフト結果
     register_t mov_value    = '0;    // A_TYPE(MOV)の代入値
 
+    // funcが不正(unique caseのdefaultに該当)だった場合，alu_result/shift_resultに前回までの
+    // 値が残ったまま書き込み・フォワーディングされてしまわないようにするための有効フラグ
+    // (ブロッキング代入で使用)．
+    logic p_write_valid;
+    logic s_write_valid;
+
     // 次段命令の先読みデコード対象の機械語．ir_nextが確定済みならそれを，
     // まだ確定していなければROMから直接取得中の機械語を対象にする
     // (can_prefetchの成立時のみrom_read.pcが次のアドレスを指すため，この場合のみ意味を持つ)．
@@ -634,7 +640,10 @@ module alu_sv (
 
                         // 演算系(P系)
                         P_TYPE: begin
-                            // 命令に応じて演算結果を求める(書き込みとフォワーディングの両方でこの値を使う)
+                            // 命令に応じて演算結果を求める(書き込みとフォワーディングの両方でこの値を使う)．
+                            // 有効なfuncであることも合わせて記録する(不正なfuncでは書き込み・
+                            // フォワーディングとも行わないため)．
+                            p_write_valid = 1'b1;
                             unique case (func_r)
                                 AND:  alu_result = rs1_val_r & rs2_val_r;
                                 OR:   alu_result = rs1_val_r | rs2_val_r;
@@ -685,14 +694,20 @@ module alu_sv (
                                         default: force_reset <= 1'b1;
                                     endcase
                                 end
-                                default: force_reset <= 1'b1;
+                                default: begin
+                                    force_reset <= 1'b1;
+                                    p_write_valid = 1'b0;
+                                end
                             endcase
 
-                            // DIV以外はここでレジスタ書き込み・PCインクリメント・次命令への遷移
+                            // DIV以外はここでPCインクリメント・次命令への遷移(不正なfuncでは
+                            // レジスタ書き込み・フォワーディングは行わない)
                             if (func_r != DIV) begin
-                                register[rd_addr_r] <= alu_result;
+                                if (p_write_valid) begin
+                                    register[rd_addr_r] <= alu_result;
+                                end
                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
-                                advance_to_next_instruction(1'b1, rd_addr_r, alu_result, 1'b0, '0, '0);
+                                advance_to_next_instruction(p_write_valid, rd_addr_r, alu_result, 1'b0, '0, '0);
                             end
                         end
 
@@ -702,14 +717,19 @@ module alu_sv (
                             register[PC_ADDR] <= register[PC_ADDR] + 1;
 
                             // イミディエイトデータを使用する？命令に応じてシフト結果を求める
-                            // (書き込みとフォワーディングの両方でこの値を使う)
+                            // (書き込みとフォワーディングの両方でこの値を使う)．有効なfuncであることも
+                            // 合わせて記録する(不正なfuncでは書き込み・フォワーディングとも行わないため)．
+                            s_write_valid = 1'b1;
                             if (imm_r[32]) begin
                                 unique case (func_r)
                                     SLL: shift_result = rs1_val_r << imm_r[31:0];
                                     SRL: shift_result = rs1_val_r >> imm_r[31:0];
                                     SLA: shift_result = rs1_val_r <<< imm_r[31:0];
                                     SRA: shift_result = rs1_val_r >>> imm_r[31:0];
-                                    default: force_reset <= 1'b1;
+                                    default: begin
+                                        force_reset <= 1'b1;
+                                        s_write_valid = 1'b0;
+                                    end
                                 endcase
                             end else begin
                                 unique case (func_r)
@@ -717,13 +737,18 @@ module alu_sv (
                                     SRL: shift_result = rs1_val_r >> rs2_val_r;
                                     SLA: shift_result = rs1_val_r <<< rs2_val_r;
                                     SRA: shift_result = rs1_val_r >>> rs2_val_r;
-                                    default: force_reset <= 1'b1;
+                                    default: begin
+                                        force_reset <= 1'b1;
+                                        s_write_valid = 1'b0;
+                                    end
                                 endcase
                             end
-                            register[rd_addr_r] <= shift_result;
+                            if (s_write_valid) begin
+                                register[rd_addr_r] <= shift_result;
+                            end
 
-                            // 次の命令へ
-                            advance_to_next_instruction(1'b1, rd_addr_r, shift_result, 1'b0, '0, '0);
+                            // 次の命令へ(不正なfuncではレジスタ書き込み・フォワーディングは行わない)
+                            advance_to_next_instruction(s_write_valid, rd_addr_r, shift_result, 1'b0, '0, '0);
                         end
 
                         // 代入系
