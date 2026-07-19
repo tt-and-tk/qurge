@@ -116,11 +116,116 @@ module alu_sv (
     // CPU_EXECUTE突入のたびに先頭で0へ戻し，末尾の先読みトリガーの可否判定にのみ使う．
     logic advancing;
 
+    // 各命令タイプの演算結果を，レジスタへの書き込みと次段へのフォワーディングの両方から
+    // 同じ値を参照できるように一旦保持しておくスクラッチ変数(ブロッキング代入で使用)．
+    register_t alu_result   = '0;    // P_TYPE(DIV以外)の演算結果
+    register_t shift_result = '0;    // S_TYPEのシフト結果
+    register_t mov_value    = '0;    // A_TYPE(MOV)の代入値
+
+    // 次段命令の先読みデコード対象の機械語．ir_nextが確定済みならそれを，
+    // まだ確定していなければROMから直接取得中の機械語を対象にする
+    // (can_prefetchの成立時のみrom_read.pcが次のアドレスを指すため，この場合のみ意味を持つ)．
+    machine_p::machine_t ir_upcoming;
+    assign ir_upcoming = ir_next_valid ? ir_next : rom_read.machine;
+
+    // 次段命令の先読みデコードが有効かどうか(ir_nextが確定済み，またはcan_prefetchの成立により
+    // 今サイクルにROMから直接次段の機械語を取得できているかのいずれか)．
+    logic decode_ahead_valid;
+    assign decode_ahead_valid = ir_next_valid || can_prefetch;
+
+    // 次段命令(ir_upcoming)専用のデコーダー．現在実行中の命令のデコード(command)とは独立に，
+    // 次段のレジスタ読み出し・書き込み可否をEXECUTE中に前もって確認するために用いる．
+    command_if command_next();
+    assign command_next.machine = ir_upcoming;
+    decorder_sv decorder_sv_next(
+        .resetn(resetn),
+        .command(command_next)
+    );
+
+    // 次段命令(command_next)を先読みデコードしてよいかどうかを判定する関数．
+    // CPU_CHECKで行っている命令タイプごとの検証条件と同じ内容を，先読み対象にも適用する．
+    function automatic logic is_predecode_valid(
+        input machine_p::type_t m_type,
+        input machine_p::func_t func,
+        input machine_p::addr_t rs1,
+        input machine_p::addr_t rs2,
+        input machine_p::addr_t rd,
+        input machine_p::imm_t  imm
+    );
+        unique case (m_type)
+            N_TYPE: is_predecode_valid = 1'b1;
+            P_TYPE: is_predecode_valid = is_readable(rs1) && is_readable(rs2) && is_writable(rd)
+                && (!imm[32] || is_writable(imm[5:0]));
+            S_TYPE: is_predecode_valid = imm[32]
+                ? (is_readable(rs1) && is_writable(rd))
+                : (is_readable(rs1) && is_readable(rs2) && is_writable(rd));
+            A_TYPE: is_predecode_valid = imm[32]
+                ? is_writable(rd)
+                : (is_readable(rs1) && is_writable(rd));
+            F_TYPE: is_predecode_valid = is_readable(rs1) && is_readable(rs2) && imm[32];
+            J_TYPE: begin
+                unique case (func)
+                    JMP, CALL: is_predecode_valid = imm[32] || is_readable(rs1);
+                    RET:       is_predecode_valid = 1'b1;
+                    default:   is_predecode_valid = 1'b0;
+                endcase
+            end
+            M_TYPE: begin
+                unique case (func)
+                    RM:      is_predecode_valid = is_writable(rd) && (imm[32] || is_readable(rs1));
+                    WM:      is_predecode_valid = is_readable(rs2) && (imm[32] || is_readable(rs1));
+                    default: is_predecode_valid = 1'b0;
+                endcase
+            end
+            IO_TYPE: begin
+                unique case (func)
+                    SCAN:    is_predecode_valid = is_writable(rd);
+                    PRINT:   is_predecode_valid = is_readable(rs1);
+                    default: is_predecode_valid = 1'b0;
+                endcase
+            end
+            default: is_predecode_valid = 1'b0;
+        endcase
+    endfunction
+
     // 命令完了時，次の命令へ遷移する処理をまとめたタスク．
     // 先読み済みの命令があればFETCHフェーズを省略し，直接CHECKへ進む．
-    task automatic advance_to_next_instruction();
+    // 次段命令の先読みデコードまで済んでいる場合は，CHECKも省略して直接EXECUTEへ進む．
+    //
+    // write1_valid/write1_addr/write1_value・write2_valid/write2_addr/write2_valueは，
+    // 今retireする命令がこのサイクルにレジスタへ書き込む内容を表す(DIVは商・余りの2箇所に
+    // 書き込むためペアで受け取る．書き込みを伴わない命令は呼び出し側でvalidを0にする)．
+    task automatic advance_to_next_instruction(
+        input logic             write1_valid,
+        input machine_p::addr_t write1_addr,
+        input register_t        write1_value,
+        input logic             write2_valid,
+        input machine_p::addr_t write2_addr,
+        input register_t        write2_value
+    );
         advancing = 1'b1;
-        if (ir_next_valid) begin
+
+        if (decode_ahead_valid && is_predecode_valid(
+            command_next.m_type, command_next.func,
+            command_next.rs1, command_next.rs2, command_next.rd, command_next.imm
+        )) begin
+            // 次段命令の読み出し・書き込み可否は確認済みのため，CHECKを省略して直接EXECUTEへ進む．
+            // 読み出しアドレスが今サイクルの書き込み先と重なる場合は，レジスタファイルの値では
+            // なく今サイクルに書き込む値をそのまま使う(フォワーディング)．
+            rs1_val_r <= (write1_valid && write1_addr == command_next.rs1) ? write1_value
+                : (write2_valid && write2_addr == command_next.rs1) ? write2_value
+                : register[command_next.rs1];
+            rs2_val_r <= (write1_valid && write1_addr == command_next.rs2) ? write1_value
+                : (write2_valid && write2_addr == command_next.rs2) ? write2_value
+                : register[command_next.rs2];
+            rd_addr_r <= command_next.rd;
+            func_r    <= command_next.func;
+            imm_r     <= command_next.imm;
+            mask_r    <= command_next.mask;
+            ir        <= ir_upcoming;
+            cpu_phase <= CPU_EXECUTE;
+        end
+        else if (ir_next_valid) begin
             // 前サイクル以前に先読みが完了している場合，それを採用する
             ir <= ir_next;
             cpu_phase <= CPU_CHECK;
@@ -521,24 +626,24 @@ module alu_sv (
                             // pcをカウントアップ
                             register[PC_ADDR] <= register[PC_ADDR] + 1;
 
-                            // 次の命令へ
-                            advance_to_next_instruction();
+                            // 次の命令へ(レジスタへの書き込みは伴わない)
+                            advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
 
                             // 不正な値が入っても全て無視する
                         end
 
                         // 演算系(P系)
                         P_TYPE: begin
-                            // 命令に応じて処理実行
+                            // 命令に応じて演算結果を求める(書き込みとフォワーディングの両方でこの値を使う)
                             unique case (func_r)
-                                AND:  register[rd_addr_r] <= rs1_val_r & rs2_val_r;
-                                OR:   register[rd_addr_r] <= rs1_val_r | rs2_val_r;
-                                XOR:  register[rd_addr_r] <= rs1_val_r ^ rs2_val_r;
-                                NOT:  register[rd_addr_r] <= ~rs1_val_r;
-                                NAND: register[rd_addr_r] <= ~(rs1_val_r & rs2_val_r);
-                                ADD:  register[rd_addr_r] <= rs1_val_r + rs2_val_r;
-                                SUB:  register[rd_addr_r] <= rs1_val_r - rs2_val_r;
-                                MUL:  register[rd_addr_r] <= rs1_val_r * rs2_val_r;
+                                AND:  alu_result = rs1_val_r & rs2_val_r;
+                                OR:   alu_result = rs1_val_r | rs2_val_r;
+                                XOR:  alu_result = rs1_val_r ^ rs2_val_r;
+                                NOT:  alu_result = ~rs1_val_r;
+                                NAND: alu_result = ~(rs1_val_r & rs2_val_r);
+                                ADD:  alu_result = rs1_val_r + rs2_val_r;
+                                SUB:  alu_result = rs1_val_r - rs2_val_r;
+                                MUL:  alu_result = rs1_val_r * rs2_val_r;
 
                                 // 割り算
                                 DIV: begin
@@ -570,7 +675,11 @@ module alu_sv (
                                                 end
                                                 div_state <= IDLE;
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
-                                                advance_to_next_instruction();
+                                                // 次の命令へ(商・余りの2箇所への書き込みをそれぞれフォワーディング対象にする)
+                                                advance_to_next_instruction(
+                                                    1'b1, rd_addr_r, dout_tdata[63:32],
+                                                    imm_r[32], imm_r[5:0], dout_tdata[31:0]
+                                                );
                                             end
                                         end
                                         default: force_reset <= 1'b1;
@@ -579,10 +688,11 @@ module alu_sv (
                                 default: force_reset <= 1'b1;
                             endcase
 
-                            // DIV以外はここでPCインクリメントと次命令への遷移
+                            // DIV以外はここでレジスタ書き込み・PCインクリメント・次命令への遷移
                             if (func_r != DIV) begin
+                                register[rd_addr_r] <= alu_result;
                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
-                                advance_to_next_instruction();
+                                advance_to_next_instruction(1'b1, rd_addr_r, alu_result, 1'b0, '0, '0);
                             end
                         end
 
@@ -591,29 +701,29 @@ module alu_sv (
                             // シフト系はどの命令でもpcをカウントアップする
                             register[PC_ADDR] <= register[PC_ADDR] + 1;
 
-                            // イミディエイトデータを使用する？
+                            // イミディエイトデータを使用する？命令に応じてシフト結果を求める
+                            // (書き込みとフォワーディングの両方でこの値を使う)
                             if (imm_r[32]) begin
-                                // 命令に応じて処理実行
                                 unique case (func_r)
-                                    SLL: register[rd_addr_r] <= rs1_val_r << imm_r[31:0];
-                                    SRL: register[rd_addr_r] <= rs1_val_r >> imm_r[31:0];
-                                    SLA: register[rd_addr_r] <= rs1_val_r <<< imm_r[31:0];
-                                    SRA: register[rd_addr_r] <= rs1_val_r >>> imm_r[31:0];
+                                    SLL: shift_result = rs1_val_r << imm_r[31:0];
+                                    SRL: shift_result = rs1_val_r >> imm_r[31:0];
+                                    SLA: shift_result = rs1_val_r <<< imm_r[31:0];
+                                    SRA: shift_result = rs1_val_r >>> imm_r[31:0];
                                     default: force_reset <= 1'b1;
                                 endcase
                             end else begin
-                                // 命令に応じて処理実行
                                 unique case (func_r)
-                                    SLL: register[rd_addr_r] <= rs1_val_r << rs2_val_r;
-                                    SRL: register[rd_addr_r] <= rs1_val_r >> rs2_val_r;
-                                    SLA: register[rd_addr_r] <= rs1_val_r <<< rs2_val_r;
-                                    SRA: register[rd_addr_r] <= rs1_val_r >>> rs2_val_r;
+                                    SLL: shift_result = rs1_val_r << rs2_val_r;
+                                    SRL: shift_result = rs1_val_r >> rs2_val_r;
+                                    SLA: shift_result = rs1_val_r <<< rs2_val_r;
+                                    SRA: shift_result = rs1_val_r >>> rs2_val_r;
                                     default: force_reset <= 1'b1;
                                 endcase
                             end
+                            register[rd_addr_r] <= shift_result;
 
                             // 次の命令へ
-                            advance_to_next_instruction();
+                            advance_to_next_instruction(1'b1, rd_addr_r, shift_result, 1'b0, '0, '0);
                         end
 
                         // 代入系
@@ -621,21 +731,18 @@ module alu_sv (
                             // 代入系はどの命令でもpcをカウントアップする
                             register[PC_ADDR] <= register[PC_ADDR] + 1;
 
-                            // 命令がMOVの時だけ実行
+                            // 命令がMOVの時だけ実行(書き込みとフォワーディングの両方でmov_valueを使う)
                             if (func_r == MOV) begin
                                 // イミディエイトデータを使用する？
-                                if (imm_r[32]) begin
-                                    register[rd_addr_r] <= imm_r[31:0];
-                                end else begin
-                                    register[rd_addr_r] <= rs1_val_r;
-                                end
+                                mov_value = imm_r[32] ? imm_r[31:0] : rs1_val_r;
+                                register[rd_addr_r] <= mov_value;
                             end
                             else begin
                                 force_reset <= 1'b1;
                             end
 
-                            // 次の命令へ
-                            advance_to_next_instruction();
+                            // 次の命令へ(MOV以外はレジスタへの書き込みを伴わない)
+                            advance_to_next_instruction(func_r == MOV, rd_addr_r, mov_value, 1'b0, '0, '0);
                         end
 
                         // 分岐系
@@ -683,8 +790,8 @@ module alu_sv (
                                 end
                             endcase
 
-                            // 次の命令へ(分岐命令のため先読みは行われない)
-                            advance_to_next_instruction();
+                            // 次の命令へ(分岐命令のため先読みは行われない．レジスタへの書き込みも伴わない)
+                            advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                         end
 
                         // ジャンプ系
@@ -701,8 +808,8 @@ module alu_sv (
                                         register[PC_ADDR] <= rs1_val_r;
                                     end
 
-                                    // 次の命令へ(ジャンプ命令のため先読みは行われない)
-                                    advance_to_next_instruction();
+                                    // 次の命令へ(ジャンプ命令のため先読みは行われない．レジスタへの書き込みも伴わない)
+                                    advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                                 end
 
                                 // 関数呼び出し
@@ -719,8 +826,9 @@ module alu_sv (
                                         register[PC_ADDR] <= rs1_val_r;
                                     end
 
-                                    // 次の命令へ(CALL命令のため先読みは行われない)
-                                    advance_to_next_instruction();
+                                    // 次の命令へ(CALL命令のため先読みは行われない．戻り先スタックへの
+                                    // 書き込みはrd経由ではないためフォワーディング対象外)
+                                    advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                                 end
 
                                 // 関数リターン
@@ -730,8 +838,8 @@ module alu_sv (
                                     // スタックポインタを戻す
                                     register[SP_ADDR] <= register[SP_ADDR] - 1;
 
-                                    // 次の命令へ(RET命令のため先読みは行われない)
-                                    advance_to_next_instruction();
+                                    // 次の命令へ(RET命令のため先読みは行われない．レジスタへの書き込みも伴わない)
+                                    advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                                 end
 
                                 // それ以外はオミット
@@ -783,7 +891,7 @@ module alu_sv (
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
 
                                                 // 次の命令へ
-                                                advance_to_next_instruction();
+                                                advance_to_next_instruction(1'b1, rd_addr_r, ram_read.data, 1'b0, '0, '0);
                                             end
                                         end
 
@@ -831,8 +939,8 @@ module alu_sv (
                                                 // プログラムカウンタをインクリメント
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
 
-                                                // 次の命令へ
-                                                advance_to_next_instruction();
+                                                // 次の命令へ(WMはレジスタへの書き込みを伴わない)
+                                                advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                                             end
                                         end
 
@@ -885,7 +993,7 @@ module alu_sv (
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
 
                                                 // 次の命令へ
-                                                advance_to_next_instruction();
+                                                advance_to_next_instruction(1'b1, rd_addr_r, stdin_tdata, 1'b0, '0, '0);
                                             end
                                             else begin
                                                 // 読み取り準備が整っていることを送る
@@ -931,8 +1039,8 @@ module alu_sv (
                                                 // プログラムカウンタをインクリメント
                                                 register[PC_ADDR] <= register[PC_ADDR] + 1;
 
-                                                // 次の命令へ
-                                                advance_to_next_instruction();
+                                                // 次の命令へ(PRINTはレジスタへの書き込みを伴わない)
+                                                advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                                             end
                                             else begin
                                                 // 書き込み準備が終わっていることを送る
