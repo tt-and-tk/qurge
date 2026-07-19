@@ -17,5 +17,5 @@ mypc.srcs/sources_1/bd/
 mypc.srcs/sources_1/imports/
 mypc.srcs/utils_1/
 
-# issue対応時のspecification疑似隔離clone用
+# issue対応時の疑似隔離clone用
 .worktrees/
