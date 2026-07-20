@@ -27,6 +27,22 @@
 `include "machine.svh"
 `include "register.svh"
 
+// 命令パイプライン処理の概要(FETCH/CHECK/EXECUTEの3フェーズを基本とし，以下の2段階の先読みで重複させる)．
+//
+// 1. 命令フェッチの先読み: 分岐・ジャンプでない命令を実行している間に，次の命令をあらかじめ
+//    ROMから取得しておく．次の命令へ進む際に取得済みの内容があれば，FETCHフェーズを省略し
+//    CHECKから開始する．
+// 2. 次の命令の解析の先読みとフォワーディング: 先読みしておいた命令(まだ先読みが済んでいない
+//    場合は，このサイクルにROMから取得中の命令)の内容を，実行中の命令とは別の回路であらかじめ
+//    解析しておく．解析の結果，読み出し・書き込みに使うレジスタ番地がすべて有効だと分かれば，
+//    今完了する命令がこのサイクルにレジスタへ書き込む値を，レジスタの読み出し結果の代わりに
+//    そのまま使う(フォワーディング)．これにより次の命令はCHECKフェーズも省略して直接EXECUTEから
+//    開始できる．
+//
+// この結果，本来FETCH→CHECK→EXECUTEの3サイクルを要する命令でも，前の命令を実行している間に
+// 先読み・解析・フォワーディングの条件が揃えば，前の命令の完了直後のサイクルから次の命令の
+// EXECUTEを直接開始できる(実質1サイクルで実行完了)．条件が揃わない場合(分岐・ジャンプの直後や，
+// 複数サイクルにまたがる命令の完了直後など)は，従来通りFETCH/CHECKを経由する．
 module alu_sv (
     input logic clk,
     input logic resetn,
@@ -134,8 +150,8 @@ module alu_sv (
     machine_p::machine_t ir_upcoming;
     assign ir_upcoming = ir_next_valid ? ir_next : rom_read.machine;
 
-    // 次段命令の先読みデコードが有効かどうか(ir_nextが確定済み，またはcan_prefetchの成立により
-    // 今サイクルにROMから直接次段の機械語を取得できているかのいずれか)．
+    // 次に実行する命令の解析結果を今のサイクルで使ってよいかどうか(次の命令をすでに先読みできて
+    // いるか，今のサイクルにROMから次の命令を取得中であるかのいずれかを満たす場合)．
     logic decode_ahead_valid;
     assign decode_ahead_valid = ir_next_valid || can_prefetch;
 
@@ -147,52 +163,6 @@ module alu_sv (
         .resetn(resetn),
         .command(command_next)
     );
-
-    // 次段命令(command_next)を先読みデコードしてよいかどうかを判定する関数．
-    // CPU_CHECKで行っている命令タイプごとの検証条件と同じ内容を，先読み対象にも適用する．
-    function automatic logic is_predecode_valid(
-        input machine_p::type_t m_type,
-        input machine_p::func_t func,
-        input machine_p::addr_t rs1,
-        input machine_p::addr_t rs2,
-        input machine_p::addr_t rd,
-        input machine_p::imm_t  imm
-    );
-        unique case (m_type)
-            N_TYPE: is_predecode_valid = 1'b1;
-            P_TYPE: is_predecode_valid = is_readable(rs1) && is_readable(rs2) && is_writable(rd)
-                && (!imm[32] || is_writable(imm[5:0]));
-            S_TYPE: is_predecode_valid = imm[32]
-                ? (is_readable(rs1) && is_writable(rd))
-                : (is_readable(rs1) && is_readable(rs2) && is_writable(rd));
-            A_TYPE: is_predecode_valid = imm[32]
-                ? is_writable(rd)
-                : (is_readable(rs1) && is_writable(rd));
-            F_TYPE: is_predecode_valid = is_readable(rs1) && is_readable(rs2) && imm[32];
-            J_TYPE: begin
-                unique case (func)
-                    JMP, CALL: is_predecode_valid = imm[32] || is_readable(rs1);
-                    RET:       is_predecode_valid = 1'b1;
-                    default:   is_predecode_valid = 1'b0;
-                endcase
-            end
-            M_TYPE: begin
-                unique case (func)
-                    RM:      is_predecode_valid = is_writable(rd) && (imm[32] || is_readable(rs1));
-                    WM:      is_predecode_valid = is_readable(rs2) && (imm[32] || is_readable(rs1));
-                    default: is_predecode_valid = 1'b0;
-                endcase
-            end
-            IO_TYPE: begin
-                unique case (func)
-                    SCAN:    is_predecode_valid = is_writable(rd);
-                    PRINT:   is_predecode_valid = is_readable(rs1);
-                    default: is_predecode_valid = 1'b0;
-                endcase
-            end
-            default: is_predecode_valid = 1'b0;
-        endcase
-    endfunction
 
     // 命令完了時，次の命令へ遷移する処理をまとめたタスク．
     // 先読み済みの命令があればFETCHフェーズを省略し，直接CHECKへ進む．
