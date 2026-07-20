@@ -19,3 +19,6 @@ mypc.srcs/utils_1/
 
 # issue対応時の疑似隔離clone用
 .worktrees/
+
+# 自動レビューループの出力ファイル
+review*.md
