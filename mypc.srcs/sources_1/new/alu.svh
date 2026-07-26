@@ -202,7 +202,7 @@ package alu_p;
         machine_p::imm_t  imm
     );
         unique case (m_type)
-            // 無処理系: 何も実行しないだけなので常に有効
+            // 処理を実行しないだけなので常に有効
             N_TYPE: is_instruction_executable = util_p::TRUE;
             // 演算系: 読み出し元2つと書き込み先(イミディエイトデータ使用時は余りの書き込み先も)が有効か
             P_TYPE: is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd)

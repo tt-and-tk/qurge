@@ -97,7 +97,8 @@ module alu_sv (
 
     // 実行前のものをいったん保存しておく
     machine_p::machine_t ir = nop();     // 命令
-    // 実行中に先読みした次の命令(分岐・ジャンプ命令の実行中は先読みしない)
+    // 実行中に先読みしておいた命令を保持するバッファ(分岐・ジャンプ命令の実行中は先読みしない)．
+    // 先読みが間に合わなかった場合は無効なままのことがあり，その場合は次の命令として採用できない．
     machine_p::machine_t ir_prefetched = nop();
     logic ir_prefetched_valid = 1'b0;    // ir_prefetchedが先読み済みの有効な命令かどうか
     register_t rs1_val_r = '0;
@@ -134,16 +135,15 @@ module alu_sv (
 
     // 演算系・シフト系・代入系の結果を，レジスタへの書き込みと次の命令へのフォワーディングの
     // 両方から同じ値を参照できるように一旦保持しておくスクラッチ変数(ブロッキング代入で使用)．
-    // これら3種類の命令は同一サイクルで同時に実行されることがないため，1つの変数を共有する．
     register_t write_value = '0;
 
-    // funcが不正(unique caseのdefaultに該当)だった場合，write_valueに前回までの値が残ったまま
-    // 書き込み・フォワーディングされてしまわないようにするための有効フラグ(ブロッキング代入で
-    // 使用)．演算系・シフト系は同一サイクルで同時に実行されることがないため，1つの変数を共有する．
+    // 有効なfuncによる演算・シフト結果をレジスタへ書き込み・フォワーディングしてよい状態ならtrue．
+    // funcが不正(unique caseのdefaultに該当)だった場合はfalseとし，write_valueに前回までの値が
+    // 残ったまま書き込み・フォワーディングされてしまうのを防ぐ(ブロッキング代入で使用)．
     logic write_valid;
 
-    // 次段命令の先読みデコード対象の機械語．ir_prefetchedが確定済みならそれを，
-    // まだ確定していなければROMから直接取得中の機械語を対象にする
+    // 次の命令として実際に採用する機械語．ir_prefetchedが先読み済みならそれを，
+    // まだ先読みできていなければROMから今サイクルに取得中の機械語をそのまま採用する
     // (can_prefetchの成立時のみrom_read.pcが次のアドレスを指すため，この場合のみ意味を持つ)．
     machine_p::machine_t ir_next;
     assign ir_next = ir_prefetched_valid ? ir_prefetched : rom_read.machine;
