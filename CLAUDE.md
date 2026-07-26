@@ -167,8 +167,8 @@ top_wrapper.v (Vivado自動生成)
 - 新しい命令を追加する場合は `machine.svh` → `decorder_sv.sv` → `alu_sv.sv` の順に変更が必要。
 - ROMのプログラム変更は `rom_sv.sv` 内の命令配列を直接書き換える。
 - `mother_board.v` はVerilogラッパーで、SystemVerilogの `mother_board_sv.sv` を呼び出す構造になっている（Vivado IPとの互換性のため）。
-- `alu_sv.sv`のCPU_EXECUTEフェーズで命令完了時に次命令へ遷移する箇所は，`cpu_phase <= CPU_FETCH;`を直接書かず`advance_to_next_instruction()`タスクを呼ぶこと．実行中に次命令を先読みする機構(`ir_next`/`can_prefetch`)と連動しているため，直接代入すると先読み結果が反映されない．分岐(F系)・ジャンプ(J系)命令は先読み対象外のため，これらの命令に関しては`advance_to_next_instruction()`を呼んでも常にFETCHフェーズへ戻る．
-- `advance_to_next_instruction()`は，今retireする命令が今サイクルにレジスタへ書き込む内容(アドレス・値，DIVの商・余りのように2箇所ある場合はペア)を引数で受け取る．次段命令の先読みデコード(`command_next`，`ir_upcoming`をデコードする専用の`decorder_sv`インスタンス)が済んでおり読み出し・書き込み可否が確認できている場合，読み出しアドレスが今回の書き込み先と重なるならレジスタファイルではなく引数で渡された書き込み値をそのまま次段のオペランドとして使う(フォワーディング)．これによりCHECKフェーズ自体を省略して直接EXECUTEへ進める．新しい命令タイプ・書き込み経路を追加する場合は，`advance_to_next_instruction()`の呼び出しに正しい書き込み内容を渡すこと(レジスタへの書き込みを伴わない命令はvalidを0にする)．スタックポインタ経由の間接書き込み(CALL/RETの戻り先スタック)はrdフィールドを経由しないため，フォワーディング対象に含めていない．
+- `alu_sv.sv`のCPU_EXECUTEフェーズで命令完了時に次命令へ遷移する箇所は，`cpu_phase <= CPU_FETCH;`を直接書かず`advance_to_next_instruction()`タスクを呼ぶこと．実行中に次命令を先読みする機構(`ir_prefetched`/`can_prefetch`)と連動しているため，直接代入すると先読み結果が反映されない．分岐(F系)・ジャンプ(J系)命令は先読み対象外のため，これらの命令に関しては`advance_to_next_instruction()`を呼んでも常にFETCHフェーズへ戻る．
+- `advance_to_next_instruction()`は，今回完了する命令が今サイクルにレジスタへ書き込む内容(アドレス・値，DIVの商・余りのように2箇所ある場合はペア)を引数で受け取る．次の命令の先読みデコード(`command_next`，`ir_next`をデコードする専用の`decorder_sv`インスタンス)が済んでおり読み出し・書き込み可否が確認できている場合，読み出しアドレスが今回の書き込み先と重なるならレジスタファイルではなく引数で渡された書き込み値をそのまま次の命令のオペランドとして使う(フォワーディング)．これによりCHECKフェーズ自体を省略して直接EXECUTEへ進める．新しい命令タイプ・書き込み経路を追加する場合は，`advance_to_next_instruction()`の呼び出しに正しい書き込み内容を渡すこと(レジスタへの書き込みを伴わない命令はvalidを0にする)．スタックポインタ経由の間接書き込み(CALL/RETの戻り先スタック)はrdフィールドを経由しないため，フォワーディング対象に含めていない．
 
 ## このプロジェクトの残件・既知課題(ハードウェア)
 
