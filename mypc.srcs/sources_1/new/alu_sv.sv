@@ -239,7 +239,7 @@ module alu_sv (
             ir        <= ir_next;
             cpu_phase <= CPU_EXECUTE;
         end
-        // 実行できない命令はCHECKへ進み，そこで強制リセットへ落とす
+        // 実行できない命令は以下のいずれかの経路でCHECKへ進み，そこで強制リセットへ落とす
         else if (ir_prefetched_valid) begin
             // 前サイクル以前に先読みが完了している場合，それを採用する
             ir <= ir_prefetched;
