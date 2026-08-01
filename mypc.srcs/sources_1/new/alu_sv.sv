@@ -216,11 +216,14 @@ module alu_sv (
             // 次段命令の読み出し・書き込み可否は確認済みのため，CHECKを省略して直接EXECUTEへ進む．
             // 読み出しアドレスが今サイクルの書き込み先と重なる場合は，レジスタファイルの値では
             // なく今サイクルに書き込む値をそのまま使う(フォワーディング)．
-            rs1_val_r <= (write1_valid && write1_addr == command_next.rs1) ? write1_value
-                : (write2_valid && write2_addr == command_next.rs1) ? write2_value
+            // 2組の書き込み先が同じ番地を指す場合は後の組を優先する．レジスタファイルへの
+            // 書き込みも後の組が勝つため，先の組を優先すると次の命令が読む値と
+            // レジスタファイルの中身が食い違ってしまう．
+            rs1_val_r <= (write2_valid && write2_addr == command_next.rs1) ? write2_value
+                : (write1_valid && write1_addr == command_next.rs1) ? write1_value
                 : register[command_next.rs1];
-            rs2_val_r <= (write1_valid && write1_addr == command_next.rs2) ? write1_value
-                : (write2_valid && write2_addr == command_next.rs2) ? write2_value
+            rs2_val_r <= (write2_valid && write2_addr == command_next.rs2) ? write2_value
+                : (write1_valid && write1_addr == command_next.rs2) ? write1_value
                 : register[command_next.rs2];
             rd_addr_r <= command_next.rd;
             func_r    <= command_next.func;
