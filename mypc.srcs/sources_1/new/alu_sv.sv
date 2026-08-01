@@ -131,45 +131,36 @@ module alu_sv (
     assign can_prefetch = (cpu_phase == CPU_EXECUTE)    // 実行フェーズの間のみ先読みが可能
         && !ir_prefetched_valid;                        // 既に先読み済みの命令があれば行わない
 
+    // 分岐命令の比較が成立しているかどうか(定義されていない比較方法は不成立として扱う)
+    logic branch_taken;
+    assign branch_taken = (command.m_type == F_TYPE)
+        && ((func_r == EQ  && rs1_val_r == rs2_val_r)
+         || (func_r == NE  && rs1_val_r != rs2_val_r)
+         || (func_r == LT  && rs1_val_r <  rs2_val_r)
+         || (func_r == GT  && rs1_val_r >  rs2_val_r)
+         || (func_r == ELT && rs1_val_r <= rs2_val_r)
+         || (func_r == EGT && rs1_val_r >= rs2_val_r));
+
+    // 飛び先を指定して移動する命令かどうか(定義されていない命令コードは移動しないものとして扱う)
+    logic jumping;
+    assign jumping = (command.m_type == J_TYPE)
+        && (func_r == JMP || func_r == CALL || func_r == RET);
+
+    // 移動する命令の飛び先．関数リターンはスタックポインタが指す戻り先，
+    // それ以外はイミディエイトデータまたはレジスタで指定された番地になる
+    register_t jump_target;
+    assign jump_target = (func_r == RET) ? register[register[SP_ADDR]]
+        : imm_r[32] ? imm_r[31:0]
+        : rs1_val_r;
+
     // 実行中の命令がこのサイクルにプログラムカウンタへ書き込む値．プログラムカウンタへの代入と
     // 次の命令の先読み先の両方がこの値を参照することで，飛び先を求める式を1箇所にまとめている．
-    // 実行フェーズ以外では比較・飛び先の判断に使う値が前の命令のものになっているため意味を持たない．
+    // 実行フェーズ以外では，命令タイプがこれから確認する命令のものであるのに対し，比較に使う値と
+    // 飛び先の指定は直前に実行した命令のものが残っており，両者が別の命令に由来するため意味を持たない．
     register_t next_pc;
-    always_comb begin
-        // 飛び先を指定しない命令は次の番地へ進む(不正な命令もこの値のままとし，ラッチの推論を避ける)
-        next_pc = register[PC_ADDR] + 1;
-
-        unique case (command.m_type)
-            // 分岐系: 比較が成立したときだけイミディエイトデータぶん離れた番地へ移動する
-            F_TYPE: begin
-                unique case (func_r)
-                    EQ:  if (rs1_val_r == rs2_val_r) next_pc = register[PC_ADDR] + imm_r[31:0];
-                    NE:  if (rs1_val_r != rs2_val_r) next_pc = register[PC_ADDR] + imm_r[31:0];
-                    LT:  if (rs1_val_r <  rs2_val_r) next_pc = register[PC_ADDR] + imm_r[31:0];
-                    GT:  if (rs1_val_r >  rs2_val_r) next_pc = register[PC_ADDR] + imm_r[31:0];
-                    ELT: if (rs1_val_r <= rs2_val_r) next_pc = register[PC_ADDR] + imm_r[31:0];
-                    EGT: if (rs1_val_r >= rs2_val_r) next_pc = register[PC_ADDR] + imm_r[31:0];
-                    // 定義されていない比較方法は実行側で強制リセットするため飛び先を求めない
-                    default: ;
-                endcase
-            end
-
-            // ジャンプ系
-            J_TYPE: begin
-                unique case (func_r)
-                    // ジャンプ・関数呼び出しは指定された番地へ移動する
-                    JMP, CALL: next_pc = imm_r[32] ? imm_r[31:0] : rs1_val_r;
-                    // 関数リターンはスタックポインタが指す戻り先の番地へ移動する
-                    RET:       next_pc = register[register[SP_ADDR]];
-                    // 定義されていない命令は実行側で強制リセットするため飛び先を求めない
-                    default: ;
-                endcase
-            end
-
-            // それ以外の命令タイプは次の番地へ進むだけ
-            default: ;
-        endcase
-    end
+    assign next_pc = branch_taken ? register[PC_ADDR] + imm_r[31:0]  // 比較が成立した分岐は指定されたぶん離れた番地へ
+        : jumping ? jump_target                                     // 移動する命令は指定された飛び先へ
+        : register[PC_ADDR] + 1;                                    // それ以外は次の番地へ進む
 
     // 今サイクルにadvance_to_next_instruction()が呼ばれたかどうかを示すスクラッチ変数(ブロッキング代入で使用)．
     // CPU_EXECUTE突入のたびに先頭で0へ戻し，末尾の先読みトリガーの可否判定にのみ使う．
@@ -199,9 +190,9 @@ module alu_sv (
     );
 
     // 命令完了時，次の命令へ遷移する処理をまとめたタスク．
-    // 次の命令の内容はこの時点で必ず取得できているため，FETCHフェーズは常に省略する．
-    // 解析の結果そのまま実行可能だと分かればCHECKも省略しEXECUTEへ直接進み，実行できないと
-    // 分かった場合のみCHECKへ進む(CHECKで強制リセットへ落とす)．
+    // 次の命令には，先読み済みの機械語か今サイクルにROMから取得中の機械語を使う．
+    // 実行可能だと分かればFETCHとCHECKをどちらも省略してEXECUTEへ直接進み，実行できないと
+    // 分かった場合はCHECKへ進む(CHECKで強制リセットへ落とす)．
     //
     // 引数は，今回完了する命令がこのサイクルにレジスタへ書き込む内容(書き込み先アドレスと
     // 書き込む値の組を2組)を表す．DIVのように商・余りの2箇所に書き込む命令は両方の組を使い，
@@ -217,8 +208,7 @@ module alu_sv (
     );
         advancing = 1'b1;
 
-        // 次の命令の内容はこのサイクルの時点で必ず確定しているため(先読み済みか今回ROMから
-        // 取得中)，そのまま実行可能だと分かった場合はCHECKを省略して直接EXECUTEへ進める．
+        // 次の命令を解析し，実行可能かどうかを判定する
         if (is_instruction_executable(
             command_next.m_type, command_next.func,
             command_next.rs1, command_next.rs2, command_next.rd, command_next.imm
@@ -272,11 +262,13 @@ module alu_sv (
         // number  = register[PC_ADDR][7:0];
         number  = register[6'h31][7:0];
 
-        // ROMへ番地を出力する．先読みが可能なら次に実行する命令を，そうでなければ実行する命令自身を取得する
+        // ROMへ番地を出力する
         if (can_prefetch) begin
+            // 実行フェーズにあり，まだ次の命令を先読みしていない場合は，次に実行する命令を取得する
             rom_read.pc = next_pc;
         end
         else begin
+            // 実行フェーズにない場合と，既に先読み済みの命令がある場合は，実行する命令自身を取得する
             rom_read.pc = register[PC_ADDR];
         end
 
@@ -351,7 +343,7 @@ module alu_sv (
 
             // CPUの実行サイクルごとに処理記載
             unique case (cpu_phase)
-                // フェッチ(先読みが働かないリセット直後の1命令目だけがここを通る)
+                // フェッチ(先読みの対象にならないプログラムの1命令目だけがここを通る)
                 CPU_FETCH: begin
                     // 命令を取得してくる
                     ir <= rom_read.machine;
@@ -360,269 +352,27 @@ module alu_sv (
                     cpu_phase <= CPU_CHECK;
                 end
 
-                // 実行前確認
+                // 実行前確認(プログラムの1命令目と，先読みの時点で実行できないと分かった命令だけがここを通る)
                 CPU_CHECK: begin
-                    // 関数タイプごとに実行
-                    unique case (command.m_type)
-                        // 処理を実行しない(N系)
-                        N_TYPE: begin
-                            // 確認はないので実行
-                            cpu_phase <= CPU_EXECUTE;
-                        end
+                    // 実行可能な命令であれば実行フェーズへ進む
+                    if (is_instruction_executable(
+                        command.m_type, command.func,
+                        command.rs1, command.rs2, command.rd, command.imm
+                    )) begin
+                        // 実行に使う値と命令の内容を取り込む
+                        rs1_val_r <= register[command.rs1];
+                        rs2_val_r <= register[command.rs2];
+                        rd_addr_r <= command.rd;
+                        func_r    <= command.func;
+                        imm_r     <= command.imm;
+                        mask_r    <= command.mask;
 
-                        // 演算系(P系)
-                        P_TYPE: begin
-                            // 指定されているアドレスが全て使用可能な場合のみ，処理を実行する
-                            if (
-                                is_readable(command.rs1)
-                                && is_readable(command.rs2)
-                                && is_writable(command.rd)
-                                // イミディエイトデータを使用する場合，そのアドレスも確認する
-                                && (!command.imm[32] ||  is_writable(command.imm[5:0])
-                                )
-                            ) begin
-                                cpu_phase <= CPU_EXECUTE;
-
-                                // 実行前準備
-                                rs1_val_r <= register[command.rs1];
-                                rs2_val_r <= register[command.rs2];
-                                rd_addr_r <= command.rd;
-                                imm_r <= command.imm;
-                                func_r <= command.func;
-                            end
-                            else begin
-                                force_reset <= 1'b1;
-                            end
-                        end
-
-                        // シフト系(S系)
-                        S_TYPE: begin
-                            // イミディエイトデータを使用するなら
-                            if (command.imm[32]) begin
-                                // 指定されているアドレスが全て使用可能な場合のみ，処理を実行する
-                                if (
-                                    is_readable(command.rs1)
-                                    && is_writable(command.rd)
-                                ) begin
-                                    cpu_phase <= CPU_EXECUTE;
-                                end
-                                else begin
-                                    force_reset <= 1'b1;
-                                end
-                            end
-                            else begin
-                                // 指定されているアドレスが全て使用可能な場合のみ，処理を実行する
-                                if (
-                                    is_readable(command.rs1)
-                                    && is_readable(command.rs2)
-                                    && is_writable(command.rd)
-                                ) begin
-                                    cpu_phase <= CPU_EXECUTE;
-                                end
-                                else begin
-                                    force_reset <= 1'b1;
-                                end
-                            end
-
-                            // 実行前準備
-                            rs1_val_r <= register[command.rs1];
-                            rs2_val_r <= register[command.rs2];
-                            rd_addr_r <= command.rd;
-                            imm_r <= command.imm;
-                            func_r <= command.func;
-                        end
-
-                        // 代入系(A系)
-                        A_TYPE: begin
-                            // イミディエイトデータを使用するなら
-                            if (command.imm[32]) begin
-                                // 指定されているアドレスが全て使用可能な場合のみ，処理を実行する
-                                if (is_writable(command.rd)) begin
-                                    cpu_phase <= CPU_EXECUTE;
-                                end
-                                else begin
-                                    force_reset <= 1'b1;
-                                end
-                            end
-                            else begin
-                                // 指定されているアドレスが全て使用可能な場合のみ，処理を実行する
-                                if (is_readable(command.rs1) && is_writable(command.rd)) begin
-                                    cpu_phase <= CPU_EXECUTE;
-                                end
-                                else begin
-                                    force_reset <= 1'b1;
-                                end
-                            end
-
-                            // 実行前準備
-                            rs1_val_r <= register[command.rs1];
-                            rd_addr_r <= command.rd;
-                            imm_r <= command.imm;
-                            func_r <= command.func;
-                        end
-
-                        // 分岐系(F系)
-                        F_TYPE: begin
-                            // 使用されているアドレスが全て使用可能
-                            // かつイミディエイトデータを使用する設定の時だけ，処理を実行する
-                            if (
-                                is_readable(command.rs1)
-                                && is_readable(command.rs2)
-                                && command.imm[32]
-                            ) begin
-                                cpu_phase <= CPU_EXECUTE;
-
-                                // 実行前準備
-                                rs1_val_r <= register[command.rs1];
-                                rs2_val_r <= register[command.rs2];
-                                imm_r <= command.imm;
-                                func_r <= command.func;
-                            end
-                            else begin
-                                force_reset <= 1'b1;
-                            end
-                        end
-
-                        // ジャンプ系(J系)
-                        J_TYPE: begin
-                            // 命令ごとのチェック項目
-                            unique case (command.func)
-                                // ジャンプ・関数呼び出しはジャンプ先の指定方法を確認する
-                                JMP, CALL: begin
-                                    // イミディエイトデータを使用しないなら
-                                    if (!command.imm[32]) begin
-                                        // 指定されているアドレスが全て使用可能な場合のみ，処理を実行する
-                                        if (is_readable(command.rs1)) begin
-                                            cpu_phase <= CPU_EXECUTE;
-                                        end
-                                        else begin
-                                            force_reset <= 1'b1;
-                                        end
-                                    end
-                                    // イミディエイトデータを使用するならチェック不要
-                                    else begin
-                                        cpu_phase <= CPU_EXECUTE;
-                                    end
-
-                                    // 実行前準備
-                                    rs1_val_r <= register[command.rs1];
-                                    imm_r <= command.imm;
-                                    func_r <= command.func;
-                                end
-
-                                // 関数リターンは引数なしなのでチェック不要
-                                RET: begin
-                                    cpu_phase <= CPU_EXECUTE;
-
-                                    // 実行前準備
-                                    func_r <= command.func;
-                                end
-
-                                // それ以外はオミット
-                                default: begin
-                                    force_reset <= 1'b1;
-                                end
-                            endcase
-                        end
-
-                        // メモリ系(M系)
-                        M_TYPE: begin
-                            // 命令ごとのチェック項目
-                            unique case (command.func)
-                                // メモリ読み込み
-                                RM: begin
-                                    if (
-                                        // rdに書き込み可能か
-                                        is_writable(command.rd)
-                                        // イミディエイトデータを使用しない場合，rs1が読み取り可能かについてもチェックする
-                                        && (command.imm[32] || is_readable(command.rs1))
-                                    ) begin
-                                        cpu_phase <= CPU_EXECUTE;
-
-                                        // 実行前準備
-                                        rs1_val_r <= register[command.rs1];
-                                        rd_addr_r <= command.rd;
-                                        imm_r <= command.imm;
-                                        mask_r <= command.mask;
-                                        func_r <= command.func;
-                                    end
-                                    else begin
-                                        force_reset <= 1'b1;
-                                    end
-                                end
-
-                                // メモリ書き込み
-                                WM: begin
-                                    if (
-                                        // rs2は読み込み可能か
-                                        is_readable(command.rs2)
-                                        // イミディエイトデータを使用しない場合，rs1が読み取り可能かについてもチェックする
-                                        && (command.imm[32] || is_readable(command.rs1))
-                                    ) begin
-                                        cpu_phase <= CPU_EXECUTE;
-
-                                        // 実行前準備
-                                        rs1_val_r <= register[command.rs1];
-                                        rs2_val_r <= register[command.rs2];
-                                        imm_r <= command.imm;
-                                        mask_r <= command.mask;
-                                        func_r <= command.func;
-                                    end
-                                    else begin
-                                        force_reset <= 1'b1;
-                                    end
-                                end
-
-                                // それ以外はオミット
-                                default: begin
-                                    force_reset <= 1'b1;
-                                end
-                            endcase
-                        end
-
-                        // 標準入出力系(IO系)
-                        IO_TYPE: begin
-                            // 命令ごとのチェック項目
-                            unique case (command.func)
-                                // 標準入力
-                                SCAN: begin
-                                    if (is_writable(command.rd)) begin
-                                        cpu_phase <= CPU_EXECUTE;
-
-                                        // 実行準備もしておく
-                                        rd_addr_r <= command.rd;
-                                        func_r <= command.func;
-                                    end
-                                    else begin
-                                        force_reset <= 1'b1;
-                                    end
-                                end
-
-                                // 標準出力
-                                PRINT: begin
-                                    if (is_readable(command.rs1)) begin
-                                        cpu_phase <= CPU_EXECUTE;
-
-                                        // 実行前準備もしておく
-                                        rs1_val_r <= register[command.rs1];
-                                        imm_r <= command.imm;
-                                        func_r <= command.func;
-                                    end
-                                    else begin
-                                        force_reset <= 1'b1;
-                                    end
-                                end
-
-                                default: begin
-                                    force_reset <= 1'b1;
-                                end
-                            endcase
-                        end
-
-                        default: begin
-                            force_reset <= 1'b1;
-                        end
-                    endcase
+                        cpu_phase <= CPU_EXECUTE;
+                    end
+                    // 実行できない命令は動作を保証できないため，リセット状態へ落とす
+                    else begin
+                        force_reset <= 1'b1;
+                    end
                 end
 
                 // 処理の実行
@@ -637,7 +387,7 @@ module alu_sv (
                             // 次に実行する命令の番地へ進む
                             register[PC_ADDR] <= next_pc;
 
-                            // 次の命令へ(レジスタへの書き込みは伴わない)
+                            // 次の命令へ(書き込み先レジスタの指定を持たないためフォワーディングする値はない)
                             advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
 
                             // 不正な値が入っても全て無視する
@@ -752,7 +502,7 @@ module alu_sv (
                                 register[rd_addr_r] <= write_value;
                             end
 
-                            // 次の命令へ(不正なfuncではレジスタ書き込み・フォワーディングは行わない)
+                            // 次の命令へ(不正な命令コードでは書き込みもフォワーディングも行わない)
                             advance_to_next_instruction(write_valid, rd_addr_r, write_value, 1'b0, '0, '0);
                         end
 
@@ -771,13 +521,13 @@ module alu_sv (
                                 force_reset <= 1'b1;
                             end
 
-                            // 次の命令へ(MOV以外はレジスタへの書き込みを伴わない)
+                            // 次の命令へ(MOV以外は書き込み先レジスタの指定を持たないためフォワーディングする値はない)
                             advance_to_next_instruction(func_r == MOV, rd_addr_r, write_value, 1'b0, '0, '0);
                         end
 
                         // 分岐系
                         F_TYPE: begin
-                            // 比較の成立・不成立に応じた飛び先は算出済みのため，そのまま採用する
+                            // 比較が成立していれば指定されたぶん離れた番地へ，していなければ次の番地へ移動する
                             unique case (func_r)
                                 EQ, NE, LT, GT, ELT, EGT: begin
                                     register[PC_ADDR] <= next_pc;
@@ -788,7 +538,7 @@ module alu_sv (
                                 end
                             endcase
 
-                            // 次の命令へ(比較のみを行うためレジスタへの書き込みは伴わない)
+                            // 次の命令へ(比較するだけで書き込み先レジスタの指定を持たないためフォワーディングする値はない)
                             advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                         end
 
@@ -798,10 +548,10 @@ module alu_sv (
                             unique case (func_r)
                                 // ジャンプ
                                 JMP: begin
-                                    // 指定された飛び先は算出済みのため，そのまま採用する
+                                    // 指定された飛び先へ移動する
                                     register[PC_ADDR] <= next_pc;
 
-                                    // 次の命令へ(移動のみを行うためレジスタへの書き込みは伴わない)
+                                    // 次の命令へ(書き込み先レジスタの指定を持たないためフォワーディングする値はない)
                                     advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                                 end
 
@@ -811,24 +561,24 @@ module alu_sv (
                                     register[register[SP_ADDR] + 1] <= register[PC_ADDR] + 1;
                                     // スタックポインタを進める
                                     register[SP_ADDR] <= register[SP_ADDR] + 1;
-                                    // 指定された飛び先は算出済みのため，そのまま採用する
+                                    // 指定された飛び先へ移動する
                                     register[PC_ADDR] <= next_pc;
 
-                                    // 次の命令へ(戻り先スタックへの書き込みは書き込み先レジスタの指定を
-                                    // 経由しないためフォワーディング対象外だが，戻り先レジスタも
-                                    // スタックポインタも読み出しが禁止されており，後続の命令が
-                                    // オペランドとして読むことはできないため取りこぼしにはならない)
+                                    // 次の命令へ(戻り先とスタックポインタは書き込み先レジスタの指定を経由せずに
+                                    // 書き込むためフォワーディングできないが，どちらも読み出しが
+                                    // 禁止されており次の命令のオペランドになり得ないので，
+                                    // フォワーディングしなくても誤った値が読まれることはない)
                                     advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                                 end
 
                                 // 関数リターン
                                 RET: begin
-                                    // スタックポインタが指す戻り先は算出済みのため，そのまま採用する
+                                    // スタックポインタが指す戻り先へ移動する
                                     register[PC_ADDR] <= next_pc;
                                     // スタックポインタを戻す
                                     register[SP_ADDR] <= register[SP_ADDR] - 1;
 
-                                    // 次の命令へ(移動のみを行うためレジスタへの書き込みは伴わない)
+                                    // 次の命令へ(書き込み先レジスタの指定を持たないためフォワーディングする値はない)
                                     advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                                 end
 
@@ -929,7 +679,7 @@ module alu_sv (
                                                 // 次に実行する命令の番地へ進む
                                                 register[PC_ADDR] <= next_pc;
 
-                                                // 次の命令へ(WMはレジスタへの書き込みを伴わない)
+                                                // 次の命令へ(メモリへ書き込むだけで書き込み先レジスタの指定を持たないためフォワーディングする値はない)
                                                 advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                                             end
                                         end
@@ -1029,7 +779,7 @@ module alu_sv (
                                                 // 次に実行する命令の番地へ進む
                                                 register[PC_ADDR] <= next_pc;
 
-                                                // 次の命令へ(PRINTはレジスタへの書き込みを伴わない)
+                                                // 次の命令へ(出力するだけで書き込み先レジスタの指定を持たないためフォワーディングする値はない)
                                                 advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                                             end
                                             else begin
