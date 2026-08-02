@@ -345,7 +345,8 @@ module alu_sv (
             ram_write.mask <= 0;
             ram_write.valid <= 0;
 
-            // レジスタ(標準入出力を覗く)
+            // レジスタ(標準入出力の状態を写しているものを除く．
+            // これらは実行中に毎サイクル入出力信号から書き込まれるため初期化しても即座に上書きされる)
             for (logic [5:0] i = 0; i <= 6'h30; i++) begin
                 register[i] <= 0;
             end
