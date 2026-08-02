@@ -11,10 +11,8 @@ mypc.sim/
 vivado*.log
 vivado*.jou
 
-# mypc.srcs内のVivado管理ディレクトリ(GUI操作で変更されるため編集禁止．詳細はCLAUDE.md参照)
+# mypc.srcs内のVivado管理ディレクトリのうち，合成・実装から再生成できるもの
 mypc.srcs/sim_1/
-mypc.srcs/sources_1/bd/
-mypc.srcs/sources_1/imports/
 mypc.srcs/utils_1/
 
 # issue対応時の疑似隔離clone用
