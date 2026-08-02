@@ -42,11 +42,12 @@
 //    そのまま使う(フォワーディング)．これにより次の命令はCHECKフェーズも省略して直接EXECUTEから
 //    開始できる．
 //
-// ここで言うフォワーディングとは，あるサイクルにレジスタへ書き込む値を，そのレジスタを読み直さずに
-// 次の命令が計算に使う値として直接渡すことを指す．レジスタへの書き込みが反映されるのはサイクルの
-// 終わりであり，同じサイクルにそのレジスタを読んでも1つ前の値しか得られない．そこで，書き込む値
-// そのものを次の命令へ渡すことで，書き込みの反映を待つサイクルを挟まずに次の命令を実行できるように
-// する．
+// ここで言うフォワーディングとは，ある命令が書き込む値を，レジスタを読み直さずに次の命令へ直接
+// 渡すことを指す．ある命令が結果を書き込んだレジスタを次の命令が計算の元として読む場合(足し算の
+// 結果を入れたレジスタを，次の命令が引き算の元として読む場合など)に必要になる．書き込んだ値が
+// レジスタから読めるようになるのはサイクルの終わりで，同じサイクルに読んでも1つ前の値しか得られ
+// ないため，そのままでは書き込みが反映されるのを1サイクル待つことになる．書き込む値そのものを
+// 次の命令へ渡すことで，この待ちを挟まずに次の命令を実行できるようにする．
 //
 // 次に実行する命令の番地は常に確定しているため，取得した命令が無駄になって破棄が必要になることは
 // ない．この結果，本来FETCH→CHECK→EXECUTEの3サイクルを要する命令でも，前の命令の完了直後の
@@ -202,19 +203,17 @@ module alu_sv (
     // 分かった場合はCHECKへ進む(CHECKで強制リセットへ落とす)．
     //
     // 引数は，今回完了する命令がこのサイクルにレジスタへ書き込む内容(書き込み先アドレスと
-    // 書き込む値の組)を表す．同じサイクルに2箇所へ書き込む命令があるため組を2つ受け取るが，
-    // 該当するのは商と余りを書き込む割り算だけで，他の命令は1組目だけを有効にして呼び出す
-    // (書き込みを伴わない命令はどちらの組も無効にする)．2つの組はサイクルが分かれるわけではなく，
-    // 同じサイクルの中で代入が記述されている順を表しており，両方が同じ番地を指した場合は
-    // 後に代入した値がレジスタに残る．
+    // 書き込む値の組)を表す．割り算だけは商と余りを同じサイクルに書き込むため，余りの組も
+    // あわせて受け取る．割り算以外の命令は結果の組だけを有効にして呼び出し，レジスタへの
+    // 書き込みを伴わない命令はどちらの組も無効にして呼び出す．
     task automatic advance_to_next_instruction(
-        input logic             earlier_write_valid,
-        input machine_p::addr_t earlier_write_addr,
-        input register_t        earlier_write_value,
-        // ここから下の3つは，同じサイクルに2箇所へ書き込む割り算でのみ使用する
-        input logic             later_write_valid,
-        input machine_p::addr_t later_write_addr,
-        input register_t        later_write_value
+        input logic             result_write_valid,
+        input machine_p::addr_t result_write_addr,
+        input register_t        result_write_value,
+        // ここから下の3つは割り算でのみ使用する
+        input logic             remainder_write_valid,
+        input machine_p::addr_t remainder_write_addr,
+        input register_t        remainder_write_value
     );
         advancing = 1'b1;
 
@@ -226,18 +225,18 @@ module alu_sv (
             // 次段命令の読み出し・書き込み可否は確認済みのため，CHECKを省略して直接EXECUTEへ進む．
             // 読み出しアドレスが今サイクルの書き込み先と重なる場合は，レジスタから読んだ値では
             // なく今サイクルに書き込む値をそのまま使う(フォワーディング)．
-            // 2組の書き込み先が同じ番地を指す場合は後に代入する組を優先する．レジスタにも
-            // 後に代入した値が残るため，先に代入する組を優先すると次の命令が読む値と
-            // レジスタの中身が食い違ってしまう．
+            // 割り算で商と余りに同じ番地を指定した場合は余りを優先する．レジスタには後から
+            // 代入する余りが残るため，商を優先すると次の命令が読む値とレジスタの中身が
+            // 食い違ってしまう．
             // プログラムカウンタは書き込み先レジスタの指定を経由せずに今サイクルへ更新されるため，
             // 次の命令が実行される時点の値(=このサイクルに書き込む値)をそのまま渡す．
             rs1_val_r <= (command_next.rs1 == PC_ADDR) ? next_pc
-                : (later_write_valid   && later_write_addr   == command_next.rs1) ? later_write_value
-                : (earlier_write_valid && earlier_write_addr == command_next.rs1) ? earlier_write_value
+                : (remainder_write_valid && remainder_write_addr == command_next.rs1) ? remainder_write_value
+                : (result_write_valid    && result_write_addr    == command_next.rs1) ? result_write_value
                 : register[command_next.rs1];
             rs2_val_r <= (command_next.rs2 == PC_ADDR) ? next_pc
-                : (later_write_valid   && later_write_addr   == command_next.rs2) ? later_write_value
-                : (earlier_write_valid && earlier_write_addr == command_next.rs2) ? earlier_write_value
+                : (remainder_write_valid && remainder_write_addr == command_next.rs2) ? remainder_write_value
+                : (result_write_valid    && result_write_addr    == command_next.rs2) ? result_write_value
                 : register[command_next.rs2];
             rd_addr_r <= command_next.rd;
             func_r    <= command_next.func;
