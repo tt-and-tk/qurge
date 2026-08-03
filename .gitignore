@@ -11,8 +11,7 @@ mypc.sim/
 vivado*.log
 vivado*.jou
 
-# mypc.srcs内のVivado管理ディレクトリのうち，合成・実装から再生成できるもの
-mypc.srcs/sim_1/
+# 合成・実装をやり直せば再生成されるデザインチェックポイント
 mypc.srcs/utils_1/
 
 # issue対応時の疑似隔離clone用
