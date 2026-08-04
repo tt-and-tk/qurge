@@ -53,7 +53,7 @@
 // ない．この結果，本来FETCH→CHECK→EXECUTEの3サイクルを要する命令でも，前の命令の完了直後の
 // サイクルから次の命令のEXECUTEを直接開始できる(実質1サイクルで実行完了)．FETCHフェーズを経由
 // するのはリセット直後の1命令目のみで，CHECKフェーズを経由するのはその1命令目と，解析の結果
-// そのままでは実行できないと分かった命令(CHECKで強制リセットへ落とす)のみ．
+// そのままでは実行できないと分かった命令(CHECKで停止させる)のみ．
 module alu_sv (
     input logic clk,
     input logic resetn,
@@ -130,8 +130,9 @@ module alu_sv (
     // 割り算回路の状態
     util_p::state_enum div_state = IDLE;
 
-    // 強制リセット
-    logic force_reset = 1'b0;
+    // 実行できない命令を検出して停止していることを表すフラグ．
+    // 立っている間はリセット処理が働き続け，外部からのリセットが入るまで下りない
+    logic is_halted = 1'b0;
 
     // 次命令を先読みしてよいかどうかを示すフラグ
     logic can_prefetch;
@@ -200,7 +201,7 @@ module alu_sv (
     // 命令完了時，次の命令へ遷移する処理をまとめたタスク．
     // 次の命令には，先読み済みの機械語か今サイクルにROMから取得中の機械語を使う．
     // 実行可能だと分かればFETCHとCHECKをどちらも省略してEXECUTEへ直接進み，実行できないと
-    // 分かった場合はCHECKへ進む(CHECKで強制リセットへ落とす)．
+    // 分かった場合はCHECKへ進む(CHECKで停止させる)．
     //
     // 引数は，今回完了する命令がこのサイクルにレジスタへ書き込む内容(書き込み先アドレスと
     // 書き込む値の組)を表す．割り算だけは商と余りを同じサイクルに書き込むため，余りの組も
@@ -245,7 +246,7 @@ module alu_sv (
             ir        <= ir_next;
             cpu_phase <= CPU_EXECUTE;
         end
-        // 実行できない命令は以下のいずれかの経路でCHECKへ進み，そこで強制リセットへ落とす
+        // 実行できない命令は以下のいずれかの経路でCHECKへ進み，そこで停止させる
         else if (ir_prefetched_valid) begin
             // 前サイクル以前に先読みが完了している場合，それを採用する
             ir <= ir_prefetched;
@@ -300,7 +301,7 @@ module alu_sv (
     // 順序回路
     always_ff @(posedge clk) begin
         // リセット
-        if (!resetn || force_reset) begin
+        if (!resetn || is_halted) begin
             // 実行状態をリセット
             cpu_phase <= CPU_FETCH;
             ir <= nop();
@@ -324,9 +325,12 @@ module alu_sv (
             ram_read_state <= IDLE;
             ram_write_state <= IDLE;
 
-            // 標準入出力の状態をリセット
+            // 標準入出力の状態と，受け渡しを行っていることを表す信号をリセット
             stdin_state <= IDLE;
             stdout_state <= IDLE;
+            stdin_tready <= 1'b0;
+            stdout_tvalid <= 1'b0;
+            stdout_tdata <= '0;
 
             // メモリ読み書き
             ram_read.address <= 0;
@@ -337,15 +341,23 @@ module alu_sv (
             ram_write.mask <= 0;
             ram_write.valid <= 0;
 
-            // レジスタ(標準入出力を覗く)
+            // レジスタ(標準入出力のデータと受け渡し状況を受け取っているものを除く．
+            // 実行中は毎サイクル入出力の信号線から書き込まれるため，初期化しても即座に上書きされる)
             for (logic [5:0] i = 0; i <= 6'h30; i++) begin
                 register[i] <= 0;
             end
             // スタックポインタは空を表す自身の番地で初期化する
             register[SP_ADDR] <= SP_ADDR;
 
-            // 強制リセット状態は元に戻さない．
-            // 強制リセットが働いたときはリセット状態から戻さない．
+            // 実行できない命令を検出して停止した状態は，外部からのリセットが
+            // 入っているときだけ解除する．自ら解除するとプログラムの先頭から
+            // 同じ命令を踏み直すだけになるため，解除の判断は外部に委ねる．
+            // このリセット信号はPS側が出すものをリセット整形用のIP(proc_sys_reset)を
+            // 通して受け取っており，ボタンから直接入ってくることはないため，
+            // チャタリングによって解除が何度も繰り返されることはない
+            if (!resetn) begin
+                is_halted <= 1'b0;
+            end
         end
         // 命令実行
         else begin
@@ -391,9 +403,9 @@ module alu_sv (
 
                         cpu_phase <= CPU_EXECUTE;
                     end
-                    // 実行できない命令は動作を保証できないため，リセット状態へ落とす
+                    // 実行できない命令は動作を保証できないため，停止させる
                     else begin
-                        force_reset <= 1'b1;
+                        is_halted <= 1'b1;
                     end
                 end
 
@@ -468,11 +480,11 @@ module alu_sv (
                                                 );
                                             end
                                         end
-                                        default: force_reset <= 1'b1;
+                                        default: is_halted <= 1'b1;
                                     endcase
                                 end
                                 default: begin
-                                    force_reset <= 1'b1;
+                                    is_halted <= 1'b1;
                                     write_valid = 1'b0;
                                 end
                             endcase
@@ -504,7 +516,7 @@ module alu_sv (
                                     SLA: write_value = rs1_val_r <<< imm_r[31:0];
                                     SRA: write_value = rs1_val_r >>> imm_r[31:0];
                                     default: begin
-                                        force_reset <= 1'b1;
+                                        is_halted <= 1'b1;
                                         write_valid = 1'b0;
                                     end
                                 endcase
@@ -515,7 +527,7 @@ module alu_sv (
                                     SLA: write_value = rs1_val_r <<< rs2_val_r;
                                     SRA: write_value = rs1_val_r >>> rs2_val_r;
                                     default: begin
-                                        force_reset <= 1'b1;
+                                        is_halted <= 1'b1;
                                         write_valid = 1'b0;
                                     end
                                 endcase
@@ -540,7 +552,7 @@ module alu_sv (
                                 register[rd_addr_r] <= write_value;
                             end
                             else begin
-                                force_reset <= 1'b1;
+                                is_halted <= 1'b1;
                             end
 
                             // 次の命令へ(MOV以外はレジスタへ書き込まないためフォワーディングする値はない)
@@ -556,7 +568,7 @@ module alu_sv (
                                 end
                                 // 定義されていない比較方法は実行できない
                                 default: begin
-                                    force_reset <= 1'b1;
+                                    is_halted <= 1'b1;
                                 end
                             endcase
 
@@ -606,7 +618,7 @@ module alu_sv (
 
                                 // それ以外はオミット
                                 default: begin
-                                    force_reset <= 1'b1;
+                                    is_halted <= 1'b1;
                                 end
                             endcase
                         end
@@ -659,7 +671,7 @@ module alu_sv (
 
                                         // その他
                                         default: begin
-                                            force_reset <= 1'b1;
+                                            is_halted <= 1'b1;
                                         end
                                     endcase
                                 end
@@ -708,22 +720,22 @@ module alu_sv (
 
                                         // その他
                                         default: begin
-                                            force_reset <= 1'b1;
+                                            is_halted <= 1'b1;
                                         end
                                     endcase
                                 end
                                 // バーストはオミット
                                 // メモリ読み込み(バースト)
                                 BRM: begin
-                                    force_reset <= 1'b1;
+                                    is_halted <= 1'b1;
                                 end
                                 // メモリ書き込み(バースト)
                                 BWM: begin
-                                    force_reset <= 1'b1;
+                                    is_halted <= 1'b1;
                                 end
 
                                 default: begin
-                                    force_reset <= 1'b1;
+                                    is_halted <= 1'b1;
                                 end
                             endcase
                         end
@@ -765,7 +777,7 @@ module alu_sv (
 
                                         // その他
                                         default: begin
-                                            force_reset <= 1'b1;
+                                            is_halted <= 1'b1;
                                         end
                                     endcase
                                 end
@@ -812,19 +824,19 @@ module alu_sv (
 
                                         // その他
                                         default: begin
-                                            force_reset <= 1'b1;
+                                            is_halted <= 1'b1;
                                         end
                                     endcase
                                 end
 
                                 default: begin
-                                    force_reset <= 1'b1;
+                                    is_halted <= 1'b1;
                                 end
                             endcase
                         end
 
                         default: begin
-                            force_reset <= 1'b1;
+                            is_halted <= 1'b1;
                         end
                     endcase
 
