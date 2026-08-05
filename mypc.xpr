@@ -227,7 +227,7 @@
       <File Path="$PSRCDIR/sources_1/imports/hdl/top_wrapper.v">
         <FileInfo>
           <Attr Name="ImportPath" Val="$PGENDIR/sources_1/bd/top/hdl/top_wrapper.v"/>
-          <Attr Name="ImportTime" Val="1772951599"/>
+          <Attr Name="ImportTime" Val="1772947042"/>
           <Attr Name="UsedIn" Val="synthesis"/>
           <Attr Name="UsedIn" Val="implementation"/>
           <Attr Name="UsedIn" Val="simulation"/>
