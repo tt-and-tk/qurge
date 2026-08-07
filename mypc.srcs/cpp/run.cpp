@@ -80,6 +80,14 @@ int main(void) {
     PYNQ_openDMA(&write_dma, ADDR);
     PYNQ_openDMA(&read_dma, ADDR);
 
+    // Ctrl+Cで端末設定を復元してから終了できるようにする(既定のSIGINT動作である即時終了だと，
+    // rawモードの端末設定が復元されないまま残ってしまう)．rawモードへの切り替えより前に
+    // 登録し，切り替え直後にSIGINTが届いても既定動作(即時終了)が働かないようにする．
+    // ただし送信側が`PYNQ_waitForDMAComplete(&write_dma, AXI_DMA_WRITE)`で待機中にSIGINTが
+    // 届いた場合，そこから抜けられるかどうかはライブラリの実装(EINTRで復帰するか)に依存し，
+    // このコードだけでは保証できない
+    std::signal(SIGINT, onSigint);
+
     // 標準入力を1文字ずつ即座に読めるよう，rawモードに切り替える
     // (ICANON: 行バッファリングを無効化してEnter待ちなしで読めるようにする，
     //  ECHO: ローカルエコーを無効化する．画面に出るのはFPGAが送り返した文字のみになる)
@@ -90,13 +98,6 @@ int main(void) {
     raw_termios.c_cc[VMIN] = 1;
     raw_termios.c_cc[VTIME] = 0;
     tcsetattr(STDIN_FILENO, TCSANOW, &raw_termios);
-
-    // Ctrl+Cで端末設定を復元してから終了できるようにする(既定のSIGINT動作である即時終了だと，
-    // rawモードの端末設定が復元されないまま残ってしまう)．
-    // ただし送信側が`PYNQ_waitForDMAComplete(&write_dma, AXI_DMA_WRITE)`で待機中にSIGINTが
-    // 届いた場合，そこから抜けられるかどうかはライブラリの実装(EINTRで復帰するか)に依存し，
-    // このコードだけでは保証できない
-    std::signal(SIGINT, onSigint);
 
     // 受信スレッド: FPGAからの出力を1文字受け取るたびに画面へ表示する．これを送信側と
     // 並行に動かすことで，入力の受け付けと出力の表示が互いを待たずに繰り返せるようにする
@@ -130,7 +131,8 @@ int main(void) {
 
         // 読んだ文字コードをDDRメモリ(write_data)に書き込む
         // FPGAのstdin_tdataは32bitなので，char→intでゼロ拡張して格納する
-        *write_data = (int)input_char;
+        // (charの符号性は環境依存のため，unsigned charを経由してゼロ拡張を確実にする)
+        *write_data = (int)(unsigned char)input_char;
 
         // DMAに対して「write_memoryの先頭からsizeof(int)バイト分をPLへ送れ」と命令する
         PYNQ_writeDMA(&write_dma, &write_memory, 0, sizeof(int));
