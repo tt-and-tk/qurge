@@ -192,7 +192,12 @@ package alu_p;
     endfunction
 
     // 命令の種類・使用するfunc・読み書きに使うレジスタ番地から，その命令がそのまま実行可能か
-    // (読み書きに使うレジスタ番地が全て有効で，かつ命令の種類・funcが定義済みの組み合わせか)を判定する
+    // (読み書きに使うレジスタ番地が全て有効で，かつ命令の種類・funcが定義済みの組み合わせか)を判定する．
+    // 実行可否判定の唯一の実装であり，alu_sv.svの先読みデコード(advance_to_next_instruction())と
+    // CPU_CHECKフェーズの両方から呼ばれる．条件を変える場合はこの関数だけを直すこと(呼び出し元へ
+    // 条件を書き足すと判定が二重管理になる)．
+    // ただし命令コードの妥当性まで見ているのはJ系・M系・IO系だけで，P系・S系・A系・F系の未定義の
+    // 命令コードはここでは弾かず，alu_sv.svのCPU_EXECUTE内のdefaultで停止する(2段構え)．
     function util_p::bool_t is_instruction_executable(
         machine_p::type_t m_type,
         machine_p::func_t func,
