@@ -91,8 +91,11 @@ int main(void) {
     raw_termios.c_cc[VTIME] = 0;
     tcsetattr(STDIN_FILENO, TCSANOW, &raw_termios);
 
-    // Ctrl+Cで安全に終了できるようにする(既定のSIGINT動作である即時終了だと，
-    // rawモードの端末設定が復元されないまま残ってしまう)
+    // Ctrl+Cで端末設定を復元してから終了できるようにする(既定のSIGINT動作である即時終了だと，
+    // rawモードの端末設定が復元されないまま残ってしまう)．
+    // ただし送信側が`PYNQ_waitForDMAComplete(&write_dma, AXI_DMA_WRITE)`で待機中にSIGINTが
+    // 届いた場合，そこから抜けられるかどうかはライブラリの実装(EINTRで復帰するか)に依存し，
+    // このコードだけでは保証できない
     std::signal(SIGINT, onSigint);
 
     // 受信スレッド: FPGAからの出力を1文字受け取るたびに画面へ表示する．これを送信側と
@@ -105,7 +108,10 @@ int main(void) {
         }
     });
     // FPGAが次の出力を送ってこない限りPYNQ_waitForDMACompleteから戻らずjoinできないため，
-    // 後始末はプロセス終了に委ねる(電源再投入前提の復帰ではなくプロセス終了を想定しており実害は小さい)
+    // 後始末はプロセス終了に委ねる(電源再投入前提の復帰ではなくプロセス終了を想定しており実害は小さい)．
+    // そのため`read_dma`・`read_memory`はメインスレッド側でclose/freeしない
+    // (受信スレッドがブロックしたまま使い続けている可能性があり，close/free後に
+    //  アクセスするとuse-after-free相当の未定義動作になるため)
     receiver.detach();
 
     // メインスレッド: 標準入力から1文字読むたびに，都度FPGAへ送信する
@@ -113,7 +119,12 @@ int main(void) {
         char input_char;
         // rawモードのため1文字入力されるとすぐに返る(シグナル受信時はEINTRで抜ける)
         ssize_t read_bytes = read(STDIN_FILENO, &input_char, 1);
-        if (read_bytes <= 0) {
+        if (read_bytes == 0) {
+            // 標準入力がEOFに達した(リダイレクトしたファイル/パイプの終端等)．
+            // read()は以後も0を返し続けるため，busyループにしないためループを抜ける
+            break;
+        }
+        if (read_bytes < 0) {
             continue;
         }
 
@@ -132,11 +143,10 @@ int main(void) {
     tcsetattr(STDIN_FILENO, TCSANOW, &original_termios);
     std::cout << std::endl;
 
-    // 使用したリソースを解放する
+    // メインスレッドが単独で使っているリソース(送信側)のみ解放する．
+    // 受信側(read_dma・read_memory)は受信スレッドが使用中の可能性があるため解放しない
     PYNQ_closeDMA(&write_dma);
-    PYNQ_closeDMA(&read_dma);
     PYNQ_freeSharedMemory(&write_memory);
-    PYNQ_freeSharedMemory(&read_memory);
 
     return 0;
 }
