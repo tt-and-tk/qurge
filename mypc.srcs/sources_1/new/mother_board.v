@@ -20,8 +20,6 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 
-// mother_board_sv(SystemVerilog本体)を呼び出すだけのVerilogラッパー．
-// Vivado IPとの互換性のため，このファイル自体はVerilogで記述している．
 module mother_board(
     input  wire clk,
     input  wire resetn,
