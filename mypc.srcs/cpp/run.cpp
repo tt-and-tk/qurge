@@ -40,18 +40,14 @@ extern "C" {
 #include <pynq_api.h>
 }
 
-namespace {
-
 // SIGINTを受けたことを伝えるフラグ．シグナルハンドラ内ではこれを立てるだけにし，
 // 後始末(端末設定の復元・DMAクローズ)はメインループ側の通常のコードパスで行う
 // (tcsetattr・exit等はasync-signal-safeではないため，ハンドラ内で直接呼ばない)
-volatile std::sig_atomic_t g_interrupted = 0;
+static volatile std::sig_atomic_t g_interrupted = 0;
 
-void onSigint(int) {
+static void onSigint(int) {
     g_interrupted = 1;
 }
-
-} // namespace
 
 int main(void) {
     char bit_path[] = "./bit/top_wrapper.bit";
@@ -88,9 +84,13 @@ int main(void) {
     // このコードだけでは保証できない
     std::signal(SIGINT, onSigint);
 
-    // 標準入力を1文字ずつ即座に読めるよう，rawモードに切り替える
-    // (ICANON: 行バッファリングを無効化してEnter待ちなしで読めるようにする，
-    //  ECHO: ローカルエコーを無効化する．画面に出るのはFPGAが送り返した文字のみになる)
+    // 標準入力を1文字ずつ即座に読めるよう，rawモードに切り替える．
+    // 通常モード(canonicalモード)では，端末ドライバが入力を1行分バッファリングし，
+    // Enterが押されるまでプログラム側のread()に文字を渡さない．また入力された文字を
+    // 自動でそのまま画面に映す(ローカルエコー)．今回はキー入力のたびに即座にFPGAへ
+    // 送信したいためこの2つの挙動が邪魔になり，以下のフラグで無効化する．
+    // ICANON: 行バッファリングを無効化し，1文字入力されるたびにread()から返るようにする
+    // ECHO:   ローカルエコーを無効化する．画面に出るのはFPGAが送り返した文字のみになる
     termios original_termios, raw_termios;
     tcgetattr(STDIN_FILENO, &original_termios);
     raw_termios = original_termios;
