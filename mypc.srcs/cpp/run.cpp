@@ -30,7 +30,6 @@
 // ライブラリの実装に依存し，この開発環境からは確認できない．インスタンスを分けて
 // 内部状態そのものを共有しない構成にすることで，この不確実性を回避する．
 
-#include <atomic>
 #include <csignal>
 #include <iostream>
 #include <thread>
@@ -40,14 +39,20 @@ extern "C" {
 #include <pynq_api.h>
 }
 
-// SIGINTを受けたことを伝えるフラグ．シグナルハンドラ内ではこれを立てるだけにし，
-// 後始末(端末設定の復元・DMAクローズ)はメインループ側の通常のコードパスで行う
-// (tcsetattr・exit等はasync-signal-safeではないため，ハンドラ内で直接呼ばない)
-static volatile std::sig_atomic_t g_interrupted = 0;
+// SIGINTを受けたことを伝えるフラグ．onSigint以外から立てられないよう，フラグ本体は
+// private化し，立てる操作(onSigint)と読む操作(isSet)だけを公開する．
+// onSigint内ではフラグを立てるだけにし，後始末(端末設定の復元・DMAクローズ)は
+// メインループ側の通常のコードパスで行う(tcsetattr・exit等はasync-signal-safeでは
+// ないため，ハンドラ内で直接呼ばない)
+class InterruptFlag {
+public:
+    static bool isSet() { return flag_ != 0; }
+    static void onSigint(int) { flag_ = 1; }
 
-static void onSigint(int) {
-    g_interrupted = 1;
-}
+private:
+    static volatile std::sig_atomic_t flag_;
+};
+volatile std::sig_atomic_t InterruptFlag::flag_ = 0;
 
 int main(void) {
     char bit_path[] = "./bit/top_wrapper.bit";
@@ -82,13 +87,9 @@ int main(void) {
     // ただし送信側が`PYNQ_waitForDMAComplete(&write_dma, AXI_DMA_WRITE)`で待機中にSIGINTが
     // 届いた場合，そこから抜けられるかどうかはライブラリの実装(EINTRで復帰するか)に依存し，
     // このコードだけでは保証できない
-    std::signal(SIGINT, onSigint);
+    std::signal(SIGINT, InterruptFlag::onSigint);
 
-    // 標準入力を1文字ずつ即座に読めるよう，rawモードに切り替える．
-    // 通常モード(canonicalモード)では，端末ドライバが入力を1行分バッファリングし，
-    // Enterが押されるまでプログラム側のread()に文字を渡さない．また入力された文字を
-    // 自動でそのまま画面に映す(ローカルエコー)．今回はキー入力のたびに即座にFPGAへ
-    // 送信したいためこの2つの挙動が邪魔になり，以下のフラグで無効化する．
+    // 標準入力を1文字ずつ即座に読めるよう，rawモードに切り替える
     // ICANON: 行バッファリングを無効化し，1文字入力されるたびにread()から返るようにする
     // ECHO:   ローカルエコーを無効化する．画面に出るのはFPGAが送り返した文字のみになる
     termios original_termios, raw_termios;
@@ -102,13 +103,14 @@ int main(void) {
     // 受信スレッド: FPGAからの出力を1文字受け取るたびに画面へ表示する．これを送信側と
     // 並行に動かすことで，入力の受け付けと出力の表示が互いを待たずに繰り返せるようにする
     std::thread receiver([&]() {
-        while (!g_interrupted) {
+        while (!InterruptFlag::isSet()) {
             PYNQ_readDMA(&read_dma, &read_memory, 0, sizeof(int));
             PYNQ_waitForDMAComplete(&read_dma, AXI_DMA_READ);
             std::cout << (char)*read_data << std::flush;
         }
     });
-    // FPGAが次の出力を送ってこない限りPYNQ_waitForDMACompleteから戻らずjoinできないため，
+    // FPGAが次の出力を送ってこない限りPYNQ_waitForDMACompleteから戻らない．join()(スレッドの
+    // 終了をこの場で待ち合わせる操作)を呼ぶとその間メインスレッドも止まってしまうため，
     // 後始末はプロセス終了に委ねる(電源再投入前提の復帰ではなくプロセス終了を想定しており実害は小さい)．
     // そのため`read_dma`・`read_memory`はメインスレッド側でclose/freeしない
     // (受信スレッドがブロックしたまま使い続けている可能性があり，close/free後に
@@ -116,9 +118,11 @@ int main(void) {
     receiver.detach();
 
     // メインスレッド: 標準入力から1文字読むたびに，都度FPGAへ送信する
-    while (!g_interrupted) {
+    while (!InterruptFlag::isSet()) {
         char input_char;
-        // rawモードのため1文字入力されるとすぐに返る(シグナル受信時はEINTRで抜ける)
+        // rawモードのため1バイト入力されるとすぐに返る(シグナル受信時はEINTRで抜ける)．
+        // 1バイトずつ読むため，マルチバイト文字(UTF-8等)は1文字として扱われず，
+        // 構成バイトがそれぞれ独立した文字コードとしてFPGAへ送信される
         ssize_t read_bytes = read(STDIN_FILENO, &input_char, 1);
         if (read_bytes == 0) {
             // 標準入力がEOFに達した(リダイレクトしたファイル/パイプの終端等)．
