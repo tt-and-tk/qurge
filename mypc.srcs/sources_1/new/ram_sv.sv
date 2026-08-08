@@ -34,8 +34,8 @@ module ram_sv import ram_p::*, util_p::*; (
     ram_write_if.slave ram_write
     );
 
-    // メモリに保存されるデータ
-    memory_t memory_data = '{default: 8'h00};
+    // メモリに保存されるデータ(分散RAM/FFへ意図せず落ちて資源が破綻しないよう，Block RAMへの実装を明示する)
+    (* ram_style = "block" *) memory_t memory_data = '{default: 8'h00};
 
     // メモリ読み出し・書き込み状態
     state_enum ram_read_state = IDLE;
