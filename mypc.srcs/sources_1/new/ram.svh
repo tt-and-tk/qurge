@@ -14,10 +14,13 @@ package ram_p;
         SUCCESS        // 成功
     } code_enum;
 
+    // 定数
+    localparam int RAM_SIZE = 65536;         // メモリの実容量(バイト)
+
     // 変数型
-    typedef logic [27:0] address_bus_t;      // アドレスバス幅
+    typedef logic [15:0] address_bus_t;      // アドレスバス幅(RAM_SIZEぶんの番地を表現できる幅)
     typedef logic [31:0] data_bus_t;         // データバス幅
-    typedef logic [27:0][ 7:0] memory_t;     // メモリのデータ全体
+    typedef logic [ 7:0] memory_t [0:RAM_SIZE - 1];  // メモリのデータ全体(1バイトずつのアンパック配列)
 endpackage
 
 // インターフェース定義
