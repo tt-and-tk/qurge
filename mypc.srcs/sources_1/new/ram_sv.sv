@@ -51,7 +51,7 @@ module ram_sv import ram_p::*, util_p::*; (
             ram_write.ready <= 1'b0;
             ram_write.code <= NONE;
 
-            // 内部変数(memory_dataは64KB全体の同期クリアがBRAM推論を妨げるため対象外，宣言時の初期値のみ持つ)
+            // 内部変数
             ram_read_state <= IDLE;
             ram_write_state <= IDLE;
         end
@@ -72,7 +72,7 @@ module ram_sv import ram_p::*, util_p::*; (
                 EXECUTE: begin
                     if (ram_read.valid) begin
                         ram_read.ready <= 1'b1;
-                       // マスクに応じて読み込み(iはint型のため，実容量超過をラップアラウンドせず判定できる)
+                       // マスクに応じて読み込み
                        foreach (ram_read.mask[i]) begin
                            if (ram_read.mask[i] && (int'(ram_read.address) + i < RAM_SIZE))
                                // 32ビットのうち，8ビット分を出力
