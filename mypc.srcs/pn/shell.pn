@@ -17,7 +17,7 @@ void handle_unknown(void) {
     print("unknown command\n");
 }
 
-// コマンド名に応じた処理を呼び出す(個別コマンドは未実装のため常に未対応として扱う)
+// コマンド名に応じた処理を呼び出す．現時点ではecho/help等の個別コマンドが1つも実装されていないため，暫定的に常に未対応として扱う
 void dispatch(char token[]) {
     handle_unknown();
 }
