@@ -510,22 +510,24 @@ module alu_sv (
                             // 合わせて記録する(不正なfuncでは書き込み・フォワーディングとも行わないため)．
                             write_valid = 1'b1;
                             if (imm_r[32]) begin
+                                // シフト量は下位5bit(0〜31)のみを使用する
                                 unique case (func_r)
-                                    SLL: write_value = rs1_val_r << imm_r[31:0];
-                                    SRL: write_value = rs1_val_r >> imm_r[31:0];
-                                    SLA: write_value = rs1_val_r <<< imm_r[31:0];
-                                    SRA: write_value = rs1_val_r >>> imm_r[31:0];
+                                    SLL: write_value = rs1_val_r << imm_r[4:0];
+                                    SRL: write_value = rs1_val_r >> imm_r[4:0];
+                                    SLA: write_value = rs1_val_r <<< imm_r[4:0];
+                                    SRA: write_value = rs1_val_r >>> imm_r[4:0];
                                     default: begin
                                         is_halted <= 1'b1;
                                         write_valid = 1'b0;
                                     end
                                 endcase
                             end else begin
+                                // シフト量は下位5bit(0〜31)のみを使用する
                                 unique case (func_r)
-                                    SLL: write_value = rs1_val_r << rs2_val_r;
-                                    SRL: write_value = rs1_val_r >> rs2_val_r;
-                                    SLA: write_value = rs1_val_r <<< rs2_val_r;
-                                    SRA: write_value = rs1_val_r >>> rs2_val_r;
+                                    SLL: write_value = rs1_val_r << rs2_val_r[4:0];
+                                    SRL: write_value = rs1_val_r >> rs2_val_r[4:0];
+                                    SLA: write_value = rs1_val_r <<< rs2_val_r[4:0];
+                                    SRA: write_value = rs1_val_r >>> rs2_val_r[4:0];
                                     default: begin
                                         is_halted <= 1'b1;
                                         write_valid = 1'b0;
