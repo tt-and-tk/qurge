@@ -1,0 +1,31 @@
+// シェルのメインループ．標準入力から1行受け取り，先頭のトークンをコマンド名として解析し，対応する処理を呼び出す
+char input[64];  // 1行分の入力バッファ
+char cmd[64];    // 入力の先頭トークン(コマンド名)
+
+// bufの先頭から空白またはヌル終端の直前までをtokenへコピーする
+void extract_command(char buf[], char token[]) {
+    int i = 0;
+    while (buf[i] != ' ' && buf[i] != '\0') {
+        token[i] = buf[i];
+        i = i + 1;
+    }
+    token[i] = '\0';
+}
+
+// 未対応コマンドのエラーメッセージを表示する
+void handle_unknown(void) {
+    print("unknown command\n");
+}
+
+// コマンド名に応じた処理を呼び出す．現時点ではecho/help等の個別コマンドが1つも実装されていないため，暫定的に常に未対応として扱う
+void dispatch(char token[]) {
+    handle_unknown();
+}
+
+void main(void) {
+    while (1) {
+        scan(input);
+        extract_command(input, cmd);
+        dispatch(cmd);
+    }
+}
