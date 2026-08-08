@@ -39,8 +39,8 @@ extern "C" {
 #include <pynq_api.h>
 }
 
-// SIGINTを受けたことを伝えるフラグ．onSigint以外から立てられないよう，フラグ本体は
-// private化し，立てる操作(onSigint)と読む操作(isSet)だけを公開する．
+// SIGINTを受けたことを伝えるフラグ．立てる操作(onSigint)と読む操作(isSet)だけを公開し，
+// フラグ本体はクラス外から直接書き換えられないようにする．
 // onSigint内ではフラグを立てるだけにし，後始末(端末設定の復元・DMAクローズ)は
 // メインループ側の通常のコードパスで行う(tcsetattr・exit等はasync-signal-safeでは
 // ないため，ハンドラ内で直接呼ばない)
@@ -120,10 +120,9 @@ int main(void) {
     // メインスレッド: 標準入力から1文字読むたびに，都度FPGAへ送信する
     while (!InterruptFlag::isSet()) {
         char input_char;
-        // rawモードのため1バイト入力されるとすぐに返る(シグナル受信時はEINTRで抜ける)．
-        // 1バイトずつ読むため，マルチバイト文字(UTF-8等)は1文字として扱われず，
-        // 構成バイトがそれぞれ独立した文字コードとしてFPGAへ送信される
+        // rawモードのため1バイト入力されるとすぐに返る(シグナル受信時はEINTRで抜ける)
         ssize_t read_bytes = read(STDIN_FILENO, &input_char, 1);
+        // マルチバイト文字(UTF-8等)には対応しない
         if (read_bytes == 0) {
             // 標準入力がEOFに達した(リダイレクトしたファイル/パイプの終端等)．
             // read()は以後も0を返し続けるため，busyループにしないためループを抜ける
