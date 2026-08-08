@@ -192,7 +192,9 @@ package alu_p;
     endfunction
 
     // 命令の種類・使用するfunc・読み書きに使うレジスタ番地から，その命令がそのまま実行可能か
-    // (読み書きに使うレジスタ番地が全て有効で，かつ命令の種類・funcが定義済みの組み合わせか)を判定する
+    // (読み書きに使うレジスタ番地が全て有効で，かつ命令の種類・funcが定義済みの組み合わせか)を判定する．
+    // 実行可否判定の唯一の実装．条件を変える場合はこの関数だけを直すこと(呼び出し元に条件を
+    // 書き足すと二重管理になる)．
     function util_p::bool_t is_instruction_executable(
         machine_p::type_t m_type,
         machine_p::func_t func,

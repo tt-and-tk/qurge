@@ -34,8 +34,8 @@ module ram_sv import ram_p::*, util_p::*; (
     ram_write_if.slave ram_write
     );
 
-    // メモリに保存されるデータ
-    memory_t memory_data = 0;
+    // メモリに保存されるデータ(分散RAM/FFへ意図せず落ちて資源が破綻しないよう，Block RAMへの実装を明示する)
+    (* ram_style = "block" *) memory_t memory_data = '{default: 8'h00};
 
     // メモリ読み出し・書き込み状態
     state_enum ram_read_state = IDLE;
@@ -52,7 +52,6 @@ module ram_sv import ram_p::*, util_p::*; (
             ram_write.code <= NONE;
 
             // 内部変数
-            memory_data <= 0;
             ram_read_state <= IDLE;
             ram_write_state <= IDLE;
         end
@@ -75,10 +74,11 @@ module ram_sv import ram_p::*, util_p::*; (
                         ram_read.ready <= 1'b1;
                        // マスクに応じて読み込み
                        foreach (ram_read.mask[i]) begin
-                           if (ram_read.mask[i])
+                           if (ram_read.mask[i] && (int'(ram_read.address) + i < RAM_SIZE))
                                // 32ビットのうち，8ビット分を出力
                                ram_read.data[i*8 + 7:i*8] <= memory_data[ram_read.address + i];
                            else
+                               // マスクが立っていない，または実容量を超える番地は0を返す
                                ram_read.data[i*8 + 7:i*8] <= 8'h00;
                        end
                         // 読み込みラスト？
@@ -113,9 +113,9 @@ module ram_sv import ram_p::*, util_p::*; (
                 EXECUTE: begin
                     if (ram_write.valid) begin
                         ram_write.ready <= 1'b1;
-                       // マスクに応じて書き込み(マスクが立っていない番地は元の値を保持する)
+                       // マスクに応じて書き込み(マスクが立っていない番地・実容量を超える番地は元の値を保持する)
                        foreach (ram_write.mask[i]) begin
-                           if (ram_write.mask[i])
+                           if (ram_write.mask[i] && (int'(ram_write.address) + i < RAM_SIZE))
                                // 32ビットのうち，8ビット分を入力
                                memory_data[ram_write.address + i] <= ram_write.data[i*8 + 7:i*8];
                        end

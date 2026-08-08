@@ -131,7 +131,9 @@ module alu_sv (
     util_p::state_enum div_state = IDLE;
 
     // 実行できない命令を検出して停止していることを表すフラグ．
-    // 立っている間はリセット処理が働き続け，外部からのリセットが入るまで下りない
+    // 立っている間はリセット処理が働き続け，外部からのリセットが入るまで下りない．
+    // このフラグを下ろす代入は，下のリセット処理の中(if (!resetn)の中)以外に置かないこと
+    // (外に置くと，停止した状態から自力で抜けてプログラムの先頭から同じ命令を踏み直す動作になる)．
     logic is_halted = 1'b0;
 
     // 次命令を先読みしてよいかどうかを示すフラグ
@@ -144,10 +146,10 @@ module alu_sv (
     assign is_branch_taken = (command.m_type == F_TYPE)
         && ((func_r == EQ  && rs1_val_r == rs2_val_r)
          || (func_r == NE  && rs1_val_r != rs2_val_r)
-         || (func_r == LT  && rs1_val_r <  rs2_val_r)
-         || (func_r == GT  && rs1_val_r >  rs2_val_r)
-         || (func_r == ELT && rs1_val_r <= rs2_val_r)
-         || (func_r == EGT && rs1_val_r >= rs2_val_r));
+         || (func_r == LT  && $signed(rs1_val_r) <  $signed(rs2_val_r))
+         || (func_r == GT  && $signed(rs1_val_r) >  $signed(rs2_val_r))
+         || (func_r == ELT && $signed(rs1_val_r) <= $signed(rs2_val_r))
+         || (func_r == EGT && $signed(rs1_val_r) >= $signed(rs2_val_r)));
 
     // 飛び先を指定してプログラムカウンタを書き換える命令かどうか(定義されていない命令コードはfalseとして扱う)
     logic is_jumping;
@@ -202,6 +204,9 @@ module alu_sv (
     // 次の命令には，先読み済みの機械語か今サイクルにROMから取得中の機械語を使う．
     // 実行可能だと分かればFETCHとCHECKをどちらも省略してEXECUTEへ直接進み，実行できないと
     // 分かった場合はCHECKへ進む(CHECKで停止させる)．
+    // CPU_EXECUTEフェーズで命令完了時に次命令へ遷移する箇所は，cpu_phase <= CPU_FETCH;を
+    // 直接書かず必ずこのタスクを呼ぶこと(先読み機構(ir_prefetched/can_prefetch)と連動しており，
+    // 直接代入すると先読み結果が反映されない)．
     //
     // 引数は，今回完了する命令がこのサイクルにレジスタへ書き込む内容(書き込み先アドレスと
     // 書き込む値の組)を表す．割り算だけは商と余りを同じサイクルに書き込むため，余りの組も
@@ -515,7 +520,7 @@ module alu_sv (
                                     SLL: write_value = rs1_val_r << imm_r[4:0];
                                     SRL: write_value = rs1_val_r >> imm_r[4:0];
                                     SLA: write_value = rs1_val_r <<< imm_r[4:0];
-                                    SRA: write_value = rs1_val_r >>> imm_r[4:0];
+                                    SRA: write_value = $signed(rs1_val_r) >>> imm_r[4:0];
                                     default: begin
                                         is_halted <= 1'b1;
                                         write_valid = 1'b0;
@@ -527,7 +532,7 @@ module alu_sv (
                                     SLL: write_value = rs1_val_r << rs2_val_r[4:0];
                                     SRL: write_value = rs1_val_r >> rs2_val_r[4:0];
                                     SLA: write_value = rs1_val_r <<< rs2_val_r[4:0];
-                                    SRA: write_value = rs1_val_r >>> rs2_val_r[4:0];
+                                    SRA: write_value = $signed(rs1_val_r) >>> rs2_val_r[4:0];
                                     default: begin
                                         is_halted <= 1'b1;
                                         write_valid = 1'b0;
