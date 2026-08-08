@@ -51,8 +51,7 @@ module ram_sv import ram_p::*, util_p::*; (
             ram_write.ready <= 1'b0;
             ram_write.code <= NONE;
 
-            // 内部変数
-            memory_data <= '{default: 8'h00};
+            // 内部変数(memory_dataは64KB全体の同期クリアがBRAM推論を妨げるため対象外，宣言時の初期値のみ持つ)
             ram_read_state <= IDLE;
             ram_write_state <= IDLE;
         end
