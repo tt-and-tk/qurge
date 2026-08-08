@@ -39,20 +39,15 @@ extern "C" {
 #include <pynq_api.h>
 }
 
-// SIGINTを受けたことを伝えるフラグ．立てる操作(onSigint)と読む操作(isSet)だけを公開し，
-// フラグ本体はクラス外から直接書き換えられないようにする．
-// onSigint内ではフラグを立てるだけにし，後始末(端末設定の復元・DMAクローズ)は
-// メインループ側の通常のコードパスで行う(tcsetattr・exit等はasync-signal-safeでは
-// ないため，ハンドラ内で直接呼ばない)
+// SIGINTを受けたことを伝えるフラグ
 class InterruptFlag {
 public:
     static bool isSet() { return flag_ != 0; }
     static void onSigint(int) { flag_ = 1; }
 
 private:
-    static volatile std::sig_atomic_t flag_;
+    inline static volatile std::sig_atomic_t flag_ = 0;
 };
-volatile std::sig_atomic_t InterruptFlag::flag_ = 0;
 
 int main(void) {
     char bit_path[] = "./bit/top_wrapper.bit";
@@ -122,12 +117,12 @@ int main(void) {
         char input_char;
         // rawモードのため1バイト入力されるとすぐに返る(シグナル受信時はEINTRで抜ける)
         ssize_t read_bytes = read(STDIN_FILENO, &input_char, 1);
-        // マルチバイト文字(UTF-8等)には対応しない
         if (read_bytes == 0) {
             // 標準入力がEOFに達した(リダイレクトしたファイル/パイプの終端等)．
             // read()は以後も0を返し続けるため，busyループにしないためループを抜ける
             break;
         }
+        // マルチバイト文字(UTF-8等)には対応しない
         if (read_bytes < 0) {
             continue;
         }
