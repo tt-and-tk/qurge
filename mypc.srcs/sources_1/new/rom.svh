@@ -9,6 +9,7 @@
 `include "machine.svh"
 
 package rom_p;
+    // ROM専用の幅を持たず，RAMのaddress_bus_tをそのまま再利用する(実際のROM命令数はrom_sv.svのROM_SIZEが別途上限を決めており，この型の広さだけで上限が決まるわけではない)
     typedef ram_p::address_bus_t pc_bus_t;  // プログラムカウンタ
 endpackage
 
