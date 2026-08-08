@@ -140,7 +140,6 @@ module alu_sv (
         && !ir_prefetched_valid;                        // 既に先読み済みの命令があれば行わない
 
     // 分岐命令の比較結果がtrueかどうか(定義されていない比較方法はfalseとして扱う)
-    // LT/GT/ELT/EGTはDIV(符号あり除算)・コンパイラのint型(符号あり)と揃えるため符号あり比較で行う
     logic is_branch_taken;
     assign is_branch_taken = (command.m_type == F_TYPE)
         && ((func_r == EQ  && rs1_val_r == rs2_val_r)
@@ -515,7 +514,7 @@ module alu_sv (
                                     SLL: write_value = rs1_val_r << imm_r[31:0];
                                     SRL: write_value = rs1_val_r >> imm_r[31:0];
                                     SLA: write_value = rs1_val_r <<< imm_r[31:0];
-                                    SRA: write_value = $signed(rs1_val_r) >>> imm_r[31:0];    // register_tは符号なし型のため$signed()で包まないと算術シフトにならない
+                                    SRA: write_value = $signed(rs1_val_r) >>> imm_r[31:0];
                                     default: begin
                                         is_halted <= 1'b1;
                                         write_valid = 1'b0;
@@ -526,7 +525,7 @@ module alu_sv (
                                     SLL: write_value = rs1_val_r << rs2_val_r;
                                     SRL: write_value = rs1_val_r >> rs2_val_r;
                                     SLA: write_value = rs1_val_r <<< rs2_val_r;
-                                    SRA: write_value = $signed(rs1_val_r) >>> rs2_val_r;    // register_tは符号なし型のため$signed()で包まないと算術シフトにならない
+                                    SRA: write_value = $signed(rs1_val_r) >>> rs2_val_r;
                                     default: begin
                                         is_halted <= 1'b1;
                                         write_valid = 1'b0;
