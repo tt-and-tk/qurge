@@ -19,3 +19,6 @@ mypc.srcs/utils_1/
 
 # 自動レビューループの出力ファイル
 review*.md
+
+# Pynesisソースからrom_sv.svを生成する際の中間生成物(アセンブリファイル)
+mypc.srcs/pn/*.pt
