@@ -208,8 +208,14 @@ package alu_p;
             N_TYPE: is_instruction_executable = util_p::TRUE;
             P_TYPE: begin
                 unique case (func)
-                    // 演算系: 読み出し元2つと書き込み先(イミディエイトデータ使用時は余りの書き込み先も)が有効か
-                    AND, OR, XOR, NOT, NAND, ADD, SUB, MUL, DIV:
+                    // 単項演算: 読み出し元1つと書き込み先が有効か
+                    NOT:
+                        is_instruction_executable = is_readable(rs1) && is_writable(rd);
+                    // 二項演算: 読み出し元2つと書き込み先が有効か
+                    AND, OR, XOR, NAND, ADD, SUB, MUL:
+                        is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd);
+                    // 割り算: 読み出し元2つと書き込み先(イミディエイトデータ使用時は余りの書き込み先も)が有効か
+                    DIV:
                         is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd)
                             && (!imm[32] || is_writable(imm[5:0]));
                     // それ以外は不正な命令として無効扱い
