@@ -128,10 +128,10 @@ package alu_p;
             is_writable = util_p::FALSE;
         // 引数が格納されているレジスタの一つ目の番地
         else if (addr == 6'h1d)
-            is_writable = util_p::FALSE;
+            is_writable = util_p::TRUE;
         // 演算結果
         else if (addr == 6'h1e)
-            is_writable = util_p::FALSE;
+            is_writable = util_p::TRUE;
         // プログラムカウンタ
         else if (addr == 6'h1f)
             is_writable = util_p::FALSE;
