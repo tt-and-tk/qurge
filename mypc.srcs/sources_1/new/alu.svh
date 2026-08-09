@@ -206,19 +206,47 @@ package alu_p;
         unique case (m_type)
             // 処理を実行しないだけなので常に有効
             N_TYPE: is_instruction_executable = util_p::TRUE;
-            // 演算系: 読み出し元2つと書き込み先(イミディエイトデータ使用時は余りの書き込み先も)が有効か
-            P_TYPE: is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd)
-                && (!imm[32] || is_writable(imm[5:0]));
-            // シフト系: イミディエイトデータ使用時は読み出し元1つ，未使用時は読み出し元2つと書き込み先が有効か
-            S_TYPE: is_instruction_executable = imm[32]
-                ? (is_readable(rs1) && is_writable(rd))
-                : (is_readable(rs1) && is_readable(rs2) && is_writable(rd));
-            // 代入系: イミディエイトデータ使用時は書き込み先のみ，未使用時は読み出し元と書き込み先が有効か
-            A_TYPE: is_instruction_executable = imm[32]
-                ? is_writable(rd)
-                : (is_readable(rs1) && is_writable(rd));
-            // 分岐系: 読み出し元2つが有効で，かつ分岐先はイミディエイトデータでの指定に限る
-            F_TYPE: is_instruction_executable = is_readable(rs1) && is_readable(rs2) && imm[32];
+            P_TYPE: begin
+                unique case (func)
+                    // 演算系: 読み出し元2つと書き込み先(イミディエイトデータ使用時は余りの書き込み先も)が有効か
+                    AND, OR, XOR, NOT, NAND, ADD, SUB, MUL, DIV:
+                        is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd)
+                            && (!imm[32] || is_writable(imm[5:0]));
+                    // それ以外は不正な命令として無効扱い
+                    default: is_instruction_executable = util_p::FALSE;
+                endcase
+            end
+            S_TYPE: begin
+                unique case (func)
+                    // シフト系: イミディエイトデータ使用時は読み出し元1つ，未使用時は読み出し元2つと書き込み先が有効か
+                    SLL, SRL, SLA, SRA:
+                        is_instruction_executable = imm[32]
+                            ? (is_readable(rs1) && is_writable(rd))
+                            : (is_readable(rs1) && is_readable(rs2) && is_writable(rd));
+                    // それ以外は不正な命令として無効扱い
+                    default: is_instruction_executable = util_p::FALSE;
+                endcase
+            end
+            A_TYPE: begin
+                unique case (func)
+                    // 代入系: イミディエイトデータ使用時は書き込み先のみ，未使用時は読み出し元と書き込み先が有効か
+                    MOV:
+                        is_instruction_executable = imm[32]
+                            ? is_writable(rd)
+                            : (is_readable(rs1) && is_writable(rd));
+                    // それ以外は不正な命令として無効扱い
+                    default: is_instruction_executable = util_p::FALSE;
+                endcase
+            end
+            F_TYPE: begin
+                unique case (func)
+                    // 分岐系: 読み出し元2つが有効で，かつ分岐先はイミディエイトデータでの指定に限る
+                    EQ, NE, LT, GT, ELT, EGT:
+                        is_instruction_executable = is_readable(rs1) && is_readable(rs2) && imm[32];
+                    // それ以外は不正な命令として無効扱い
+                    default: is_instruction_executable = util_p::FALSE;
+                endcase
+            end
             J_TYPE: begin
                 unique case (func)
                     // ジャンプ・関数呼び出し: ジャンプ先をイミディエイトデータで指定するか，読み出し元が有効か
