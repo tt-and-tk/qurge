@@ -204,8 +204,8 @@ package alu_p;
         machine_p::imm_t  imm
     );
         unique case (m_type)
-            // 処理を実行しないだけなので常に有効
-            N_TYPE: is_instruction_executable = util_p::TRUE;
+            // 処理を実行しないだけなので，funcがNOPであれば常に有効
+            N_TYPE: is_instruction_executable = (func == NOP);
             P_TYPE: begin
                 unique case (func)
                     // 単項演算: 読み出し元1つと書き込み先が有効か
