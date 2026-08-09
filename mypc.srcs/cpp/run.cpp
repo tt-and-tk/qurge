@@ -87,8 +87,9 @@ int main(void) {
     // 標準入力を1文字ずつ即座に読めるよう，rawモードに切り替える
     // ICANON: 行バッファリングを無効化し，1文字入力されるたびにread()から返るようにする
     // ECHO:   有効なままにする(OSのローカルエコーで入力文字を即座に画面へ表示する)．
-    //         CPU(PL)側がエコーの要否を自ら制御できるようになるまでの暫定対応であり，
-    //         対応後はここを無効化する(issue #65)
+    //         SCAN命令(PL側)は読み込んだ文字を自動で送り返さないため，二重表示にはならない
+    //         (specification/isa.mdで確認済み)．CPU(PL)側がエコーの要否を自ら制御できる
+    //         ようになるまでの暫定対応であり，対応後はここを無効化する(issue #65)
     termios original_termios, raw_termios;
     tcgetattr(STDIN_FILENO, &original_termios);
     raw_termios = original_termios;
