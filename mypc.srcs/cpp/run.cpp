@@ -86,11 +86,13 @@ int main(void) {
 
     // 標準入力を1文字ずつ即座に読めるよう，rawモードに切り替える
     // ICANON: 行バッファリングを無効化し，1文字入力されるたびにread()から返るようにする
-    // ECHO:   ローカルエコーを無効化する．画面に出るのはFPGAが送り返した文字のみになる
+    // ECHO:   有効なままにする(OSのローカルエコーで入力文字を即座に画面へ表示する)．
+    //         CPU(PL)側がエコーの要否を自ら制御できるようになるまでの暫定対応であり，
+    //         対応後はここを無効化する(issue #65)
     termios original_termios, raw_termios;
     tcgetattr(STDIN_FILENO, &original_termios);
     raw_termios = original_termios;
-    raw_termios.c_lflag &= ~(ICANON | ECHO);
+    raw_termios.c_lflag &= ~ICANON;
     raw_termios.c_cc[VMIN] = 1;
     raw_termios.c_cc[VTIME] = 0;
     tcsetattr(STDIN_FILENO, TCSANOW, &raw_termios);
