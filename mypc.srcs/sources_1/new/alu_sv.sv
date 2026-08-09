@@ -495,24 +495,19 @@ module alu_sv (
                             endcase
 
                             // DIV以外はここでPCインクリメント・次命令への遷移(不正なfuncでは
-                            // レジスタ書き込み・フォワーディングは行わない)
-                            if (func_r != DIV) begin
-                                if (write_valid) begin
-                                    register[rd_addr_r] <= write_value;
-                                end
+                            // レジスタ書き込み・PC更新・次命令への遷移のいずれも行わない)
+                            if (func_r != DIV && write_valid) begin
+                                register[rd_addr_r] <= write_value;
                                 register[PC_ADDR] <= next_pc;
-                                advance_to_next_instruction(write_valid, rd_addr_r, write_value, 1'b0, '0, '0);
+                                advance_to_next_instruction(1'b1, rd_addr_r, write_value, 1'b0, '0, '0);
                             end
                         end
 
                         // シフト系
                         S_TYPE: begin
-                            // シフト系はどの命令でも次に実行する命令の番地へ進む
-                            register[PC_ADDR] <= next_pc;
-
                             // イミディエイトデータを使用する？命令に応じてシフト結果を求める
                             // (書き込みとフォワーディングの両方でこの値を使う)．有効なfuncであることも
-                            // 合わせて記録する(不正なfuncでは書き込み・フォワーディングとも行わないため)．
+                            // 合わせて記録する(不正なfuncでは以降の処理を一切行わないため)．
                             write_valid = 1'b1;
                             if (imm_r[32]) begin
                                 // シフト量は下位5bit(0〜31)のみを使用する
@@ -539,31 +534,29 @@ module alu_sv (
                                     end
                                 endcase
                             end
+
+                            // 有効なfuncのときだけレジスタ書き込み・PC更新・次命令への遷移を行う
                             if (write_valid) begin
                                 register[rd_addr_r] <= write_value;
+                                register[PC_ADDR] <= next_pc;
+                                advance_to_next_instruction(1'b1, rd_addr_r, write_value, 1'b0, '0, '0);
                             end
-
-                            // 次の命令へ(不正な命令コードでは書き込みもフォワーディングも行わない)
-                            advance_to_next_instruction(write_valid, rd_addr_r, write_value, 1'b0, '0, '0);
                         end
 
                         // 代入系
                         A_TYPE: begin
-                            // 代入系はどの命令でも次に実行する命令の番地へ進む
-                            register[PC_ADDR] <= next_pc;
-
-                            // 命令がMOVの時だけ実行(書き込みとフォワーディングの両方でwrite_valueを使う)
+                            // 命令がMOVの時だけ，書き込み・PC更新・次命令への遷移を行う
+                            // (書き込みとフォワーディングの両方でwrite_valueを使う)
                             if (func_r == MOV) begin
                                 // イミディエイトデータを使用する？
                                 write_value = imm_r[32] ? imm_r[31:0] : rs1_val_r;
                                 register[rd_addr_r] <= write_value;
+                                register[PC_ADDR] <= next_pc;
+                                advance_to_next_instruction(1'b1, rd_addr_r, write_value, 1'b0, '0, '0);
                             end
                             else begin
                                 is_halted <= 1'b1;
                             end
-
-                            // 次の命令へ(MOV以外はレジスタへ書き込まないためフォワーディングする値はない)
-                            advance_to_next_instruction(func_r == MOV, rd_addr_r, write_value, 1'b0, '0, '0);
                         end
 
                         // 分岐系
@@ -572,15 +565,15 @@ module alu_sv (
                             unique case (func_r)
                                 EQ, NE, LT, GT, ELT, EGT: begin
                                     register[PC_ADDR] <= next_pc;
+
+                                    // 次の命令へ(比較するだけでレジスタへ書き込まないためフォワーディングする値はない)
+                                    advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                                 end
                                 // 定義されていない比較方法は実行できない
                                 default: begin
                                     is_halted <= 1'b1;
                                 end
                             endcase
-
-                            // 次の命令へ(比較するだけでレジスタへ書き込まないためフォワーディングする値はない)
-                            advance_to_next_instruction(1'b0, '0, '0, 1'b0, '0, '0);
                         end
 
                         // ジャンプ系
