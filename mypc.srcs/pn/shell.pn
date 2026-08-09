@@ -2,14 +2,45 @@
 char input[64];  // 1行分の入力バッファ
 char cmd[64];    // 入力の先頭トークン(コマンド名)
 
-// bufの先頭から空白またはヌル終端の直前までをtokenへコピーする
-void extract_command(char buf[], char token[]) {
+// bufの先頭から空白またはヌル終端の直前までをtokenへコピーし，コピーした長さを返す
+int extract_command(char buf[], char token[]) {
     int i = 0;
     while (buf[i] != ' ' && buf[i] != '\0') {
         token[i] = buf[i];
         i = i + 1;
     }
     token[i] = '\0';
+    return i;
+}
+
+// bufのcmd_len文字目以降(コマンド名の直後の空白を1つだけ読み飛ばした位置)からヌル終端までをoutへコピーする
+void extract_args(char buf[], int cmd_len, char out[]) {
+    int start;  // outへのコピー開始位置
+    int i = 0;
+    if (buf[cmd_len] == ' ') {
+        start = cmd_len + 1;
+    } else {
+        start = cmd_len;
+    }
+    while (buf[start + i] != '\0') {
+        out[i] = buf[start + i];
+        i = i + 1;
+    }
+    out[i] = '\0';
+}
+
+// echoコマンド: コマンド名以降の引数部分をそのまま出力する
+void handle_echo(int cmd_len) {
+    char args[64];  // コマンド名を除いた引数部分
+    extract_args(input, cmd_len, args);
+    print(args);
+    print("\n");
+}
+
+// helpコマンド: 利用可能なコマンドの一覧を表示する
+void handle_help(void) {
+    print("echo\n");
+    print("help\n");
 }
 
 // 未対応コマンドのエラーメッセージを表示する
@@ -17,15 +48,23 @@ void handle_unknown(void) {
     print("unknown command\n");
 }
 
-// コマンド名に応じた処理を呼び出す．現時点ではecho/help等の個別コマンドが1つも実装されていないため，暫定的に常に未対応として扱う
-void dispatch(char token[]) {
-    handle_unknown();
+// グローバル配列cmdの内容に応じた処理を呼び出す(streqは直接配列のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
+void dispatch(int cmd_len) {
+    if (streq(cmd, "echo")) {
+        handle_echo(cmd_len);
+    } else if (streq(cmd, "help")) {
+        handle_help();
+    } else {
+        handle_unknown();
+    }
 }
 
 void main(void) {
+    int cmd_len;  // コマンド名の文字数
     while (1) {
+        print("> ");  // 入力待ちであることを示すプロンプト
         scan(input);
-        extract_command(input, cmd);
-        dispatch(cmd);
+        cmd_len = extract_command(input, cmd);
+        dispatch(cmd_len);
     }
 }
