@@ -192,10 +192,12 @@ package alu_p;
     endfunction
 
     // 命令の種類・使用するfunc・読み書きに使うレジスタ番地から，その命令がそのまま実行可能か
-    // (読み書きに使うレジスタ番地が全て有効で，かつ命令の種類・funcが定義済みの組み合わせか)を判定する．
+    // (読み書きに使うレジスタ番地が全て有効で，かつ命令の種類・funcが定義済みの組み合わせで，
+    // かつ命令自体をROMの範囲内から取得できているか)を判定する．
     // 実行可否判定の唯一の実装．条件を変える場合はこの関数だけを直すこと(呼び出し元に条件を
     // 書き足すと二重管理になる)．
     function util_p::bool_t is_instruction_executable(
+        logic              pc_valid,  // 命令をROMの範囲内から取得できたか
         machine_p::type_t m_type,
         machine_p::func_t func,
         machine_p::addr_t rs1,
@@ -203,6 +205,10 @@ package alu_p;
         machine_p::addr_t rd,
         machine_p::imm_t  imm
     );
+        // 範囲外から取得した命令は，中身がnop()相当であっても実行不可扱いにする
+        if (!pc_valid) begin
+            is_instruction_executable = util_p::FALSE;
+        end else
         unique case (m_type)
             // 処理を実行しないだけなので，funcがNOPであれば常に有効
             N_TYPE: is_instruction_executable = (func == NOP);

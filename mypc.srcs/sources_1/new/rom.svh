@@ -16,15 +16,18 @@ endpackage
 interface rom_read_if;  // ROM読み込みインターフェース
     rom_p::pc_bus_t      pc;
     machine_p::machine_t machine;
+    logic                valid;  // pcがROMの命令数に収まっているか
 
     modport slave(
         input pc,
-        output machine
+        output machine,
+        output valid
     );
 
     modport master(
         output pc,
-        input machine
+        input machine,
+        input valid
     );
 endinterface
 
