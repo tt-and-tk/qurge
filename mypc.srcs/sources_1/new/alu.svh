@@ -197,7 +197,7 @@ package alu_p;
     // 実行可否判定の唯一の実装．条件を変える場合はこの関数だけを直すこと(呼び出し元に条件を
     // 書き足すと二重管理になる)．
     function util_p::bool_t is_instruction_executable(
-        logic              pc_valid,  // 命令をROMの範囲内から取得できたか
+        logic             pc_valid,  // 命令をROMの範囲内から取得できたか
         machine_p::type_t m_type,
         machine_p::func_t func,
         machine_p::addr_t rs1,
@@ -208,92 +208,93 @@ package alu_p;
         // 範囲外から取得した命令は，中身がnop()相当であっても実行不可扱いにする
         if (!pc_valid) begin
             is_instruction_executable = util_p::FALSE;
-        end else
-        unique case (m_type)
-            // 処理を実行しないだけなので，funcがNOPであれば常に有効
-            N_TYPE: is_instruction_executable = (func == NOP);
-            P_TYPE: begin
-                unique case (func)
-                    // 単項演算: 読み出し元1つと書き込み先が有効か
-                    NOT:
-                        is_instruction_executable = is_readable(rs1) && is_writable(rd);
-                    // 二項演算: 読み出し元2つと書き込み先が有効か
-                    AND, OR, XOR, NAND, ADD, SUB, MUL:
-                        is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd);
-                    // 割り算: 読み出し元2つと書き込み先(イミディエイトデータ使用時は余りの書き込み先も)が有効か
-                    DIV:
-                        is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd)
-                            && (!imm[32] || is_writable(imm[5:0]));
-                    // それ以外は不正な命令として無効扱い
-                    default: is_instruction_executable = util_p::FALSE;
-                endcase
-            end
-            S_TYPE: begin
-                unique case (func)
-                    // シフト系: イミディエイトデータ使用時は読み出し元1つ，未使用時は読み出し元2つと書き込み先が有効か
-                    SLL, SRL, SLA, SRA:
-                        is_instruction_executable = imm[32]
-                            ? (is_readable(rs1) && is_writable(rd))
-                            : (is_readable(rs1) && is_readable(rs2) && is_writable(rd));
-                    // それ以外は不正な命令として無効扱い
-                    default: is_instruction_executable = util_p::FALSE;
-                endcase
-            end
-            A_TYPE: begin
-                unique case (func)
-                    // 代入系: イミディエイトデータ使用時は書き込み先のみ，未使用時は読み出し元と書き込み先が有効か
-                    MOV:
-                        is_instruction_executable = imm[32]
-                            ? is_writable(rd)
-                            : (is_readable(rs1) && is_writable(rd));
-                    // それ以外は不正な命令として無効扱い
-                    default: is_instruction_executable = util_p::FALSE;
-                endcase
-            end
-            F_TYPE: begin
-                unique case (func)
-                    // 分岐系: 読み出し元2つが有効で，かつ分岐先はイミディエイトデータでの指定に限る
-                    EQ, NE, LT, GT, ELT, EGT:
-                        is_instruction_executable = is_readable(rs1) && is_readable(rs2) && imm[32];
-                    // それ以外は不正な命令として無効扱い
-                    default: is_instruction_executable = util_p::FALSE;
-                endcase
-            end
-            J_TYPE: begin
-                unique case (func)
-                    // ジャンプ・関数呼び出し: ジャンプ先をイミディエイトデータで指定するか，読み出し元が有効か
-                    JMP, CALL: is_instruction_executable = imm[32] || is_readable(rs1);
-                    // 関数リターンは引数を使わないので常に有効
-                    RET:       is_instruction_executable = util_p::TRUE;
-                    // それ以外は不正な命令として無効扱い
-                    default:   is_instruction_executable = util_p::FALSE;
-                endcase
-            end
-            M_TYPE: begin
-                unique case (func)
-                    // メモリ読み込み: 書き込み先が有効で，かつ読み込みアドレスをイミディエイトデータで
-                    // 指定するか読み出し元が有効か
-                    RM:      is_instruction_executable = is_writable(rd) && (imm[32] || is_readable(rs1));
-                    // メモリ書き込み: 書き込むデータの読み出し元が有効で，かつ書き込みアドレスを
-                    // イミディエイトデータで指定するか読み出し元が有効か
-                    WM:      is_instruction_executable = is_readable(rs2) && (imm[32] || is_readable(rs1));
-                    // それ以外は不正な命令として無効扱い
-                    default: is_instruction_executable = util_p::FALSE;
-                endcase
-            end
-            IO_TYPE: begin
-                unique case (func)
-                    // 標準入力: 書き込み先が有効か
-                    SCAN:    is_instruction_executable = is_writable(rd);
-                    // 標準出力: 出力するデータの読み出し元が有効か
-                    PRINT:   is_instruction_executable = is_readable(rs1);
-                    // それ以外は不正な命令として無効扱い
-                    default: is_instruction_executable = util_p::FALSE;
-                endcase
-            end
-            // 定義されていない命令タイプは無効扱い
-            default: is_instruction_executable = util_p::FALSE;
-        endcase
+        end else begin
+            unique case (m_type)
+                // 処理を実行しないだけなので，funcがNOPであれば常に有効
+                N_TYPE: is_instruction_executable = (func == NOP);
+                P_TYPE: begin
+                    unique case (func)
+                        // 単項演算: 読み出し元1つと書き込み先が有効か
+                        NOT:
+                            is_instruction_executable = is_readable(rs1) && is_writable(rd);
+                        // 二項演算: 読み出し元2つと書き込み先が有効か
+                        AND, OR, XOR, NAND, ADD, SUB, MUL:
+                            is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd);
+                        // 割り算: 読み出し元2つと書き込み先(イミディエイトデータ使用時は余りの書き込み先も)が有効か
+                        DIV:
+                            is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd)
+                                && (!imm[32] || is_writable(imm[5:0]));
+                        // それ以外は不正な命令として無効扱い
+                        default: is_instruction_executable = util_p::FALSE;
+                    endcase
+                end
+                S_TYPE: begin
+                    unique case (func)
+                        // シフト系: イミディエイトデータ使用時は読み出し元1つ，未使用時は読み出し元2つと書き込み先が有効か
+                        SLL, SRL, SLA, SRA:
+                            is_instruction_executable = imm[32]
+                                ? (is_readable(rs1) && is_writable(rd))
+                                : (is_readable(rs1) && is_readable(rs2) && is_writable(rd));
+                        // それ以外は不正な命令として無効扱い
+                        default: is_instruction_executable = util_p::FALSE;
+                    endcase
+                end
+                A_TYPE: begin
+                    unique case (func)
+                        // 代入系: イミディエイトデータ使用時は書き込み先のみ，未使用時は読み出し元と書き込み先が有効か
+                        MOV:
+                            is_instruction_executable = imm[32]
+                                ? is_writable(rd)
+                                : (is_readable(rs1) && is_writable(rd));
+                        // それ以外は不正な命令として無効扱い
+                        default: is_instruction_executable = util_p::FALSE;
+                    endcase
+                end
+                F_TYPE: begin
+                    unique case (func)
+                        // 分岐系: 読み出し元2つが有効で，かつ分岐先はイミディエイトデータでの指定に限る
+                        EQ, NE, LT, GT, ELT, EGT:
+                            is_instruction_executable = is_readable(rs1) && is_readable(rs2) && imm[32];
+                        // それ以外は不正な命令として無効扱い
+                        default: is_instruction_executable = util_p::FALSE;
+                    endcase
+                end
+                J_TYPE: begin
+                    unique case (func)
+                        // ジャンプ・関数呼び出し: ジャンプ先をイミディエイトデータで指定するか，読み出し元が有効か
+                        JMP, CALL: is_instruction_executable = imm[32] || is_readable(rs1);
+                        // 関数リターンは引数を使わないので常に有効
+                        RET:       is_instruction_executable = util_p::TRUE;
+                        // それ以外は不正な命令として無効扱い
+                        default:   is_instruction_executable = util_p::FALSE;
+                    endcase
+                end
+                M_TYPE: begin
+                    unique case (func)
+                        // メモリ読み込み: 書き込み先が有効で，かつ読み込みアドレスをイミディエイトデータで
+                        // 指定するか読み出し元が有効か
+                        RM:      is_instruction_executable = is_writable(rd) && (imm[32] || is_readable(rs1));
+                        // メモリ書き込み: 書き込むデータの読み出し元が有効で，かつ書き込みアドレスを
+                        // イミディエイトデータで指定するか読み出し元が有効か
+                        WM:      is_instruction_executable = is_readable(rs2) && (imm[32] || is_readable(rs1));
+                        // それ以外は不正な命令として無効扱い
+                        default: is_instruction_executable = util_p::FALSE;
+                    endcase
+                end
+                IO_TYPE: begin
+                    unique case (func)
+                        // 標準入力: 書き込み先が有効か
+                        SCAN:    is_instruction_executable = is_writable(rd);
+                        // 標準出力: 出力するデータの読み出し元が有効か
+                        PRINT:   is_instruction_executable = is_readable(rs1);
+                        // それ以外は不正な命令として無効扱い
+                        default: is_instruction_executable = util_p::FALSE;
+                    endcase
+                end
+                // 定義されていない命令タイプは無効扱い
+                default: is_instruction_executable = util_p::FALSE;
+            endcase
+        end
     endfunction
 endpackage
 
