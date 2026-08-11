@@ -16,10 +16,9 @@ package ram_p;
 
     // 定数
     localparam int RAM_SIZE = 4096;          // メモリの実容量(バイト)
-    localparam int ADDRESS_BUS_BITS = 16;    // アドレスバス幅(ビット数．RAM_SIZEとは独立)
 
     // 変数型
-    typedef logic [ADDRESS_BUS_BITS-1:0] address_bus_t;  // アドレスバス幅
+    typedef logic [$clog2(RAM_SIZE)-1:0] address_bus_t;  // アドレスバス幅
     typedef logic [31:0] data_bus_t;         // データバス幅
     typedef logic [ 7:0] memory_t [0:RAM_SIZE - 1];  // メモリのデータ全体
 endpackage
