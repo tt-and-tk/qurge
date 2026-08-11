@@ -198,7 +198,7 @@ module alu_sv (
     assign ir_next = ir_prefetched_valid ? ir_prefetched : rom_read.machine;
 
     // ir_nextをROMの範囲内から取得できたか(取得元がir_prefetchedか今サイクルのrom_read.machineかで参照先を切り替える)．
-    // 切り詰め前の番地がpc_bus_tの幅に収まっていない場合も，範囲外からの取得と同様に無効とする
+    // ROMの実容量の範囲内であることに加え，番地がpc_bus_tの幅に収まっていることも要求する
     logic ir_next_pc_valid;
     assign ir_next_pc_valid = ir_prefetched_valid ? ir_prefetched_pc_valid : (rom_read.valid && pc_fits_in_width);
 
@@ -273,7 +273,7 @@ module alu_sv (
         else begin
             // 今サイクルに先読みが完了する場合，レジスタを経由せず直接採用する．
             // このときROMへは次に実行する命令の番地を出しているため，読み出し結果がそのまま次の命令になる．
-            // 切り詰め前の番地がpc_bus_tの幅に収まっていない場合も無効とする
+            // ROMの範囲内から取得できているか(番地がpc_bus_tの幅に収まっているか)もあわせて有効性に含める
             ir <= rom_read.machine;
             ir_pc_valid <= rom_read.valid && pc_fits_in_width;
             cpu_phase <= CPU_CHECK;
@@ -304,7 +304,7 @@ module alu_sv (
             // 実行フェーズにあり，まだ次の命令を先読みしていない場合は，次に実行する命令を取得する
             rom_read.pc = next_pc;
             // 切り詰め前のnext_pcがpc_bus_tの幅に収まっているか(収まらない場合は上位ビットが黙って捨てられる)
-            pc_fits_in_width = util_p::fits_in_width(next_pc, $bits(rom_p::pc_bus_t));
+            pc_fits_in_width = util_p::is_within_bit_width(next_pc, $bits(rom_p::pc_bus_t));
         end
         else if (ir_prefetched_valid) begin
             // 既に先読み済みの命令がある場合は，取得した命令を使わないため番地を出さない
@@ -316,7 +316,7 @@ module alu_sv (
             // 実行フェーズにない場合は，これから実行する命令自身を取得する(プログラムの1命令目のフェッチ)
             rom_read.pc = register[PC_ADDR];
             // 切り詰め前のプログラムカウンタがpc_bus_tの幅に収まっているか
-            pc_fits_in_width = util_p::fits_in_width(register[PC_ADDR], $bits(rom_p::pc_bus_t));
+            pc_fits_in_width = util_p::is_within_bit_width(register[PC_ADDR], $bits(rom_p::pc_bus_t));
         end
 
         // 標準入出力
@@ -405,7 +405,7 @@ module alu_sv (
             unique case (cpu_phase)
                 // フェッチ(先読みの対象にならないプログラムの1命令目だけがここを通る)
                 CPU_FETCH: begin
-                    // 命令を取得してくる．切り詰め前の番地がpc_bus_tの幅に収まっていない場合も無効とする
+                    // 命令を取得してくる．ROMの範囲内から取得できているか(番地がpc_bus_tの幅に収まっているか)もあわせて有効性に含める
                     ir <= rom_read.machine;
                     ir_pc_valid <= rom_read.valid && pc_fits_in_width;
 
@@ -658,8 +658,8 @@ module alu_sv (
                                             // 切り詰め前の読み込みアドレス(イミディエイトデータ使用時はimm_r，
                                             // 未使用時はrs1_val_rが発生源)がaddress_bus_tの幅に収まっていない場合は
                                             // 不正な番地として停止する
-                                            if (!util_p::fits_in_width(
-                                                imm_r[32] ? imm_r[31:0] : rs1_val_r, $bits(ram_p::address_bus_t)
+                                            if (!util_p::is_within_bit_width(
+                                                (imm_r[32] ? imm_r[31:0] : rs1_val_r), $bits(ram_p::address_bus_t)
                                             )) begin
                                                 is_halted <= 1'b1;
                                             end
@@ -718,8 +718,8 @@ module alu_sv (
                                             // 切り詰め前の書き込みアドレス(イミディエイトデータ使用時はimm_r，
                                             // 未使用時はrs1_val_rが発生源)がaddress_bus_tの幅に収まっていない場合は
                                             // 不正な番地として停止する
-                                            if (!util_p::fits_in_width(
-                                                imm_r[32] ? imm_r[31:0] : rs1_val_r, $bits(ram_p::address_bus_t)
+                                            if (!util_p::is_within_bit_width(
+                                                (imm_r[32] ? imm_r[31:0] : rs1_val_r), $bits(ram_p::address_bus_t)
                                             )) begin
                                                 is_halted <= 1'b1;
                                             end
@@ -895,7 +895,7 @@ module alu_sv (
                     // ここでもir_prefetched_valid <= 1'b1を予約すると同一サイクル内で同じ信号への代入が
                     // 競合してしまうため．
                     if (can_prefetch && !advancing) begin
-                        // 切り詰め前の番地がpc_bus_tの幅に収まっていない場合も無効とする
+                        // ROMの範囲内から取得できているか(番地がpc_bus_tの幅に収まっているか)もあわせて有効性に含める
                         ir_prefetched <= rom_read.machine;
                         ir_prefetched_valid <= 1'b1;
                         ir_prefetched_pc_valid <= rom_read.valid && pc_fits_in_width;

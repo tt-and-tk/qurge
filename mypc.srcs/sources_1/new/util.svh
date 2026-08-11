@@ -18,12 +18,12 @@ package util_p;
         RESPONSE       // レスポンスを返す
     } state_enum;
 
-    // 32bit値を指定ビット幅へ切り詰めても情報が失われないか(指定ビット幅を超える上位ビットが全て0か)を判定する
-    function bool_t fits_in_width(
+    // 32bit値が指定ビット幅の範囲内に収まっているか(指定ビット幅を超える上位ビットが全て0か)を判定する
+    function bool_t is_within_bit_width(
         logic [31:0] value,  // 判定対象の値
-        int          width   // 切り詰め先のビット幅
+        int          width   // 収まっているべきビット幅
     );
-        fits_in_width = ((value >> width) == '0);
+        is_within_bit_width = ((value >> width) == '0);
     endfunction
 endpackage
 
