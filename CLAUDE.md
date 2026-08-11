@@ -45,7 +45,6 @@ mypc/                                  # リポジトリルート(Vivadoプロ�
     ├── constrs_1/new/top.xdc          # PYNQ-Z2ボードのピン制約  ← 編集可
     ├── cpp/                           # PS(ARM)側のC++プログラム ← 編集可(Vivado標準構成にはなく，独自に追加したディレクトリ)
     ├── pn/                            # ROM上で動くPynesisソース ← 編集可(Vivado標準構成にはなく，独自に追加したディレクトリ)
-    ├── sim_1/                         # テストベンチ(未作成)     ← 編集可
     ├── sources_1/
     │   ├── bd/                        # Vivadoブロックダイアグラム ← 編集禁止
     │   ├── imports/                   # Vivado自動生成ファイル    ← 編集禁止
