@@ -32,12 +32,18 @@
 
 #include <csignal>
 #include <iostream>
+#include <mutex>
 #include <thread>
 #include <termios.h>
 #include <unistd.h>
 extern "C" {
 #include <pynq_api.h>
 }
+
+// 標準出力への書き込みを送信側(ローカルエコー)・受信側の2スレッド間で排他するためのミューテックス．
+// 特にバックスペース表示("\b \b"の3文字)の途中に受信スレッドの出力が割り込むと，画面上の
+// カーソル位置とローカルエコー側が数えている表示済み文字数がずれてしまうため必要
+std::mutex cout_mutex;
 
 // SIGINTを受けたことを伝えるフラグ
 class InterruptFlag {
@@ -86,14 +92,14 @@ int main(void) {
 
     // 標準入力を1文字ずつ即座に読めるよう，rawモードに切り替える
     // ICANON: 行バッファリングを無効化し，1文字入力されるたびにread()から返るようにする
-    // ECHO:   有効なままにする(OSのローカルエコーで入力文字を即座に画面へ表示する)．
-    //         SCAN命令(PL側)は読み込んだ文字を自動で送り返さないため，二重表示にはならない
-    //         (specification/isa.mdで確認済み)．CPU(PL)側がエコーの要否を自ら制御できる
-    //         ようになるまでの暫定対応であり，対応後はここを無効化する(issue #65)
+    // ECHO:   無効化する．OSのローカルエコーはバックスペース(DEL, 0x7F)を送っても`^?`と
+    //         表示するだけで直前の文字を消す動作をしないため，このプログラム自身が
+    //         下記メインループでローカルエコーを行う(CPU(PL)側がエコーの要否を自ら制御できる
+    //         ようになるまでの暫定対応であり，対応後はここを削除する(issue #65))
     termios original_termios, raw_termios;
     tcgetattr(STDIN_FILENO, &original_termios);
     raw_termios = original_termios;
-    raw_termios.c_lflag &= ~ICANON;
+    raw_termios.c_lflag &= ~(ICANON | ECHO);
     raw_termios.c_cc[VMIN] = 1;
     raw_termios.c_cc[VTIME] = 0;
     tcsetattr(STDIN_FILENO, TCSANOW, &raw_termios);
@@ -104,6 +110,7 @@ int main(void) {
         while (!InterruptFlag::isSet()) {
             PYNQ_readDMA(&read_dma, &read_memory, 0, sizeof(int));
             PYNQ_waitForDMAComplete(&read_dma, AXI_DMA_READ);
+            std::lock_guard<std::mutex> lock(cout_mutex);  // ローカルエコーとの出力順序が入れ替わらないようにする
             std::cout << (char)*read_data << std::flush;
         }
     });
@@ -115,7 +122,11 @@ int main(void) {
     //  アクセスするとuse-after-free相当の未定義動作になるため)
     receiver.detach();
 
-    // メインスレッド: 標準入力から1文字読むたびに，都度FPGAへ送信する
+    // ECHOを無効化した代わりにこのプログラム自身が行うローカルエコーで，直近の改行'\n'以降に
+    // 画面へ表示した文字数(バックスペースで消してよい範囲の境界)を数えるカウンタ
+    int echoed_count = 0;
+
+    // メインスレッド: 標準入力から1文字読むたびに，ローカルエコーしてから都度FPGAへ送信する
     while (!InterruptFlag::isSet()) {
         char input_char;
         // rawモードのため1バイト入力されるとすぐに返る(シグナル受信時はEINTRで抜ける)
@@ -130,7 +141,29 @@ int main(void) {
             continue;
         }
 
-        // 読んだ文字コードをDDRメモリ(write_data)に書き込む
+        // ローカルエコー．DMA送信より前に行うことで，DMA転送完了待ちの遅延が
+        // キー入力から画面表示までのラグとして体感されないようにする
+        {
+            std::lock_guard<std::mutex> lock(cout_mutex);  // 受信スレッドの出力との割り込みを防ぐ
+            if (input_char == 127) {
+                // バックスペース(DEL)．直前の行頭以降に表示した文字がある場合のみ，
+                // カーソルを戻して空白で上書きし，再度カーソルを戻すことで実際に1文字消す
+                if (echoed_count > 0) {
+                    std::cout << "\b \b" << std::flush;
+                    echoed_count = echoed_count - 1;
+                }
+            } else {
+                std::cout << input_char << std::flush;
+                if (input_char == '\n') {
+                    echoed_count = 0;  // 行が確定したので次の行の表示済み文字数を数え直す
+                } else {
+                    echoed_count = echoed_count + 1;
+                }
+            }
+        }
+
+        // 読んだ文字コードをDDRメモリ(write_data)に書き込む．FPGA側での削除処理の要否に関わらず，
+        // DEL(0x7F)を含め読んだバイトをそのまま送る(バッファ上の削除はCPU/シェル側の責務とする)
         // FPGAのstdin_tdataは32bitなので，char→intでゼロ拡張して格納する
         // (charの符号性は環境依存のため，unsigned charを経由してゼロ拡張を確実にする)
         *write_data = (int)(unsigned char)input_char;
