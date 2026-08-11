@@ -27,20 +27,24 @@
 `include "machine.svh"
 `include "register.svh"
 
-// 命令パイプライン処理の概要(FETCH/CHECK/EXECUTEの3フェーズを基本とし，以下の3段階でフェーズを
-// 省略する)．
+// 命令パイプライン処理の概要(FETCH/FETCH_CAPTURE/CHECK/EXECUTEの4フェーズを基本とし，以下の3段階で
+// フェーズを省略する)．ROM(rom_sv.sv)はクロックに同期した読み出しのため，rom_read.pcを出した
+// サイクルの次のサイクルにならないとrom_read.machine/rom_read.validが確定しない．FETCHで番地を
+// 出し，FETCH_CAPTUREで確定した結果を取り込む．
 //
 // 1. 次に実行する命令の番地の早期確定: 実行中の命令がこのサイクルにプログラムカウンタへ書き込む
 //    値を，実行と同じサイクルで算出する．比較の成立・不成立や，ジャンプ先・関数の戻り先も
 //    この時点で確定するため，どの命令の実行中であっても次に実行すべき命令の番地が分かる．
 // 2. 命令フェッチの先読み: 1で求めた番地を使って，実行中に次の命令をあらかじめROMから取得して
-//    おく．次の命令へ進む際に取得済みの内容があれば，FETCHフェーズを省略しCHECKから開始する．
-// 3. 次の命令の解析の先読みとフォワーディング: 先読みしておいた命令(まだ先読みが済んでいない
-//    場合は，このサイクルにROMから取得中の命令)の内容を，実行中の命令とは別の回路であらかじめ
-//    解析しておく．解析の結果，読み出し・書き込みに使うレジスタ番地がすべて有効だと分かれば，
-//    今完了する命令がこのサイクルにレジスタへ書き込む値を，レジスタの読み出し結果の代わりに
-//    そのまま使う(フォワーディング)．これにより次の命令はCHECKフェーズも省略して直接EXECUTEから
-//    開始できる．
+//    おく．ROMの読み出し結果はクロックに同期して確定するため，番地を出してから1サイクル安定して
+//    待たないと取り込めず，先読みが間に合うのは実行が2サイクル以上かかる命令(DIV・RM/WM・
+//    SCAN/PRINTの応答待ちなど)に限られる．次の命令へ進む際に取得済みの内容があれば，
+//    FETCH/FETCH_CAPTUREフェーズを省略しCHECKから開始する．
+// 3. 次の命令の解析の先読みとフォワーディング: 先読みが完了した命令の内容を，実行中の命令とは
+//    別の回路であらかじめ解析しておく．解析の結果，読み出し・書き込みに使うレジスタ番地がすべて
+//    有効だと分かれば，今完了する命令がこのサイクルにレジスタへ書き込む値を，レジスタの読み出し
+//    結果の代わりにそのまま使う(フォワーディング)．これにより次の命令はCHECKフェーズも省略して
+//    直接EXECUTEから開始できる．
 //
 // ここで言うフォワーディングとは，ある命令が書き込む値を，レジスタを読み直さずに次の命令へ直接
 // 渡すことを指す．ある命令が結果を書き込んだレジスタを次の命令が計算の元として読む場合(足し算の
@@ -50,10 +54,9 @@
 // 次の命令へ渡すことで，この待ちを挟まずに次の命令を実行できるようにする．
 //
 // 次に実行する命令の番地は常に確定しているため，取得した命令が無駄になって破棄が必要になることは
-// ない．この結果，本来FETCH→CHECK→EXECUTEの3サイクルを要する命令でも，前の命令の完了直後の
-// サイクルから次の命令のEXECUTEを直接開始できる(実質1サイクルで実行完了)．FETCHフェーズを経由
-// するのはリセット直後の1命令目のみで，CHECKフェーズを経由するのはその1命令目と，解析の結果
-// そのままでは実行できないと分かった命令(CHECKで停止させる)のみ．
+// ない．この結果，実行が2サイクル以上かかる命令は，その完了直後のサイクルから次の命令のEXECUTEを
+// 直接開始できる．一方，1サイクルで完了する命令(P/S/A/F/J/N_TYPE)は先読みが間に合わないため，
+// 毎回FETCH→FETCH_CAPTURE→CHECK→EXECUTEの4サイクルを要する．
 module alu_sv (
     input logic clk,
     input logic resetn,
@@ -192,29 +195,27 @@ module alu_sv (
     // 残ったまま書き込み・フォワーディングされてしまうのを防ぐ(ブロッキング代入で使用)．
     logic write_valid;
 
-    // 次の命令として実際に採用する機械語．ir_prefetchedが先読み済みならそれを，
-    // まだ先読みできていなければROMから今サイクルに取得中の機械語をそのまま採用する．
-    machine_p::machine_t ir_next;
-    assign ir_next = ir_prefetched_valid ? ir_prefetched : rom_read.machine;
-
-    // ir_nextをROMから正しく取得できたか(取得元がir_prefetchedか今サイクルのrom_read.machineかで参照先を切り替える)．
-    // 番地がROMの実容量の範囲内(rom_read.valid)であり，かつpc_bus_tの幅に収まっている(pc_fits_in_width)場合にのみ有効とする
-    logic ir_next_pc_valid;
-    assign ir_next_pc_valid = ir_prefetched_valid ? ir_prefetched_pc_valid : (rom_read.valid && pc_fits_in_width);
-
-    // 次段命令(ir_next)専用のデコーダー．現在実行中の命令のデコード(command)とは独立に，
+    // 次段命令(ir_prefetched)専用のデコーダー．現在実行中の命令のデコード(command)とは独立に，
     // 次段のレジスタ読み出し・書き込み可否をEXECUTE中に前もって確認するために用いる．
+    // ROMが同期読み出しのため，今サイクルのrom_read.machineは1つ前に出した番地に対する値であり
+    // 信用できない．先読み済み(ir_prefetched_valid)の場合のみ有効なデコード結果として扱う
     command_if command_next();
-    assign command_next.machine = ir_next;
+    assign command_next.machine = ir_prefetched;
     decorder_sv decorder_sv_next(
         .resetn(resetn),
         .command(command_next)
     );
 
+    // can_prefetchが1サイクル前も立っていたか．ROMの同期読み出しは番地を出した次のサイクルに
+    // ならないと結果が確定しないため，1サイクル安定して待ってから取り込んでよいかの判定に使う
+    logic can_prefetch_d1 = 1'b0;
+
     // 命令完了時，次の命令へ遷移する処理をまとめたタスク．
-    // 次の命令には，先読み済みの機械語か今サイクルにROMから取得中の機械語を使う．
-    // 実行可能だと分かればFETCHとCHECKをどちらも省略してEXECUTEへ直接進み，実行できないと
-    // 分かった場合はCHECKへ進む(CHECKで停止させる)．
+    // 次の命令には，先読み済みの機械語(ir_prefetched)のみを使う(ROMが同期読み出しのため，
+    // 先読みが間に合っていない場合は今サイクルのrom_read.machineを信用できない)．
+    // 先読みが完了しかつ実行可能だと分かればCHECKを省略してEXECUTEへ直接進み，先読み済みだが
+    // 実行できないと分かった場合はCHECKへ進む(CHECKで停止させる)．先読みが間に合っていない
+    // 場合はFETCHへ戻ってROMから改めて取得し直す．
     // CPU_EXECUTEフェーズで命令完了時に次命令へ遷移する箇所は，cpu_phase <= CPU_FETCH;を
     // 直接書かず必ずこのタスクを呼ぶこと(先読み機構(ir_prefetched/can_prefetch)と連動しており，
     // 直接代入すると先読み結果が反映されない)．
@@ -234,9 +235,11 @@ module alu_sv (
     );
         advancing = 1'b1;
 
-        // 次の命令を解析し，実行可能かどうかを判定する
-        if (is_instruction_executable(
-            ir_next_pc_valid, command_next.m_type, command_next.func,
+        // 先読み済みの次の命令が実行可能かどうかを判定する．先読みが間に合っていない場合，
+        // 今サイクルのrom_read.machineは1つ前に出した番地に対する値で信用できないため，
+        // ir_prefetched_valid自体を判定の条件に含める
+        if (ir_prefetched_valid && is_instruction_executable(
+            ir_prefetched_pc_valid, command_next.m_type, command_next.func,
             command_next.rs1, command_next.rs2, command_next.rd, command_next.imm
         )) begin
             // 次段命令の読み出し・書き込み可否は確認済みのため，CHECKを省略して直接EXECUTEへ進む．
@@ -259,24 +262,20 @@ module alu_sv (
             func_r    <= command_next.func;
             imm_r     <= command_next.imm;
             mask_r    <= command_next.mask;
-            ir        <= ir_next;
-            ir_pc_valid <= ir_next_pc_valid;
+            ir        <= ir_prefetched;
+            ir_pc_valid <= ir_prefetched_pc_valid;
             cpu_phase <= CPU_EXECUTE;
         end
-        // 実行できない命令は以下のいずれかの経路でCHECKへ進み，そこで停止させる
+        // 先読み済みだが実行できないと分かった命令は，CHECKへ進みそこで停止させる
         else if (ir_prefetched_valid) begin
-            // 前サイクル以前に先読みが完了している場合，それを採用する
             ir <= ir_prefetched;
             ir_pc_valid <= ir_prefetched_pc_valid;
             cpu_phase <= CPU_CHECK;
         end
+        // 先読みが間に合っていない．register[PC_ADDR]は呼び出し元で既に次の番地へ更新済み
+        // なので，FETCHへ戻って改めてROMから取得し直す
         else begin
-            // 今サイクルに先読みが完了する場合，レジスタを経由せず直接採用する．
-            // このときROMへは次に実行する命令の番地を出しているため，読み出し結果がそのまま次の命令になる．
-            // 番地がROMの実容量の範囲内(rom_read.valid)であり，かつpc_bus_tの幅に収まっている(pc_fits_in_width)場合にのみ有効とする
-            ir <= rom_read.machine;
-            ir_pc_valid <= rom_read.valid && pc_fits_in_width;
-            cpu_phase <= CPU_CHECK;
+            cpu_phase <= CPU_FETCH;
         end
 
         // 先読み済みだった命令は消費し終えたので無効化する(今サイクルに新たに先読みが成立すれば，末尾のブロックで改めて1にする)
@@ -300,23 +299,25 @@ module alu_sv (
         number  = register[6'h31][7:0];
 
         // ROMへ番地を出力する
-        if (can_prefetch) begin
+        if (cpu_phase == CPU_FETCH || cpu_phase == CPU_FETCH_CAPTURE) begin
+            // フェッチ中(1サイクル目・同期読み出しの結果を待つ間とも)は，これから実行する
+            // 命令の番地を出し続ける(プログラムの1命令目のフェッチ，または先読みが間に合わ
+            // なかった命令の取得し直し)
+            rom_read.pc = register[PC_ADDR];
+            // 切り詰め前のプログラムカウンタがpc_bus_tの幅に収まっているか
+            pc_fits_in_width = util_p::is_within_bit_width(register[PC_ADDR], $bits(rom_p::pc_bus_t));
+        end
+        else if (can_prefetch) begin
             // 実行フェーズにあり，まだ次の命令を先読みしていない場合は，次に実行する命令を取得する
             rom_read.pc = next_pc;
             // 切り詰め前のnext_pcがpc_bus_tの幅に収まっているか(収まらない場合は上位ビットが黙って捨てられる)
             pc_fits_in_width = util_p::is_within_bit_width(next_pc, $bits(rom_p::pc_bus_t));
         end
-        else if (ir_prefetched_valid) begin
-            // 既に先読み済みの命令がある場合は，取得した命令を使わないため番地を出さない
+        else begin
+            // 先読み済み，またはCHECKフェーズなど，ROMへ新たな要求を出す必要がない場合
             rom_read.pc = '0;
             // 番地を出していないため，この値は使われない
             pc_fits_in_width = util_p::TRUE;
-        end
-        else begin
-            // 実行フェーズにない場合は，これから実行する命令自身を取得する(プログラムの1命令目のフェッチ)
-            rom_read.pc = register[PC_ADDR];
-            // 切り詰め前のプログラムカウンタがpc_bus_tの幅に収まっているか
-            pc_fits_in_width = util_p::is_within_bit_width(register[PC_ADDR], $bits(rom_p::pc_bus_t));
         end
 
         // 標準入出力
@@ -335,6 +336,7 @@ module alu_sv (
             ir_prefetched_valid <= 1'b0;
             ir_pc_valid <= 1'b1;
             ir_prefetched_pc_valid <= 1'b1;
+            can_prefetch_d1 <= 1'b0;
             rs1_val_r <= '0;
             rs2_val_r <= '0;
             rd_addr_r <= '0;
@@ -401,11 +403,23 @@ module alu_sv (
             register[6'h34][1] <= stdout_tvalid;
             register[6'h34][0] <= stdout_tready;
 
+            // can_prefetchの1サイクル遅延版を更新する(ROMの同期読み出しは番地を出した次の
+            // サイクルにならないと結果が確定しないため，先読みの取り込み可否判定に使う)
+            can_prefetch_d1 <= can_prefetch;
+
             // CPUの実行サイクルごとに処理記載
             unique case (cpu_phase)
-                // フェッチ(先読みの対象にならないプログラムの1命令目だけがここを通る)
+                // フェッチ1サイクル目(プログラムの1命令目，および先読みが間に合わなかった
+                // 命令の取得し直しがここを通る)．ROMへ番地を出す(comb blockで実施済み)だけで，
+                // 同期読み出しの結果はまだ確定していないため次のサイクルまで待つ
                 CPU_FETCH: begin
-                    // 命令を取得してくる．番地がROMの実容量の範囲内(rom_read.valid)であり，
+                    cpu_phase <= CPU_FETCH_CAPTURE;
+                end
+
+                // フェッチ2サイクル目．前サイクルに出した番地に対応するrom_read.machineが
+                // 確定しているので取り込む
+                CPU_FETCH_CAPTURE: begin
+                    // 番地がROMの実容量の範囲内(rom_read.valid)であり，
                     // かつpc_bus_tの幅に収まっている(pc_fits_in_width)場合にのみ有効とする
                     ir <= rom_read.machine;
                     ir_pc_valid <= rom_read.valid && pc_fits_in_width;
@@ -414,11 +428,10 @@ module alu_sv (
                     cpu_phase <= CPU_CHECK;
                 end
 
-                // 実行前確認(プログラムの1命令目と，先読みの時点で実行できないと分かった命令だけがここを通る)
+                // 実行前確認(プログラムの1命令目，先読みが間に合わずFETCHから取得し直した
+                // 命令，先読みの時点で実行できないと分かった命令がここを通る)
                 CPU_CHECK: begin
-                    // 実行可能な命令であれば実行フェーズへ進む．
-                    // 先読みを経てここへ来た命令は実行できないと判定済みであるため，
-                    // こちらへ入るのはプログラムの1命令目だけになる
+                    // 実行可能な命令であれば実行フェーズへ進む
                     if (is_instruction_executable(
                         ir_pc_valid, command.m_type, command.func,
                         command.rs1, command.rs2, command.rd, command.imm
@@ -895,7 +908,13 @@ module alu_sv (
                     // いる(advancing==1)場合，そちらの中で既にir_prefetched_valid <= 1'b0が予約されており，
                     // ここでもir_prefetched_valid <= 1'b1を予約すると同一サイクル内で同じ信号への代入が
                     // 競合してしまうため．
-                    if (can_prefetch && !advancing) begin
+                    // can_prefetch_d1も合わせて要求するのは，ROMの同期読み出しが番地を出した
+                    // 次のサイクルにならないと確定しないため(can_prefetch単独では1サイクル
+                    // 早すぎる値を掴んでしまう)．can_prefetchも同時に要求するのは，捕捉が
+                    // 完了しir_prefetched_valid <= 1'b1が反映された直後の1サイクルは
+                    // can_prefetch_d1がまだ1のまま残っており，その間に古い要求(番地'0)への
+                    // 応答で誤って再取り込みしてしまうのを防ぐため
+                    if (can_prefetch && can_prefetch_d1 && !advancing) begin
                         // 番地がROMの実容量の範囲内(rom_read.valid)であり，
                         // かつpc_bus_tの幅に収まっている(pc_fits_in_width)場合にのみ有効とする
                         ir_prefetched <= rom_read.machine;
