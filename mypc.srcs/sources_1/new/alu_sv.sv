@@ -197,8 +197,8 @@ module alu_sv (
     machine_p::machine_t ir_next;
     assign ir_next = ir_prefetched_valid ? ir_prefetched : rom_read.machine;
 
-    // ir_nextをROMの範囲内から取得できたか(取得元がir_prefetchedか今サイクルのrom_read.machineかで参照先を切り替える)．
-    // ROMの実容量の範囲内であることに加え，番地がpc_bus_tの幅に収まっていることも要求する
+    // ir_nextをROMから正しく取得できたか(取得元がir_prefetchedか今サイクルのrom_read.machineかで参照先を切り替える)．
+    // 番地がROMの実容量の範囲内(rom_read.valid)であり，かつpc_bus_tの幅に収まっている(pc_fits_in_width)場合にのみ有効とする
     logic ir_next_pc_valid;
     assign ir_next_pc_valid = ir_prefetched_valid ? ir_prefetched_pc_valid : (rom_read.valid && pc_fits_in_width);
 
@@ -273,7 +273,7 @@ module alu_sv (
         else begin
             // 今サイクルに先読みが完了する場合，レジスタを経由せず直接採用する．
             // このときROMへは次に実行する命令の番地を出しているため，読み出し結果がそのまま次の命令になる．
-            // ROMの範囲内から取得できているか(番地がpc_bus_tの幅に収まっているか)もあわせて有効性に含める
+            // 番地がROMの実容量の範囲内(rom_read.valid)であり，かつpc_bus_tの幅に収まっている(pc_fits_in_width)場合にのみ有効とする
             ir <= rom_read.machine;
             ir_pc_valid <= rom_read.valid && pc_fits_in_width;
             cpu_phase <= CPU_CHECK;
@@ -405,7 +405,8 @@ module alu_sv (
             unique case (cpu_phase)
                 // フェッチ(先読みの対象にならないプログラムの1命令目だけがここを通る)
                 CPU_FETCH: begin
-                    // 命令を取得してくる．ROMの範囲内から取得できているか(番地がpc_bus_tの幅に収まっているか)もあわせて有効性に含める
+                    // 命令を取得してくる．番地がROMの実容量の範囲内(rom_read.valid)であり，
+                    // かつpc_bus_tの幅に収まっている(pc_fits_in_width)場合にのみ有効とする
                     ir <= rom_read.machine;
                     ir_pc_valid <= rom_read.valid && pc_fits_in_width;
 
@@ -895,7 +896,8 @@ module alu_sv (
                     // ここでもir_prefetched_valid <= 1'b1を予約すると同一サイクル内で同じ信号への代入が
                     // 競合してしまうため．
                     if (can_prefetch && !advancing) begin
-                        // ROMの範囲内から取得できているか(番地がpc_bus_tの幅に収まっているか)もあわせて有効性に含める
+                        // 番地がROMの実容量の範囲内(rom_read.valid)であり，
+                        // かつpc_bus_tの幅に収まっている(pc_fits_in_width)場合にのみ有効とする
                         ir_prefetched <= rom_read.machine;
                         ir_prefetched_valid <= 1'b1;
                         ir_prefetched_pc_valid <= rom_read.valid && pc_fits_in_width;
