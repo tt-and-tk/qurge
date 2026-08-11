@@ -109,6 +109,7 @@ module mother_board_sv(
 
     // プログラムメモリ
     rom_sv rom_sv_0 (
+        .clk(clk),
         // プログラムデータ読み込み
         .rom_read(rom_read)
     );

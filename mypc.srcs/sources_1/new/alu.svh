@@ -23,9 +23,10 @@ package alu_p;
         IO_TYPE   // 標準入出力系
     } type_enum;
     typedef enum logic[1:0] {    // CPUの実行フェーズ(フェッチや実行などを別のクロックに分ける)
-        CPU_FETCH,    // 命令フェッチ
-        CPU_CHECK,    // 命令を実行可能かどうかチェックする
-        CPU_EXECUTE   // 命令実行
+        CPU_FETCH,       // 命令フェッチ(ROMへ番地を出す)
+        CPU_FETCH_WAIT,  // ROMの同期読み出し結果が確定するのを待って取り込む
+        CPU_CHECK,       // 命令を実行可能かどうかチェックする
+        CPU_EXECUTE      // 命令実行
     } cpu_phase_enum;
 
     // 変数型
