@@ -69,22 +69,22 @@ package alu_p;
         // RGB LED
         else if (addr == 6'h23)
             is_readable = util_p::FALSE;
-        // Pmod A(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // Pmod A
         else if (addr == 6'h24)
             is_readable = util_p::TRUE;
-        // Pmod B(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // Pmod B
         else if (addr == 6'h25)
             is_readable = util_p::TRUE;
-        // AR(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // AR
         else if (addr == 6'h26 || addr == 6'h28)
             is_readable = util_p::TRUE;
-        // I2C(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // I2C
         else if (addr == 6'h27)
             is_readable = util_p::TRUE;
-        // AR_RST(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // AR_RST
         else if (addr == 6'h29)
             is_readable = util_p::TRUE;
-        // SPI(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // SPI
         else if (addr == 6'h2a)
             is_readable = util_p::TRUE;
         // アナログピン
@@ -93,7 +93,7 @@ package alu_p;
         // XADC
         else if (addr == 6'h2c)
             is_readable = util_p::FALSE;    // オミット
-        // GPIO(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // GPIO
         else if (6'h2d <= addr && addr <= 6'h30)
             is_readable = util_p::TRUE;
         // 標準入力(データ)
@@ -148,22 +148,22 @@ package alu_p;
         // RGB LED
         else if (addr == 6'h23)
             is_writable = util_p::TRUE;
-        // Pmod A(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // Pmod A
         else if (addr == 6'h24)
             is_writable = util_p::TRUE;
-        // Pmod B(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // Pmod B
         else if (addr == 6'h25)
             is_writable = util_p::TRUE;
-        // AR(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // AR
         else if (addr == 6'h26 || addr == 6'h28)
             is_writable = util_p::TRUE;
-        // I2C(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // I2C
         else if (addr == 6'h27)
             is_writable = util_p::TRUE;
-        // AR_RST(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // AR_RST
         else if (addr == 6'h29)
             is_writable = util_p::FALSE;
-        // SPI(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // SPI
         else if (addr == 6'h2a)
             is_writable = util_p::TRUE;
         // アナログピン
@@ -172,7 +172,7 @@ package alu_p;
         // XADC
         else if (addr == 6'h2c)
             is_writable = util_p::FALSE;    // オミット
-        // GPIO(物理ピンとは未結線．alu_sv.svのポートリストに対応する信号が存在しない)
+        // GPIO
         else if (6'h2d <= addr && addr <= 6'h30)
             is_writable = util_p::TRUE;
         // 標準入力(データ)
