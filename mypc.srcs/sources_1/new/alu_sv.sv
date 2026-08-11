@@ -670,10 +670,10 @@ module alu_sv (
                                         // 待機
                                         IDLE: begin
                                             // 切り詰め前の読み込みアドレス(イミディエイトデータ使用時はimm_r，
-                                            // 未使用時はrs1_val_rが発生源)がaddress_bus_tの幅に収まっていない場合は
+                                            // 未使用時はrs1_val_rが発生源)がRAM実容量に収まっていない場合は
                                             // 不正な番地として停止する
                                             if (!util_p::is_within_bit_width(
-                                                (imm_r[32] ? imm_r[31:0] : rs1_val_r), $bits(ram_p::address_bus_t)
+                                                (imm_r[32] ? imm_r[31:0] : rs1_val_r), $clog2(ram_p::RAM_SIZE)
                                             )) begin
                                                 is_halted <= 1'b1;
                                             end
@@ -730,10 +730,10 @@ module alu_sv (
                                         // 待機
                                         IDLE: begin
                                             // 切り詰め前の書き込みアドレス(イミディエイトデータ使用時はimm_r，
-                                            // 未使用時はrs1_val_rが発生源)がaddress_bus_tの幅に収まっていない場合は
+                                            // 未使用時はrs1_val_rが発生源)がRAM実容量に収まっていない場合は
                                             // 不正な番地として停止する
                                             if (!util_p::is_within_bit_width(
-                                                (imm_r[32] ? imm_r[31:0] : rs1_val_r), $bits(ram_p::address_bus_t)
+                                                (imm_r[32] ? imm_r[31:0] : rs1_val_r), $clog2(ram_p::RAM_SIZE)
                                             )) begin
                                                 is_halted <= 1'b1;
                                             end
