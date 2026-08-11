@@ -27,19 +27,19 @@
 `include "machine.svh"
 `include "register.svh"
 
-// 命令パイプライン処理の概要(FETCH/FETCH_WAIT/CHECK/EXECUTEの4フェーズを基本とし，以下の3段階で
-// フェーズを省略する)．ROM(rom_sv.sv)はBRAM推論のためクロック同期読み出しになっており，
-// rom_read.pcを出したサイクルの次のサイクルにならないとrom_read.machine/rom_read.validが確定
-// しない．そのためFETCHは「番地を出す(FETCH)」「結果を取り込む(FETCH_WAIT)」の2サイクルに分かれる．
+// 命令パイプライン処理の概要(FETCH/FETCH_CAPTURE/CHECK/EXECUTEの4フェーズを基本とし，以下の3段階で
+// フェーズを省略する)．ROM(rom_sv.sv)はクロックに同期した読み出しのため，rom_read.pcを出した
+// サイクルの次のサイクルにならないとrom_read.machine/rom_read.validが確定しない．FETCHで番地を
+// 出し，FETCH_CAPTUREで確定した結果を取り込む．
 //
 // 1. 次に実行する命令の番地の早期確定: 実行中の命令がこのサイクルにプログラムカウンタへ書き込む
 //    値を，実行と同じサイクルで算出する．比較の成立・不成立や，ジャンプ先・関数の戻り先も
 //    この時点で確定するため，どの命令の実行中であっても次に実行すべき命令の番地が分かる．
 // 2. 命令フェッチの先読み: 1で求めた番地を使って，実行中に次の命令をあらかじめROMから取得して
-//    おく．ROMの同期読み出し遅延により，番地を出してから1サイクル安定して待たないと取り込めない
-//    ため，先読みが間に合うのは実行が2サイクル以上かかる命令(DIV・RM/WM・SCAN/PRINTの応答待ちなど)
-//    に限られる．次の命令へ進む際に取得済みの内容があれば，FETCH/FETCH_WAITフェーズを省略し
-//    CHECKから開始する．
+//    おく．ROMの読み出し結果はクロックに同期して確定するため，番地を出してから1サイクル安定して
+//    待たないと取り込めず，先読みが間に合うのは実行が2サイクル以上かかる命令(DIV・RM/WM・
+//    SCAN/PRINTの応答待ちなど)に限られる．次の命令へ進む際に取得済みの内容があれば，
+//    FETCH/FETCH_CAPTUREフェーズを省略しCHECKから開始する．
 // 3. 次の命令の解析の先読みとフォワーディング: 先読みが完了した命令の内容を，実行中の命令とは
 //    別の回路であらかじめ解析しておく．解析の結果，読み出し・書き込みに使うレジスタ番地がすべて
 //    有効だと分かれば，今完了する命令がこのサイクルにレジスタへ書き込む値を，レジスタの読み出し
@@ -56,7 +56,7 @@
 // 次に実行する命令の番地は常に確定しているため，取得した命令が無駄になって破棄が必要になることは
 // ない．この結果，実行が2サイクル以上かかる命令は，その完了直後のサイクルから次の命令のEXECUTEを
 // 直接開始できる．一方，1サイクルで完了する命令(P/S/A/F/J/N_TYPE)は先読みが間に合わないため，
-// 毎回FETCH→FETCH_WAIT→CHECK→EXECUTEの4サイクルを要する．
+// 毎回FETCH→FETCH_CAPTURE→CHECK→EXECUTEの4サイクルを要する．
 module alu_sv (
     input logic clk,
     input logic resetn,
@@ -299,7 +299,7 @@ module alu_sv (
         number  = register[6'h31][7:0];
 
         // ROMへ番地を出力する
-        if (cpu_phase == CPU_FETCH || cpu_phase == CPU_FETCH_WAIT) begin
+        if (cpu_phase == CPU_FETCH || cpu_phase == CPU_FETCH_CAPTURE) begin
             // フェッチ中(1サイクル目・同期読み出しの結果を待つ間とも)は，これから実行する
             // 命令の番地を出し続ける(プログラムの1命令目のフェッチ，または先読みが間に合わ
             // なかった命令の取得し直し)
@@ -413,12 +413,12 @@ module alu_sv (
                 // 命令の取得し直しがここを通る)．ROMへ番地を出す(comb blockで実施済み)だけで，
                 // 同期読み出しの結果はまだ確定していないため次のサイクルまで待つ
                 CPU_FETCH: begin
-                    cpu_phase <= CPU_FETCH_WAIT;
+                    cpu_phase <= CPU_FETCH_CAPTURE;
                 end
 
                 // フェッチ2サイクル目．前サイクルに出した番地に対応するrom_read.machineが
                 // 確定しているので取り込む
-                CPU_FETCH_WAIT: begin
+                CPU_FETCH_CAPTURE: begin
                     // 番地がROMの実容量の範囲内(rom_read.valid)であり，
                     // かつpc_bus_tの幅に収まっている(pc_fits_in_width)場合にのみ有効とする
                     ir <= rom_read.machine;
