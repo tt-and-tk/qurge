@@ -177,7 +177,10 @@ int main(void) {
 
     // 端末設定を元に戻してから終了する
     tcsetattr(STDIN_FILENO, TCSANOW, &original_termios);
-    std::cout << std::endl;
+    {
+        std::lock_guard<std::mutex> lock(cout_mutex);  // detachされたまま動き続ける受信スレッドとの割り込みを防ぐ
+        std::cout << std::endl;
+    }
 
     // メインスレッドが単独で使っているリソース(送信側)のみ解放する．
     // 受信側(read_dma・read_memory)は受信スレッドが使用中の可能性があるため解放しない
