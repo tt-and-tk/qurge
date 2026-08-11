@@ -2,12 +2,12 @@
  * デコーダーに関する関数
  */
 
-`ifndef DECORDER_SV
-`define DECORDER_SV
+`ifndef DECODER_SV
+`define DECODER_SV
 
 `include "machine.svh"
 
-package decorder_p;
+package decoder_p;
 endpackage
 
 // インターフェース定義

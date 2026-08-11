@@ -5,7 +5,7 @@
 //
 // Create Date: 2025/04/20 16:22:23
 // Design Name:
-// Module Name: decorder_sv
+// Module Name: decoder_sv
 // Project Name:
 // Target Devices:
 // Tool Versions:
@@ -20,9 +20,9 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 
-`include "decorder.svh"
+`include "decoder.svh"
 
-module decorder_sv (
+module decoder_sv (
     input logic resetn,
     command_if.slave command
     );

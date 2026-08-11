@@ -21,7 +21,7 @@
 
 
 `include "rom.svh"
-`include "decorder.svh"
+`include "decoder.svh"
 `include "alu.svh"
 `include "ram.svh"
 `include "machine.svh"
@@ -201,7 +201,7 @@ module alu_sv (
     // 信用できない．先読み済み(ir_prefetched_valid)の場合のみ有効なデコード結果として扱う
     command_if command_next();
     assign command_next.machine = ir_prefetched;
-    decorder_sv decorder_sv_next(
+    decoder_sv decoder_sv_next(
         .resetn(resetn),
         .command(command_next)
     );

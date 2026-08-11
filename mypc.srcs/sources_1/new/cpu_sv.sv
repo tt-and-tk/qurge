@@ -22,7 +22,7 @@
 
 `include "machine.svh"
 `include "rom.svh"
-`include "decorder.svh"
+`include "decoder.svh"
 
 module cpu_sv import machine_p::*; (
     input logic clk,
@@ -67,7 +67,7 @@ module cpu_sv import machine_p::*; (
     command_if command();
 
     // デコーダー
-    decorder_sv decorder_sv_0(
+    decoder_sv decoder_sv_0(
         .resetn(resetn),
         .command(command)
     );
