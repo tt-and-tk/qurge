@@ -319,10 +319,13 @@ module rom_sv(
     };
 
     always_comb begin
-        if (rom_read.pc >= ROM_SIZE) begin
-            rom_read.machine = nop();
-        end else begin
+        // pcがROMの命令数に収まっているかを上位へ伝える
+        rom_read.valid = (rom_read.pc < ROM_SIZE);
+
+        if (rom_read.valid) begin
             rom_read.machine = machines[rom_read.pc];
+        end else begin
+            rom_read.machine = nop();
         end
     end
 

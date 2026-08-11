@@ -112,6 +112,8 @@ module alu_sv (
     // 1サイクルで完了する命令の実行中は埋まらないまま次の命令へ進む．
     machine_p::machine_t ir_prefetched = nop();
     logic ir_prefetched_valid = 1'b0;    // ir_prefetchedが先読み済みの有効な命令かどうか
+    logic ir_pc_valid = 1'b1;            // irをROMの範囲内から取得できたか
+    logic ir_prefetched_pc_valid = 1'b1; // ir_prefetchedをROMの範囲内から取得できたか
     register_t rs1_val_r = '0;
     register_t rs2_val_r = '0;
     machine_p::addr_t rd_addr_r = '0;
@@ -191,6 +193,10 @@ module alu_sv (
     machine_p::machine_t ir_next;
     assign ir_next = ir_prefetched_valid ? ir_prefetched : rom_read.machine;
 
+    // ir_nextをROMの範囲内から取得できたか(取得元がir_prefetchedか今サイクルのrom_read.machineかで参照先を切り替える)
+    logic ir_next_pc_valid;
+    assign ir_next_pc_valid = ir_prefetched_valid ? ir_prefetched_pc_valid : rom_read.valid;
+
     // 次段命令(ir_next)専用のデコーダー．現在実行中の命令のデコード(command)とは独立に，
     // 次段のレジスタ読み出し・書き込み可否をEXECUTE中に前もって確認するために用いる．
     command_if command_next();
@@ -225,7 +231,7 @@ module alu_sv (
 
         // 次の命令を解析し，実行可能かどうかを判定する
         if (is_instruction_executable(
-            command_next.m_type, command_next.func,
+            ir_next_pc_valid, command_next.m_type, command_next.func,
             command_next.rs1, command_next.rs2, command_next.rd, command_next.imm
         )) begin
             // 次段命令の読み出し・書き込み可否は確認済みのため，CHECKを省略して直接EXECUTEへ進む．
@@ -249,18 +255,21 @@ module alu_sv (
             imm_r     <= command_next.imm;
             mask_r    <= command_next.mask;
             ir        <= ir_next;
+            ir_pc_valid <= ir_next_pc_valid;
             cpu_phase <= CPU_EXECUTE;
         end
         // 実行できない命令は以下のいずれかの経路でCHECKへ進み，そこで停止させる
         else if (ir_prefetched_valid) begin
             // 前サイクル以前に先読みが完了している場合，それを採用する
             ir <= ir_prefetched;
+            ir_pc_valid <= ir_prefetched_pc_valid;
             cpu_phase <= CPU_CHECK;
         end
         else begin
             // 今サイクルに先読みが完了する場合，レジスタを経由せず直接採用する．
             // このときROMへは次に実行する命令の番地を出しているため，読み出し結果がそのまま次の命令になる
             ir <= rom_read.machine;
+            ir_pc_valid <= rom_read.valid;
             cpu_phase <= CPU_CHECK;
         end
 
@@ -312,6 +321,8 @@ module alu_sv (
             ir <= nop();
             ir_prefetched <= nop();
             ir_prefetched_valid <= 1'b0;
+            ir_pc_valid <= 1'b1;
+            ir_prefetched_pc_valid <= 1'b1;
             rs1_val_r <= '0;
             rs2_val_r <= '0;
             rd_addr_r <= '0;
@@ -384,6 +395,7 @@ module alu_sv (
                 CPU_FETCH: begin
                     // 命令を取得してくる
                     ir <= rom_read.machine;
+                    ir_pc_valid <= rom_read.valid;
 
                     // 次のサイクルへ
                     cpu_phase <= CPU_CHECK;
@@ -395,7 +407,7 @@ module alu_sv (
                     // 先読みを経てここへ来た命令は実行できないと判定済みであるため，
                     // こちらへ入るのはプログラムの1命令目だけになる
                     if (is_instruction_executable(
-                        command.m_type, command.func,
+                        ir_pc_valid, command.m_type, command.func,
                         command.rs1, command.rs2, command.rd, command.imm
                     )) begin
                         // 実行に使う値と命令の内容を取り込む
@@ -853,6 +865,7 @@ module alu_sv (
                     if (can_prefetch && !advancing) begin
                         ir_prefetched <= rom_read.machine;
                         ir_prefetched_valid <= 1'b1;
+                        ir_prefetched_pc_valid <= rom_read.valid;
                     end
                 end
             endcase
