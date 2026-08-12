@@ -15,7 +15,7 @@ package ram_p;
     } code_enum;
 
     // 定数
-    localparam int RAM_SIZE = 65536;         // メモリの実容量(バイト)
+    localparam int RAM_SIZE = 4096;          // メモリの実容量(バイト)
 
     // 変数型
     typedef logic [$clog2(RAM_SIZE)-1:0] address_bus_t;  // アドレスバス幅
