@@ -36,6 +36,15 @@ PYNQ-Z2(Zynq-7000)上に実装する自作CPUと，それを動かすソフト�
 
 `mypc.xpr`は開いた場所の絶対パス・各ソースの取り込み時刻・上記チェックポイントの登録状態を保持しており，開くだけで内容が書き換わる．ソースを変更していないのに生じたこの差分はコミットしない．ソースやブロックダイアグラムを変更して`mypc.xpr`を正当にコミットする場合も，これらの行だけは元の値に戻してからコミットする(開いた場所によって値が変わるため，そのまま入れるとディレクトリを移るたびに書き換わり続ける)．
 
+## PS側(ARM/C++)のビルド・書き込み方法
+
+`mypc.srcs/cpp/`配下のC++プログラムは，PC側でのクロスコンパイルは行わず，**PYNQ-Z2ボード上のLinux環境で直接ビルド・実行する**．
+
+1. ボード上の任意の作業ディレクトリへ，`mypc.srcs/cpp/`配下のファイル(`run.cpp`・`compile.sh`)と，Vivadoが生成したビットストリームを転送する
+2. その作業ディレクトリの直下に`bit/`ディレクトリを作成し，ビットストリームを`bit/top_wrapper.bit`として配置する(`run.cpp`が実行時のカレントディレクトリからの相対パス`./bit/top_wrapper.bit`でこれを参照するため)
+3. 作業ディレクトリ内で`bash compile.sh`を実行してビルドする(内容は`g++ -o run run.cpp -lpynq -lcma -lpthread`)
+4. `./run`を実行する(root権限は不要)
+
 ## ディレクトリ構造
 
 ```
@@ -70,7 +79,7 @@ mypc/                                  # リポジトリルート(Vivadoプロ�
 |-------------|------|
 | `mypc.srcs/sources_1/new/` | カスタムCPUのHDLソース（主な作業対象） |
 | `mypc.srcs/constrs_1/new/` | PYNQ-Z2ボードのピン制約 (top.xdc) |
-| `mypc.srcs/cpp/` | PS(ARM)側のC++プログラム(`run.cpp`が現行版) |
+| `mypc.srcs/cpp/` | PS(ARM)側のC++プログラム(`run.cpp`が現行版)．`compile.sh`はPYNQ-Z2ボード上でビルドする際に使うスクリプト |
 | `mypc.srcs/pn/` | ROM上で動くPynesisソース(`.pn`)．`compiler`の`c2asm.exe`でアセンブリへ，`assembler`の`asm2bin.exe`で`mypc.srcs/sources_1/new/rom_sv.sv`へ変換する(中間生成物の`.pt`は`.gitignore`対象) |
 | `mypc.srcs/sim_1/` | テストベンチ(まだ1つも書いておらず，ディレクトリ自体が存在しない) |
 
