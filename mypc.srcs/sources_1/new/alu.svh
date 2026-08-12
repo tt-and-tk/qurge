@@ -6,7 +6,7 @@
 `define ALU_SVH
 
 `include "util.svh"
-`include "decorder.svh"
+`include "decoder.svh"
 
 package alu_p;
     import machine_p::*;
