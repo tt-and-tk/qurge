@@ -32,6 +32,9 @@ package alu_p;
     // 変数型
     typedef logic [31:0] register_t;   // レジスタサイズ
 
+    // 定数
+    localparam machine_p::addr_t REGISTER_MAX_ADDR = 6'h34;   // レジスタ配列の最大有効番地(0x00〜この値が有効)
+
     // 関数
     function util_p::bool_t is_readable(   // そのアドレスのレジスタが読み込み可能か
         machine_p::addr_t addr
@@ -208,6 +211,11 @@ package alu_p;
     );
         // 範囲外から取得した命令は，中身がnop()相当であっても実行不可扱いにする
         if (!pc_valid) begin
+            is_instruction_executable = util_p::FALSE;
+        // rs1・rs2・rdは命令の種類によらず機械語中に必ず存在するフィールドのため，命令が
+        // 実際には使わない番地であっても，レジスタ配列の宣言範囲を超えていれば無条件に
+        // 実行不可扱いにする(範囲外番地を読み出さないようにするため)
+        end else if (rs1 > REGISTER_MAX_ADDR || rs2 > REGISTER_MAX_ADDR || rd > REGISTER_MAX_ADDR) begin
             is_instruction_executable = util_p::FALSE;
         end else begin
             unique case (m_type)
