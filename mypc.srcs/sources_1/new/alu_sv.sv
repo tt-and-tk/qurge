@@ -782,7 +782,7 @@ module alu_sv (
                                         end
                                     endcase
                                 end
-                                // バーストはオミット
+                                // バースト転送はコマンドだけ用意されているが実装予定なし
                                 // メモリ読み込み(バースト)
                                 BRM: begin
                                     is_halted <= 1'b1;
