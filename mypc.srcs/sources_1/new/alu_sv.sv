@@ -104,7 +104,7 @@ module alu_sv (
     import util_p::*;
 
     // 内部レジスタ
-    register_t register[6'h34:0] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+    register_t register[REGISTER_MAX_ADDR:0] = '{(REGISTER_MAX_ADDR + 1){32'h0}};
 
     // 実行フェーズ
     cpu_phase_enum cpu_phase = CPU_FETCH;
