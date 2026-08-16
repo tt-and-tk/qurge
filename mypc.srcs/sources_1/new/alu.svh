@@ -214,7 +214,8 @@ package alu_p;
             is_instruction_executable = util_p::FALSE;
         // rs1・rs2・rdは命令の種類によらず機械語中に必ず存在するフィールドのため，命令が
         // 実際には使わない番地であっても，レジスタ配列の宣言範囲を超えていれば無条件に
-        // 実行不可扱いにする(範囲外番地を読み出さないようにするため)
+        // 実行不可扱いにする(範囲外番地を読み出さないようにするため)．immは番地として
+        // 使われる箇所(DIVの余り書き込み先)が使用時に限られ，そこで個別にチェック済みのためここでは見ない
         end else if (rs1 > REGISTER_MAX_ADDR || rs2 > REGISTER_MAX_ADDR || rd > REGISTER_MAX_ADDR) begin
             is_instruction_executable = util_p::FALSE;
         end else begin
