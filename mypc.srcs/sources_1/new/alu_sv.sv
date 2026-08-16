@@ -587,6 +587,7 @@ module alu_sv (
                             // (書き込みとフォワーディングの両方でwrite_valueを使う)
                             if (func_r == MOV) begin
                                 // イミディエイトデータを使用する？
+                                // mask_rは未実装のため参照せず，常にrdの全バイトへ書き込む
                                 write_value = imm_r[32] ? imm_r[31:0] : rs1_val_r;
                                 register[rd_addr_r] <= write_value;
                                 register[PC_ADDR] <= next_pc;
