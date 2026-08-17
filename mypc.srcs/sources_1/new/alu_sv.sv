@@ -109,46 +109,72 @@ module alu_sv (
     // 実行フェーズ
     cpu_phase_enum cpu_phase = CPU_FETCH;
 
-    // 実行前のものをいったん保存しておく
-    machine_p::machine_t current_instruction = nop(); // 命令
-    // 実行中に先読みしておいた命令を保持するバッファ．複数サイクルにまたがる命令の待機中に埋まり，
-    // 1サイクルで完了する命令の実行中は埋まらないまま次の命令へ進む．
-    machine_p::machine_t prefetched_instruction = nop();
-    logic prefetched_instruction_valid = 1'b0;    // prefetched_instructionが先読み済みの有効な命令かどうか
-    logic current_instruction_pc_valid = 1'b1;    // current_instructionをROMの範囲内から取得できたか
-    logic prefetched_instruction_pc_valid = 1'b1; // prefetched_instructionをROMの範囲内から取得できたか
-    register_t rs1_val_r = '0;
-    register_t rs2_val_r = '0;
-    machine_p::addr_t rd_addr_r = '0;
-    machine_p::func_t func_r = '0;
-    machine_p::imm_t imm_r = '0;
-    machine_p::mask_t mask_r = '0;
-
-    // メモリ読み込み・書き出し状態
-    util_p::state_enum ram_read_state = IDLE;
-    util_p::state_enum ram_write_state = IDLE;
-
-    // 標準入出力の入出力状態
-    util_p::state_enum stdin_state = IDLE;
-    util_p::state_enum stdout_state = IDLE;
-
-    // 割り算回路の状態
-    util_p::state_enum div_state = IDLE;
-
     // 実行できない命令を検出して停止していることを表すフラグ．
     // 立っている間はリセット処理が働き続け，外部からのリセットが入るまで下りない．
     // このフラグを下ろす代入は，下のリセット処理の中(if (!resetn)の中)以外に置かないこと
     // (外に置くと，停止した状態から自力で抜けてプログラムの先頭から同じ命令を踏み直す動作になる)．
     logic is_halted = 1'b0;
 
-    // 次命令を先読みしてよいかどうかを示すフラグ
+    // ===== 命令の保持・先読み =====
+    // 現在対象の命令(current_instruction)と，実行中にあらかじめ取得しておいた次の命令
+    // (prefetched_instruction)の2系統を持つ．後者が埋まっていれば，命令完了時にFETCHを
+    // 経由せず直接次の命令へ進める(モジュール冒頭のコメント参照)．
+
+    // CHECK/EXECUTEフェーズの対象になっている命令(実行前のものをいったん保存しておく)
+    machine_p::machine_t current_instruction = nop();
+    // current_instructionをROMの実容量範囲内から取得できたか(CPU_FETCH_CAPTUREで確定する)
+    logic current_instruction_pc_valid = 1'b1;
+
+    // 実行中に先読みしておいた次の命令を保持するバッファ．複数サイクルにまたがる命令の
+    // 待機中に埋まり，1サイクルで完了する命令の実行中は埋まらないまま次の命令へ進む．
+    machine_p::machine_t prefetched_instruction = nop();
+    // prefetched_instructionが先読み済みの有効な命令かどうか
+    logic prefetched_instruction_valid = 1'b0;
+    // prefetched_instructionをROMの実容量範囲内から取得できたか
+    logic prefetched_instruction_pc_valid = 1'b1;
+
+    // 次命令を先読みしてよいかどうかを示すフラグ．実行フェーズの間，かつ
+    // 既に先読み済みの命令がなければ先読みしてよい
     logic can_prefetch;
-    assign can_prefetch = (cpu_phase == CPU_EXECUTE)    // 実行フェーズの間のみ先読みが可能
-        && !prefetched_instruction_valid;                        // 既に先読み済みの命令があれば行わない
+    assign can_prefetch = (cpu_phase == CPU_EXECUTE)
+        && !prefetched_instruction_valid;
 
     // can_prefetchが1サイクル前も立っていたか．ROMの同期読み出しは番地を出した次のサイクルに
     // ならないと結果が確定しないため，1サイクル安定して待ってから取り込んでよいかの判定に使う
     logic can_prefetch_d1 = 1'b0;
+
+    // 次段命令(prefetched_instruction)専用のデコーダー．現在実行中の命令のデコード(command)とは
+    // 独立に，次段のレジスタ読み出し・書き込み可否をEXECUTE中に前もって確認するために用いる．
+    // ROMが同期読み出しのため，今サイクルのrom_read.machineは1つ前に出した番地に対する値であり
+    // 信用できない．先読み済み(prefetched_instruction_valid)の場合のみ有効なデコード結果として扱う
+    command_if command_next();
+    assign command_next.machine = prefetched_instruction;
+    decoder_sv decoder_sv_next(
+        .resetn(resetn),
+        .command(command_next)
+    );
+
+    // ===== デコード結果を保持する実行用レジスタ =====
+    // CPU_CHECKで取り込み，CPU_EXECUTE中はこれらの値を参照して命令を実行する
+
+    register_t rs1_val_r = '0;        // 第1オペランドの読み出し値
+    register_t rs2_val_r = '0;        // 第2オペランドの読み出し値
+    machine_p::addr_t rd_addr_r = '0; // 書き込み先レジスタの番地
+    machine_p::func_t func_r = '0;    // 命令の細分類(演算子・比較方法など)
+    machine_p::imm_t imm_r = '0;      // イミディエイトデータ(使用可否のフラグを含む)
+    machine_p::mask_t mask_r = '0;    // 書き込みバイトマスク(未実装のため参照されない)
+
+    // ===== メモリ・標準入出力・割り算回路とのハンドシェイク状態 =====
+    // それぞれの命令の実行が複数サイクルにまたがる間，どこまで進んだかを保持する
+
+    util_p::state_enum ram_read_state = IDLE;  // メモリ読み込み(RM)の実行状態
+    util_p::state_enum ram_write_state = IDLE; // メモリ書き込み(WM)の実行状態
+    util_p::state_enum stdin_state = IDLE;     // 標準入力(SCAN)の実行状態
+    util_p::state_enum stdout_state = IDLE;    // 標準出力(PRINT)の実行状態
+    util_p::state_enum div_state = IDLE;       // 割り算(DIV)の実行状態
+
+    // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
+    // 実行フェーズの間のみ意味を持つ(それ以外のフェーズでは直前に実行した命令の値が残っている)
 
     // rom_read.pcへ出力した(切り詰め前の)プログラムカウンタの値が，pc_bus_tの幅に収まっているか．
     // ROMへ番地を出力するalways_comb内で，rom_read.pcと同じ発生源から算出する
@@ -186,29 +212,22 @@ module alu_sv (
                    : is_jumping      ? jump_target                      // 移動する命令は指定された飛び先へ
                    : register[PC_ADDR] + 1;                             // それ以外は次の番地へ進む
 
-    // 今サイクルにadvance_to_next_instruction()が呼ばれたかどうかを示すスクラッチ変数(ブロッキング代入で使用)．
+    // ===== CPU_EXECUTE内でのみ使うスクラッチ変数(ブロッキング代入で使用) =====
+    // always_ff内のブロッキング代入は同一サイクル内の一時的な値の受け渡しにのみ用い，
+    // サイクルをまたいで保持する状態には使わない
+
+    // 今サイクルにadvance_to_next_instruction()が呼ばれたかどうか．
     // CPU_EXECUTE突入のたびに先頭で0へ戻し，末尾の先読みトリガーの可否判定にのみ使う．
     logic advancing;
 
-    // 演算系・シフト系・代入系の結果を，レジスタへの書き込みと次の命令へのフォワーディングの
-    // 両方から同じ値を参照できるように一旦保持しておくスクラッチ変数(ブロッキング代入で使用)．
+    // 演算系・シフト系・代入系の結果．レジスタへの書き込みと次の命令へのフォワーディングの
+    // 両方から同じ値を参照できるように一旦保持しておく
     register_t write_value = '0;
 
     // 有効なfuncによる演算・シフト結果をレジスタへ書き込み・フォワーディングしてよい状態ならtrue．
     // funcが不正(unique caseのdefaultに該当)だった場合はfalseとし，write_valueに前回までの値が
-    // 残ったまま書き込み・フォワーディングされてしまうのを防ぐ(ブロッキング代入で使用)．
+    // 残ったまま書き込み・フォワーディングされてしまうのを防ぐ
     logic write_valid;
-
-    // 次段命令(prefetched_instruction)専用のデコーダー．現在実行中の命令のデコード(command)とは独立に，
-    // 次段のレジスタ読み出し・書き込み可否をEXECUTE中に前もって確認するために用いる．
-    // ROMが同期読み出しのため，今サイクルのrom_read.machineは1つ前に出した番地に対する値であり
-    // 信用できない．先読み済み(prefetched_instruction_valid)の場合のみ有効なデコード結果として扱う
-    command_if command_next();
-    assign command_next.machine = prefetched_instruction;
-    decoder_sv decoder_sv_next(
-        .resetn(resetn),
-        .command(command_next)
-    );
 
     // 命令完了時，次の命令へ遷移する処理をまとめたタスク．
     // 次の命令には，先読み済みの機械語(prefetched_instruction)のみを使う(ROMが同期読み出しのため，
