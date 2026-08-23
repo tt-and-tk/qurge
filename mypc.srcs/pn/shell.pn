@@ -56,14 +56,19 @@ int find_free_entry(void) {
     return -1;
 }
 
-// nameの内容をentries[entry].nameへ1文字ずつコピーし，内容を空にしたうえで使用中フラグを立てる(7文字を超える分は切り捨てる)
-void create_file(int entry, char name[]) {
+// nameの内容をentries[entry].nameへ1文字ずつコピーする(7文字を超える分は切り捨てる)
+void rename_file(int entry, char name[]) {
     int i = 0;
     while (name[i] != '\0' && i < 7) {
         entries[entry].name[i] = name[i];
         i = i + 1;
     }
     entries[entry].name[i] = '\0';
+}
+
+// entries[entry].nameをnameで設定し，内容を空にしたうえで使用中フラグを立てる
+void create_file(int entry, char name[]) {
+    rename_file(entry, name);
     entries[entry].content[0] = '\0';
     file_used[entry] = 1;
 }
@@ -245,6 +250,45 @@ void handle_rm(int cmd_len) {
     delete_file(entry);
 }
 
+// mvコマンド: 引数の先頭トークンを旧ファイル名，残りを新ファイル名として名前を変更する
+void handle_mv(int cmd_len) {
+    char rest[64];  // "old new..." (コマンド名を除いた部分)
+    char old_name[64];  // 先頭トークン(旧ファイル名)
+    char new_name[64];  // 旧ファイル名トークンを除いた残り(新ファイル名)
+    int old_len;    // 旧ファイル名トークンの文字数
+    int entry;      // 対象エントリのインデックス
+
+    // コマンド名(mv)を除いた"old new..."を取り出す
+    extract_rest(input, cmd_len, rest);
+
+    // 先頭トークンを旧ファイル名として切り出す
+    old_len = extract_token(rest, old_name);
+    // 旧ファイル名が指定されていなければ何もしない
+    if (old_name[0] == '\0') {
+        print("mv: missing file name\n");
+        return;
+    }
+
+    // 旧ファイル名から対象エントリを探す
+    entry = find_entry_by_name(old_name);
+    // 対象ファイルが無ければ何もしない
+    if (entry == -1) {
+        print("mv: no such file\n");
+        return;
+    }
+
+    // 旧ファイル名トークンを除いた残りを新ファイル名として取り出す
+    extract_rest(rest, old_len, new_name);
+    // 新ファイル名が指定されていなければ何もしない
+    if (new_name[0] == '\0') {
+        print("mv: missing new name\n");
+        return;
+    }
+
+    // 見つかったエントリの名前を付け替える
+    rename_file(entry, new_name);
+}
+
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 void handle_help(void) {
     print("echo\n");
@@ -254,6 +298,7 @@ void handle_help(void) {
     print("write\n");
     print("cat\n");
     print("rm\n");
+    print("mv\n");
 }
 
 // 未対応コマンドのエラーメッセージを表示する
@@ -277,6 +322,8 @@ void dispatch(int cmd_len) {
         handle_cat(cmd_len);
     } else if (streq(cmd, "rm")) {
         handle_rm(cmd_len);
+    } else if (streq(cmd, "mv")) {
+        handle_mv(cmd_len);
     } else {
         handle_unknown();
     }
