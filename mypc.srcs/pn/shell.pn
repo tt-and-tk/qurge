@@ -86,11 +86,13 @@ int names_match(char name[], int entry) {
             return 0;
         }
         if (entries[entry].name[j] == '\0') {
-            return 1;  // 同じ位置でヌル終端に達した(一致)
+            // 同じ位置でヌル終端に達した(一致)
+            return 1;
         }
         j = j + 1;
     }
-    return 1;  // 名前欄の上限(8バイト)まで一致
+    // 名前欄の上限(8バイト)まで一致
+    return 1;
 }
 
 // nameと一致する使用中エントリのインデックスを返す．無ければ-1を返す
@@ -163,22 +165,29 @@ void handle_write(int cmd_len) {
     int name_len;   // 名前トークンの文字数
     int entry;      // 対象エントリのインデックス
 
-    extract_args(input, cmd_len, rest);  // コマンド名(write)を除いた"name content..."を取り出す
+    // コマンド名(write)を除いた"name content..."を取り出す
+    extract_args(input, cmd_len, rest);
 
-    name_len = extract_command(rest, name);  // 先頭トークンをファイル名として切り出す
-    if (name[0] == '\0') {  // ファイル名が指定されていなければ何もしない
+    // 先頭トークンをファイル名として切り出す
+    name_len = extract_command(rest, name);
+    // ファイル名が指定されていなければ何もしない
+    if (name[0] == '\0') {
         print("write: missing file name\n");
         return;
     }
 
-    entry = find_entry_by_name(name);  // ファイル名から対象エントリを探す
-    if (entry == -1) {  // 対象ファイルが無ければ何もしない(自動作成はしない)
+    // ファイル名から対象エントリを探す
+    entry = find_entry_by_name(name);
+    // 対象ファイルが無ければ何もしない(自動作成はしない)
+    if (entry == -1) {
         print("write: no such file\n");
         return;
     }
 
-    extract_args(rest, name_len, content);  // ファイル名トークンを除いた残りを内容として取り出す
-    write_file(entry, content);  // 取り出した内容でエントリの中身を丸ごと上書きする
+    // ファイル名トークンを除いた残りを内容として取り出す
+    extract_args(rest, name_len, content);
+    // 取り出した内容でエントリの中身を丸ごと上書きする
+    write_file(entry, content);
 }
 
 // catコマンド: 引数のファイル名に対応する内容を出力する
@@ -186,19 +195,24 @@ void handle_cat(int cmd_len) {
     char name[64];  // コマンド名を除いた引数部分(読み出すファイル名)
     int entry;      // 対象エントリのインデックス
 
-    extract_args(input, cmd_len, name);  // コマンド名(cat)を除いた部分をファイル名として取り出す
-    if (name[0] == '\0') {  // ファイル名が指定されていなければ何もしない
+    // コマンド名(cat)を除いた部分をファイル名として取り出す
+    extract_args(input, cmd_len, name);
+    // ファイル名が指定されていなければ何もしない
+    if (name[0] == '\0') {
         print("cat: missing file name\n");
         return;
     }
 
-    entry = find_entry_by_name(name);  // ファイル名から対象エントリを探す
-    if (entry == -1) {  // 対象ファイルが無ければ何もしない
+    // ファイル名から対象エントリを探す
+    entry = find_entry_by_name(name);
+    // 対象ファイルが無ければ何もしない
+    if (entry == -1) {
         print("cat: no such file\n");
         return;
     }
 
-    print_content(entry);  // 見つかったエントリの内容を出力する
+    // 見つかったエントリの内容を出力する
+    print_content(entry);
 }
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
