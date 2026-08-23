@@ -47,8 +47,7 @@ void handle_echo(int cmd_len) {
 
 // file_usedを先頭から走査し，未使用エントリのインデックスを返す．空きが無ければ-1を返す
 int find_free_entry(void) {
-    int i;
-    for (i = 0; i < 4; i += 1) {
+    for (int i = 0; i < 4; i++) {
         if (file_used[i] == 0) {
             return i;
         }
@@ -82,8 +81,7 @@ void print_entry(int entry) {
 
 // lsコマンド: 使用中の全エントリの名前を順に出力する
 void handle_ls(void) {
-    int i;
-    for (i = 0; i < 4; i += 1) {
+    for (int i = 0; i < 4; i++) {
         if (file_used[i] == 1) {
             print_entry(i);
         }
@@ -137,8 +135,7 @@ void dispatch(int cmd_len) {
 
 void main(void) {
     int cmd_len;  // コマンド名の文字数
-    int i;        // file_used初期化用のインデックス
-    for (i = 0; i < 4; i += 1) {  // グローバル配列の初期値は不定なため，起動時に明示的にクリアする
+    for (int i = 0; i < 4; i++) {  // グローバル配列の初期値は不定なため，起動時に明示的にクリアする
         file_used[i] = 0;
     }
     while (1) {
