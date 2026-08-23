@@ -105,6 +105,11 @@ int find_entry_by_name(char name[]) {
     return -1;
 }
 
+// entryの使用中フラグを下ろし，未使用エントリとして扱えるようにする(nameやcontentのクリアは行わない．再利用時にcreate_fileが上書きするため)
+void delete_file(int entry) {
+    file_used[entry] = 0;
+}
+
 // entries[entry].nameを一時バッファへ1文字ずつコピーしてから出力する(printは直接配列のみ受け付けるため)
 void print_entry(int entry) {
     char entry_buf[8];  // 出力用の一時バッファ(7文字+ヌル終端)
@@ -215,6 +220,31 @@ void handle_cat(int cmd_len) {
     print_content(entry);
 }
 
+// rmコマンド: 引数のファイル名に対応するエントリを削除する
+void handle_rm(int cmd_len) {
+    char name[64];  // コマンド名を除いた引数部分(削除するファイル名)
+    int entry;      // 対象エントリのインデックス
+
+    // コマンド名(rm)を除いた部分をファイル名として取り出す
+    extract_rest(input, cmd_len, name);
+    // ファイル名が指定されていなければ何もしない
+    if (name[0] == '\0') {
+        print("rm: missing file name\n");
+        return;
+    }
+
+    // ファイル名から対象エントリを探す
+    entry = find_entry_by_name(name);
+    // 対象ファイルが無ければ何もしない
+    if (entry == -1) {
+        print("rm: no such file\n");
+        return;
+    }
+
+    // 見つかったエントリを削除する
+    delete_file(entry);
+}
+
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 void handle_help(void) {
     print("echo\n");
@@ -223,6 +253,7 @@ void handle_help(void) {
     print("touch\n");
     print("write\n");
     print("cat\n");
+    print("rm\n");
 }
 
 // 未対応コマンドのエラーメッセージを表示する
@@ -244,6 +275,8 @@ void dispatch(int cmd_len) {
         handle_write(cmd_len);
     } else if (streq(cmd, "cat")) {
         handle_cat(cmd_len);
+    } else if (streq(cmd, "rm")) {
+        handle_rm(cmd_len);
     } else {
         handle_unknown();
     }
