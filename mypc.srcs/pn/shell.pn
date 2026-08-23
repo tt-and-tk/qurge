@@ -2,16 +2,17 @@
 char input[64];  // 1行分の入力バッファ
 char cmd[64];    // 入力の先頭トークン(コマンド名)
 
-// ファイル1件分のエントリ(名前のみ，7文字+ヌル終端)
+// ファイル1件分のエントリ(名前は7文字+ヌル終端，内容は31文字+ヌル終端)
 struct FileEntry {
     char name[8];
+    char content[32];
 };
 
 struct FileEntry entries[4];  // ファイルテーブル本体(最大4件)
 char file_used[4];            // 各エントリの使用中フラグ(0:未使用，1:使用中)
 
 // bufの先頭から空白またはヌル終端の直前までをtokenへコピーし，コピーした長さを返す
-int extract_command(char buf[], char token[]) {
+int extract_token(char buf[], char token[]) {
     int i = 0;
     while (buf[i] != ' ' && buf[i] != '\0') {
         token[i] = buf[i];
@@ -21,14 +22,14 @@ int extract_command(char buf[], char token[]) {
     return i;
 }
 
-// bufのcmd_len文字目以降(コマンド名の直後の空白を1つだけ読み飛ばした位置)からヌル終端までをoutへコピーする
-void extract_args(char buf[], int cmd_len, char out[]) {
+// bufのtoken_len文字目以降(先頭トークンの直後の空白を1つだけ読み飛ばした位置)からヌル終端までをoutへコピーする
+void extract_rest(char buf[], int token_len, char out[]) {
     int start;  // outへのコピー開始位置
     int i = 0;
-    if (buf[cmd_len] == ' ') {
-        start = cmd_len + 1;
+    if (buf[token_len] == ' ') {
+        start = token_len + 1;
     } else {
-        start = cmd_len;
+        start = token_len;
     }
     while (buf[start + i] != '\0') {
         out[i] = buf[start + i];
@@ -40,7 +41,7 @@ void extract_args(char buf[], int cmd_len, char out[]) {
 // echoコマンド: コマンド名以降の引数部分をそのまま出力する
 void handle_echo(int cmd_len) {
     char args[64];  // コマンド名を除いた引数部分
-    extract_args(input, cmd_len, args);
+    extract_rest(input, cmd_len, args);
     print(args);
     print("\n");
 }
@@ -55,7 +56,7 @@ int find_free_entry(void) {
     return -1;
 }
 
-// nameの内容をentries[entry].nameへ1文字ずつコピーし，使用中フラグを立てる(7文字を超える分は切り捨てる)
+// nameの内容をentries[entry].nameへ1文字ずつコピーし，内容を空にしたうえで使用中フラグを立てる(7文字を超える分は切り捨てる)
 void create_file(int entry, char name[]) {
     int i = 0;
     while (name[i] != '\0' && i < 7) {
@@ -63,7 +64,45 @@ void create_file(int entry, char name[]) {
         i = i + 1;
     }
     entries[entry].name[i] = '\0';
+    entries[entry].content[0] = '\0';
     file_used[entry] = 1;
+}
+
+// contentの内容をentries[entry].contentへ1文字ずつコピーする(31文字を超える分は切り捨てる)
+void write_file(int entry, char content[]) {
+    int i = 0;
+    while (content[i] != '\0' && i < 31) {
+        entries[entry].content[i] = content[i];
+        i = i + 1;
+    }
+    entries[entry].content[i] = '\0';
+}
+
+// nameとentries[entry].nameが一致するか比較する(streqは構造体配列のメンバを渡せないため手動比較する)
+int names_match(char name[], int entry) {
+    int j = 0;
+    while (j < 8) {
+        if (name[j] != entries[entry].name[j]) {
+            return 0;
+        }
+        if (entries[entry].name[j] == '\0') {
+            // 同じ位置でヌル終端に達した(一致)
+            return 1;
+        }
+        j = j + 1;
+    }
+    // 名前欄の上限(8バイト)まで一致
+    return 1;
+}
+
+// nameと一致する使用中エントリのインデックスを返す．無ければ-1を返す
+int find_entry_by_name(char name[]) {
+    for (int i = 0; i < 4; i++) {
+        if (file_used[i] == 1 && names_match(name, i)) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 // entries[entry].nameを一時バッファへ1文字ずつコピーしてから出力する(printは直接配列のみ受け付けるため)
@@ -88,11 +127,24 @@ void handle_ls(void) {
     }
 }
 
+// entries[entry].contentを一時バッファへ1文字ずつコピーしてから出力する(printは直接配列のみ受け付けるため)
+void print_content(int entry) {
+    char content_buf[32];  // 出力用の一時バッファ(31文字+ヌル終端)
+    int i = 0;
+    while (entries[entry].content[i] != '\0' && i < 31) {
+        content_buf[i] = entries[entry].content[i];
+        i = i + 1;
+    }
+    content_buf[i] = '\0';
+    print(content_buf);
+    print("\n");
+}
+
 // touchコマンド: コマンド名以降の引数部分を名前とするファイルを1件作成する
 void handle_touch(int cmd_len) {
     char args[64];  // コマンド名を除いた引数部分(作成するファイル名)
     int entry;      // 割り当てたエントリのインデックス
-    extract_args(input, cmd_len, args);
+    extract_rest(input, cmd_len, args);
     if (args[0] == '\0') {  // 名前が指定されていなければ何もしない
         print("touch: missing file name\n");
         return;
@@ -105,12 +157,72 @@ void handle_touch(int cmd_len) {
     }
 }
 
+// writeコマンド: 引数の先頭トークンをファイル名，残りを内容として丸ごと上書きする
+void handle_write(int cmd_len) {
+    char rest[64];  // "name content..." (コマンド名を除いた部分)
+    char name[64];  // 先頭トークン(ファイル名)
+    char content[64];  // 名前トークンを除いた残り(書き込む内容)
+    int name_len;   // 名前トークンの文字数
+    int entry;      // 対象エントリのインデックス
+
+    // コマンド名(write)を除いた"name content..."を取り出す
+    extract_rest(input, cmd_len, rest);
+
+    // 先頭トークンをファイル名として切り出す
+    name_len = extract_token(rest, name);
+    // ファイル名が指定されていなければ何もしない
+    if (name[0] == '\0') {
+        print("write: missing file name\n");
+        return;
+    }
+
+    // ファイル名から対象エントリを探す
+    entry = find_entry_by_name(name);
+    // 対象ファイルが無ければ何もしない(自動作成はしない)
+    if (entry == -1) {
+        print("write: no such file\n");
+        return;
+    }
+
+    // ファイル名トークンを除いた残りを内容として取り出す
+    extract_rest(rest, name_len, content);
+    // 取り出した内容でエントリの中身を丸ごと上書きする
+    write_file(entry, content);
+}
+
+// catコマンド: 引数のファイル名に対応する内容を出力する
+void handle_cat(int cmd_len) {
+    char name[64];  // コマンド名を除いた引数部分(読み出すファイル名)
+    int entry;      // 対象エントリのインデックス
+
+    // コマンド名(cat)を除いた部分をファイル名として取り出す
+    extract_rest(input, cmd_len, name);
+    // ファイル名が指定されていなければ何もしない
+    if (name[0] == '\0') {
+        print("cat: missing file name\n");
+        return;
+    }
+
+    // ファイル名から対象エントリを探す
+    entry = find_entry_by_name(name);
+    // 対象ファイルが無ければ何もしない
+    if (entry == -1) {
+        print("cat: no such file\n");
+        return;
+    }
+
+    // 見つかったエントリの内容を出力する
+    print_content(entry);
+}
+
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 void handle_help(void) {
     print("echo\n");
     print("help\n");
     print("ls\n");
     print("touch\n");
+    print("write\n");
+    print("cat\n");
 }
 
 // 未対応コマンドのエラーメッセージを表示する
@@ -128,6 +240,10 @@ void dispatch(int cmd_len) {
         handle_ls();
     } else if (streq(cmd, "touch")) {
         handle_touch(cmd_len);
+    } else if (streq(cmd, "write")) {
+        handle_write(cmd_len);
+    } else if (streq(cmd, "cat")) {
+        handle_cat(cmd_len);
     } else {
         handle_unknown();
     }
@@ -141,7 +257,7 @@ void main(void) {
     while (1) {
         print("> ");  // 入力待ちであることを示すプロンプト
         scan(input);
-        cmd_len = extract_command(input, cmd);
+        cmd_len = extract_token(input, cmd);
         dispatch(cmd_len);
     }
 }
