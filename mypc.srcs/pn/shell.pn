@@ -162,36 +162,43 @@ void handle_write(int cmd_len) {
     char content[64];  // 名前トークンを除いた残り(書き込む内容)
     int name_len;   // 名前トークンの文字数
     int entry;      // 対象エントリのインデックス
-    extract_args(input, cmd_len, rest);
-    name_len = extract_command(rest, name);
-    if (name[0] == '\0') {
+
+    extract_args(input, cmd_len, rest);  // コマンド名(write)を除いた"name content..."を取り出す
+
+    name_len = extract_command(rest, name);  // 先頭トークンをファイル名として切り出す
+    if (name[0] == '\0') {  // ファイル名が指定されていなければ何もしない
         print("write: missing file name\n");
         return;
     }
-    entry = find_entry_by_name(name);
-    if (entry == -1) {
+
+    entry = find_entry_by_name(name);  // ファイル名から対象エントリを探す
+    if (entry == -1) {  // 対象ファイルが無ければ何もしない(自動作成はしない)
         print("write: no such file\n");
         return;
     }
-    extract_args(rest, name_len, content);
-    write_file(entry, content);
+
+    extract_args(rest, name_len, content);  // ファイル名トークンを除いた残りを内容として取り出す
+    write_file(entry, content);  // 取り出した内容でエントリの中身を丸ごと上書きする
 }
 
 // catコマンド: 引数のファイル名に対応する内容を出力する
 void handle_cat(int cmd_len) {
     char name[64];  // コマンド名を除いた引数部分(読み出すファイル名)
     int entry;      // 対象エントリのインデックス
-    extract_args(input, cmd_len, name);
-    if (name[0] == '\0') {
+
+    extract_args(input, cmd_len, name);  // コマンド名(cat)を除いた部分をファイル名として取り出す
+    if (name[0] == '\0') {  // ファイル名が指定されていなければ何もしない
         print("cat: missing file name\n");
         return;
     }
-    entry = find_entry_by_name(name);
-    if (entry == -1) {
+
+    entry = find_entry_by_name(name);  // ファイル名から対象エントリを探す
+    if (entry == -1) {  // 対象ファイルが無ければ何もしない
         print("cat: no such file\n");
         return;
     }
-    print_content(entry);
+
+    print_content(entry);  // 見つかったエントリの内容を出力する
 }
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
