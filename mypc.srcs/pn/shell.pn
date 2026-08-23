@@ -2,6 +2,14 @@
 char input[64];  // 1行分の入力バッファ
 char cmd[64];    // 入力の先頭トークン(コマンド名)
 
+// ファイル1件分のエントリ(名前のみ，7文字+ヌル終端)
+struct FileEntry {
+    char name[8];
+};
+
+struct FileEntry entries[4];  // ファイルテーブル本体(最大4件)
+char file_used[4];            // 各エントリの使用中フラグ(0:未使用，1:使用中)
+
 // bufの先頭から空白またはヌル終端の直前までをtokenへコピーし，コピーした長さを返す
 int extract_command(char buf[], char token[]) {
     int i = 0;
@@ -37,58 +45,48 @@ void handle_echo(int cmd_len) {
     print("\n");
 }
 
-// ファイル1件分のエントリ(名前のみ，7文字+ヌル終端)
-struct FileEntry {
-    char name[8];
-};
-
-struct FileEntry entries[4];  // ファイルテーブル本体(最大4件)
-char file_used[4];            // 各エントリの使用中フラグ(0:未使用，1:使用中)
-char entry_buf[8];            // 一覧表示時に1件分の名前を組み立てる一時バッファ
-
 // file_usedを先頭から走査し，未使用エントリのインデックスを返す．空きが無ければ-1を返す
 int find_free_entry(void) {
-    int i = 0;
-    while (i < 4) {
+    int i;
+    for (i = 0; i < 4; i += 1) {
         if (file_used[i] == 0) {
             return i;
         }
-        i = i + 1;
     }
     return -1;
 }
 
 // nameの内容をentries[entry].nameへ1文字ずつコピーし，使用中フラグを立てる(7文字を超える分は切り捨てる)
 void create_file(int entry, char name[]) {
-    int j = 0;
-    while (name[j] != '\0' && j < 7) {
-        entries[entry].name[j] = name[j];
-        j = j + 1;
+    int i = 0;
+    while (name[i] != '\0' && i < 7) {
+        entries[entry].name[i] = name[i];
+        i = i + 1;
     }
-    entries[entry].name[j] = '\0';
+    entries[entry].name[i] = '\0';
     file_used[entry] = 1;
 }
 
-// entries[entry].nameをentry_bufへ1文字ずつコピーしてから出力する(printは直接配列のみ受け付けるため)
+// entries[entry].nameを一時バッファへ1文字ずつコピーしてから出力する(printは直接配列のみ受け付けるため)
 void print_entry(int entry) {
-    int j = 0;
-    while (entries[entry].name[j] != '\0' && j < 7) {
-        entry_buf[j] = entries[entry].name[j];
-        j = j + 1;
+    char entry_buf[8];  // 出力用の一時バッファ(7文字+ヌル終端)
+    int i = 0;
+    while (entries[entry].name[i] != '\0' && i < 7) {
+        entry_buf[i] = entries[entry].name[i];
+        i = i + 1;
     }
-    entry_buf[j] = '\0';
+    entry_buf[i] = '\0';
     print(entry_buf);
     print("\n");
 }
 
 // lsコマンド: 使用中の全エントリの名前を順に出力する
 void handle_ls(void) {
-    int i = 0;
-    while (i < 4) {
+    int i;
+    for (i = 0; i < 4; i += 1) {
         if (file_used[i] == 1) {
             print_entry(i);
         }
-        i = i + 1;
     }
 }
 
@@ -139,10 +137,9 @@ void dispatch(int cmd_len) {
 
 void main(void) {
     int cmd_len;  // コマンド名の文字数
-    int i = 0;    // file_used初期化用のインデックス
-    while (i < 4) {  // グローバル配列の初期値は不定なため，起動時に明示的にクリアする
+    int i;        // file_used初期化用のインデックス
+    for (i = 0; i < 4; i += 1) {  // グローバル配列の初期値は不定なため，起動時に明示的にクリアする
         file_used[i] = 0;
-        i = i + 1;
     }
     while (1) {
         print("> ");  // 入力待ちであることを示すプロンプト
