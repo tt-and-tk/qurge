@@ -2,9 +2,10 @@
 char input[64];  // 1行分の入力バッファ
 char cmd[64];    // 入力の先頭トークン(コマンド名)
 
-// ファイル1件分のエントリ(名前のみ，7文字+ヌル終端)
+// ファイル1件分のエントリ(名前は7文字+ヌル終端，内容は31文字+ヌル終端)
 struct FileEntry {
     char name[8];
+    char content[32];
 };
 
 struct FileEntry entries[4];  // ファイルテーブル本体(最大4件)
@@ -55,7 +56,7 @@ int find_free_entry(void) {
     return -1;
 }
 
-// nameの内容をentries[entry].nameへ1文字ずつコピーし，使用中フラグを立てる(7文字を超える分は切り捨てる)
+// nameの内容をentries[entry].nameへ1文字ずつコピーし，内容を空にしたうえで使用中フラグを立てる(7文字を超える分は切り捨てる)
 void create_file(int entry, char name[]) {
     int i = 0;
     while (name[i] != '\0' && i < 7) {
@@ -63,7 +64,43 @@ void create_file(int entry, char name[]) {
         i = i + 1;
     }
     entries[entry].name[i] = '\0';
+    entries[entry].content[0] = '\0';
     file_used[entry] = 1;
+}
+
+// contentの内容をentries[entry].contentへ1文字ずつコピーする(31文字を超える分は切り捨てる)
+void write_file(int entry, char content[]) {
+    int i = 0;
+    while (content[i] != '\0' && i < 31) {
+        entries[entry].content[i] = content[i];
+        i = i + 1;
+    }
+    entries[entry].content[i] = '\0';
+}
+
+// nameとentries[entry].nameが一致するか比較する(streqは構造体配列のメンバを渡せないため手動比較する)
+int names_match(char name[], int entry) {
+    int j = 0;
+    while (j < 8) {
+        if (name[j] != entries[entry].name[j]) {
+            return 0;
+        }
+        if (entries[entry].name[j] == '\0') {
+            return 1;  // 同じ位置でヌル終端に達した(一致)
+        }
+        j = j + 1;
+    }
+    return 1;  // 名前欄の上限(8バイト)まで一致
+}
+
+// nameと一致する使用中エントリのインデックスを返す．無ければ-1を返す
+int find_entry_by_name(char name[]) {
+    for (int i = 0; i < 4; i++) {
+        if (file_used[i] == 1 && names_match(name, i)) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 // entries[entry].nameを一時バッファへ1文字ずつコピーしてから出力する(printは直接配列のみ受け付けるため)
@@ -88,6 +125,19 @@ void handle_ls(void) {
     }
 }
 
+// entries[entry].contentを一時バッファへ1文字ずつコピーしてから出力する(printは直接配列のみ受け付けるため)
+void print_content(int entry) {
+    char content_buf[32];  // 出力用の一時バッファ(31文字+ヌル終端)
+    int i = 0;
+    while (entries[entry].content[i] != '\0' && i < 31) {
+        content_buf[i] = entries[entry].content[i];
+        i = i + 1;
+    }
+    content_buf[i] = '\0';
+    print(content_buf);
+    print("\n");
+}
+
 // touchコマンド: コマンド名以降の引数部分を名前とするファイルを1件作成する
 void handle_touch(int cmd_len) {
     char args[64];  // コマンド名を除いた引数部分(作成するファイル名)
@@ -105,12 +155,53 @@ void handle_touch(int cmd_len) {
     }
 }
 
+// writeコマンド: 引数の先頭トークンをファイル名，残りを内容として丸ごと上書きする
+void handle_write(int cmd_len) {
+    char rest[64];  // "name content..." (コマンド名を除いた部分)
+    char name[64];  // 先頭トークン(ファイル名)
+    char content[64];  // 名前トークンを除いた残り(書き込む内容)
+    int name_len;   // 名前トークンの文字数
+    int entry;      // 対象エントリのインデックス
+    extract_args(input, cmd_len, rest);
+    name_len = extract_command(rest, name);
+    if (name[0] == '\0') {
+        print("write: missing file name\n");
+        return;
+    }
+    entry = find_entry_by_name(name);
+    if (entry == -1) {
+        print("write: no such file\n");
+        return;
+    }
+    extract_args(rest, name_len, content);
+    write_file(entry, content);
+}
+
+// catコマンド: 引数のファイル名に対応する内容を出力する
+void handle_cat(int cmd_len) {
+    char name[64];  // コマンド名を除いた引数部分(読み出すファイル名)
+    int entry;      // 対象エントリのインデックス
+    extract_args(input, cmd_len, name);
+    if (name[0] == '\0') {
+        print("cat: missing file name\n");
+        return;
+    }
+    entry = find_entry_by_name(name);
+    if (entry == -1) {
+        print("cat: no such file\n");
+        return;
+    }
+    print_content(entry);
+}
+
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 void handle_help(void) {
     print("echo\n");
     print("help\n");
     print("ls\n");
     print("touch\n");
+    print("write\n");
+    print("cat\n");
 }
 
 // 未対応コマンドのエラーメッセージを表示する
@@ -128,6 +219,10 @@ void dispatch(int cmd_len) {
         handle_ls();
     } else if (streq(cmd, "touch")) {
         handle_touch(cmd_len);
+    } else if (streq(cmd, "write")) {
+        handle_write(cmd_len);
+    } else if (streq(cmd, "cat")) {
+        handle_cat(cmd_len);
     } else {
         handle_unknown();
     }
