@@ -12,7 +12,7 @@ struct FileEntry entries[4];  // ファイルテーブル本体(最大4件)
 char file_used[4];            // 各エントリの使用中フラグ(0:未使用，1:使用中)
 
 // bufの先頭から空白またはヌル終端の直前までをtokenへコピーし，コピーした長さを返す
-int extract_command(char buf[], char token[]) {
+int extract_token(char buf[], char token[]) {
     int i = 0;
     while (buf[i] != ' ' && buf[i] != '\0') {
         token[i] = buf[i];
@@ -22,14 +22,14 @@ int extract_command(char buf[], char token[]) {
     return i;
 }
 
-// bufのcmd_len文字目以降(コマンド名の直後の空白を1つだけ読み飛ばした位置)からヌル終端までをoutへコピーする
-void extract_args(char buf[], int cmd_len, char out[]) {
+// bufのtoken_len文字目以降(先頭トークンの直後の空白を1つだけ読み飛ばした位置)からヌル終端までをoutへコピーする
+void extract_rest(char buf[], int token_len, char out[]) {
     int start;  // outへのコピー開始位置
     int i = 0;
-    if (buf[cmd_len] == ' ') {
-        start = cmd_len + 1;
+    if (buf[token_len] == ' ') {
+        start = token_len + 1;
     } else {
-        start = cmd_len;
+        start = token_len;
     }
     while (buf[start + i] != '\0') {
         out[i] = buf[start + i];
@@ -41,7 +41,7 @@ void extract_args(char buf[], int cmd_len, char out[]) {
 // echoコマンド: コマンド名以降の引数部分をそのまま出力する
 void handle_echo(int cmd_len) {
     char args[64];  // コマンド名を除いた引数部分
-    extract_args(input, cmd_len, args);
+    extract_rest(input, cmd_len, args);
     print(args);
     print("\n");
 }
@@ -144,7 +144,7 @@ void print_content(int entry) {
 void handle_touch(int cmd_len) {
     char args[64];  // コマンド名を除いた引数部分(作成するファイル名)
     int entry;      // 割り当てたエントリのインデックス
-    extract_args(input, cmd_len, args);
+    extract_rest(input, cmd_len, args);
     if (args[0] == '\0') {  // 名前が指定されていなければ何もしない
         print("touch: missing file name\n");
         return;
@@ -166,10 +166,10 @@ void handle_write(int cmd_len) {
     int entry;      // 対象エントリのインデックス
 
     // コマンド名(write)を除いた"name content..."を取り出す
-    extract_args(input, cmd_len, rest);
+    extract_rest(input, cmd_len, rest);
 
     // 先頭トークンをファイル名として切り出す
-    name_len = extract_command(rest, name);
+    name_len = extract_token(rest, name);
     // ファイル名が指定されていなければ何もしない
     if (name[0] == '\0') {
         print("write: missing file name\n");
@@ -185,7 +185,7 @@ void handle_write(int cmd_len) {
     }
 
     // ファイル名トークンを除いた残りを内容として取り出す
-    extract_args(rest, name_len, content);
+    extract_rest(rest, name_len, content);
     // 取り出した内容でエントリの中身を丸ごと上書きする
     write_file(entry, content);
 }
@@ -196,7 +196,7 @@ void handle_cat(int cmd_len) {
     int entry;      // 対象エントリのインデックス
 
     // コマンド名(cat)を除いた部分をファイル名として取り出す
-    extract_args(input, cmd_len, name);
+    extract_rest(input, cmd_len, name);
     // ファイル名が指定されていなければ何もしない
     if (name[0] == '\0') {
         print("cat: missing file name\n");
@@ -257,7 +257,7 @@ void main(void) {
     while (1) {
         print("> ");  // 入力待ちであることを示すプロンプト
         scan(input);
-        cmd_len = extract_command(input, cmd);
+        cmd_len = extract_token(input, cmd);
         dispatch(cmd_len);
     }
 }
