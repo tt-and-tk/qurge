@@ -2,6 +2,14 @@
 char input[64];  // 1行分の入力バッファ
 char cmd[64];    // 入力の先頭トークン(コマンド名)
 
+// ファイル1件分のエントリ(名前のみ，7文字+ヌル終端)
+struct FileEntry {
+    char name[8];
+};
+
+struct FileEntry entries[4];  // ファイルテーブル本体(最大4件)
+char file_used[4];            // 各エントリの使用中フラグ(0:未使用，1:使用中)
+
 // bufの先頭から空白またはヌル終端の直前までをtokenへコピーし，コピーした長さを返す
 int extract_command(char buf[], char token[]) {
     int i = 0;
@@ -37,10 +45,72 @@ void handle_echo(int cmd_len) {
     print("\n");
 }
 
+// file_usedを先頭から走査し，未使用エントリのインデックスを返す．空きが無ければ-1を返す
+int find_free_entry(void) {
+    for (int i = 0; i < 4; i++) {
+        if (file_used[i] == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// nameの内容をentries[entry].nameへ1文字ずつコピーし，使用中フラグを立てる(7文字を超える分は切り捨てる)
+void create_file(int entry, char name[]) {
+    int i = 0;
+    while (name[i] != '\0' && i < 7) {
+        entries[entry].name[i] = name[i];
+        i = i + 1;
+    }
+    entries[entry].name[i] = '\0';
+    file_used[entry] = 1;
+}
+
+// entries[entry].nameを一時バッファへ1文字ずつコピーしてから出力する(printは直接配列のみ受け付けるため)
+void print_entry(int entry) {
+    char entry_buf[8];  // 出力用の一時バッファ(7文字+ヌル終端)
+    int i = 0;
+    while (entries[entry].name[i] != '\0' && i < 7) {
+        entry_buf[i] = entries[entry].name[i];
+        i = i + 1;
+    }
+    entry_buf[i] = '\0';
+    print(entry_buf);
+    print("\n");
+}
+
+// lsコマンド: 使用中の全エントリの名前を順に出力する
+void handle_ls(void) {
+    for (int i = 0; i < 4; i++) {
+        if (file_used[i] == 1) {
+            print_entry(i);
+        }
+    }
+}
+
+// touchコマンド: コマンド名以降の引数部分を名前とするファイルを1件作成する
+void handle_touch(int cmd_len) {
+    char args[64];  // コマンド名を除いた引数部分(作成するファイル名)
+    int entry;      // 割り当てたエントリのインデックス
+    extract_args(input, cmd_len, args);
+    if (args[0] == '\0') {  // 名前が指定されていなければ何もしない
+        print("touch: missing file name\n");
+        return;
+    }
+    entry = find_free_entry();
+    if (entry != -1) {
+        create_file(entry, args);
+    } else {
+        print("no free entry\n");
+    }
+}
+
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 void handle_help(void) {
     print("echo\n");
     print("help\n");
+    print("ls\n");
+    print("touch\n");
 }
 
 // 未対応コマンドのエラーメッセージを表示する
@@ -54,6 +124,10 @@ void dispatch(int cmd_len) {
         handle_echo(cmd_len);
     } else if (streq(cmd, "help")) {
         handle_help();
+    } else if (streq(cmd, "ls")) {
+        handle_ls();
+    } else if (streq(cmd, "touch")) {
+        handle_touch(cmd_len);
     } else {
         handle_unknown();
     }
@@ -61,6 +135,9 @@ void dispatch(int cmd_len) {
 
 void main(void) {
     int cmd_len;  // コマンド名の文字数
+    for (int i = 0; i < 4; i++) {  // グローバル配列の初期値は不定なため，起動時に明示的にクリアする
+        file_used[i] = 0;
+    }
     while (1) {
         print("> ");  // 入力待ちであることを示すプロンプト
         scan(input);
