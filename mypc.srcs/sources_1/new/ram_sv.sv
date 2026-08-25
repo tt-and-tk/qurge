@@ -34,7 +34,9 @@ module ram_sv import ram_p::*, util_p::*; (
     ram_write_if.slave ram_write
     );
 
-    // 1ワード(4バイト)あたりのワード数(仕様上，RM/WM 1回のアクセスは4バイトワード境界をまたがないためこの単位で分割できる．詳細はspecification/memory.md参照)
+    // 1ワード(4バイト)あたりのワード数(仕様上，RM/WM 1回のアクセスは4バイトワード境界をまたがないためこの単位で分割できる．詳細はspecification/memory.md参照)．
+    // addressのビット幅はRAM_SIZEからちょうど決まる($clog2(RAM_SIZE))ため，現状のパラメータでは以下のWORDS境界チェックは常に真になるが，
+    // RAM_SIZEが4の倍数以外に変わった場合の安全策として残す
     localparam int WORDS = RAM_SIZE / 4;
 
     // メモリに保存されるデータ．4バイトを4本の独立したバイトレーンに分割する(1本の配列のまま複数番地へ同時アクセスする形だと
