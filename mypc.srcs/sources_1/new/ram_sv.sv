@@ -38,8 +38,19 @@ module ram_sv import ram_p::*, util_p::*; (
     localparam int WORDS = RAM_SIZE / 4;
 
     // メモリに保存されるデータ．4バイトを4本の独立したバイトレーンに分割する(1本の配列のまま複数番地へ同時アクセスする形だと
-    // Block RAMの1ポート=1番地という制約と噛み合わずBRAMへ推論されないため，レーンごとに単一番地アクセスへ揃える)
-    (* ram_style = "block" *) logic [7:0] memory_lane [0:3][0:WORDS - 1] = '{default: '{default: 8'h00}};
+    // Block RAMの1ポート=1番地という制約と噛み合わずBRAMへ推論されないため，レーンごとに単一番地アクセスへ揃える)．
+    // レーンを選ぶ添字が実行時の可変値だとBRAM推論の妨げになるため，4本を別名の配列として持ち，各レーンへのアクセスは
+    // 常に静的な名前(memory_lane_0〜3)で行う(どの位置iのデータをどのレーンに読み書きするかだけを動的に計算する)
+    (* ram_style = "block" *) logic [7:0] memory_lane_0 [0:WORDS - 1] = '{default: 8'h00};
+    (* ram_style = "block" *) logic [7:0] memory_lane_1 [0:WORDS - 1] = '{default: 8'h00};
+    (* ram_style = "block" *) logic [7:0] memory_lane_2 [0:WORDS - 1] = '{default: 8'h00};
+    (* ram_style = "block" *) logic [7:0] memory_lane_3 [0:WORDS - 1] = '{default: 8'h00};
+
+    // レーンlane(0〜3の固定値)が，addressの下位2ビット(addr_low)のとき，データバス上のどの位置(0〜3)に対応するかを求める
+    // (addressが4バイト境界からずれているぶんだけ，レーンとデータバス位置の対応が巡回シフトする)
+    function automatic logic [1:0] lane_to_pos(input logic [1:0] lane, input logic [1:0] addr_low);
+        lane_to_pos = (4 + lane - addr_low) % 4;
+    endfunction
 
     // メモリ読み出し・書き込み状態
     state_enum ram_read_state = IDLE;
@@ -76,16 +87,28 @@ module ram_sv import ram_p::*, util_p::*; (
                 EXECUTE: begin
                     if (ram_read.valid) begin
                         ram_read.ready <= 1'b1;
-                       // マスクに応じて読み込み．全レーン共通で同じワード番地(addressの下位2ビットを除いた部分)を参照し，
-                       // データバス上の位置iに対応するバイトは，addressの下位2ビット分だけずらしたレーン((address[1:0]+i)%4)から取り出す
-                       foreach (ram_read.mask[i]) begin
-                           if (ram_read.mask[i] && (ram_read.address[$bits(ram_read.address)-1:2] < WORDS))
-                               // 32ビットのうち，8ビット分を出力
-                               ram_read.data[i*8 + 7:i*8] <= memory_lane[(ram_read.address[1:0] + i) % 4][ram_read.address[$bits(ram_read.address)-1:2]];
-                           else
-                               // マスクが立っていない，または実容量を超える番地は0を返す
-                               ram_read.data[i*8 + 7:i*8] <= 8'h00;
-                       end
+                       // 4本のレーンそれぞれ，このサイクルでデータバス上のどの位置(pos)に対応するかを求め，
+                       // 全レーン共通のワード番地(addressの下位2ビットを除いた部分)から，対応するマスクビットが
+                       // 立っているぶんだけ読み込む(立っていない，または実容量を超える番地は0を返す)
+                       if (ram_read.mask[lane_to_pos(2'd0, ram_read.address[1:0])] && (ram_read.address[$bits(ram_read.address)-1:2] < WORDS))
+                           ram_read.data[lane_to_pos(2'd0, ram_read.address[1:0])*8 +: 8] <= memory_lane_0[ram_read.address[$bits(ram_read.address)-1:2]];
+                       else
+                           ram_read.data[lane_to_pos(2'd0, ram_read.address[1:0])*8 +: 8] <= 8'h00;
+
+                       if (ram_read.mask[lane_to_pos(2'd1, ram_read.address[1:0])] && (ram_read.address[$bits(ram_read.address)-1:2] < WORDS))
+                           ram_read.data[lane_to_pos(2'd1, ram_read.address[1:0])*8 +: 8] <= memory_lane_1[ram_read.address[$bits(ram_read.address)-1:2]];
+                       else
+                           ram_read.data[lane_to_pos(2'd1, ram_read.address[1:0])*8 +: 8] <= 8'h00;
+
+                       if (ram_read.mask[lane_to_pos(2'd2, ram_read.address[1:0])] && (ram_read.address[$bits(ram_read.address)-1:2] < WORDS))
+                           ram_read.data[lane_to_pos(2'd2, ram_read.address[1:0])*8 +: 8] <= memory_lane_2[ram_read.address[$bits(ram_read.address)-1:2]];
+                       else
+                           ram_read.data[lane_to_pos(2'd2, ram_read.address[1:0])*8 +: 8] <= 8'h00;
+
+                       if (ram_read.mask[lane_to_pos(2'd3, ram_read.address[1:0])] && (ram_read.address[$bits(ram_read.address)-1:2] < WORDS))
+                           ram_read.data[lane_to_pos(2'd3, ram_read.address[1:0])*8 +: 8] <= memory_lane_3[ram_read.address[$bits(ram_read.address)-1:2]];
+                       else
+                           ram_read.data[lane_to_pos(2'd3, ram_read.address[1:0])*8 +: 8] <= 8'h00;
                         // 読み込みラスト？
                         if (ram_read.last) begin
                             ram_read_state <= RESPONSE;
@@ -118,13 +141,19 @@ module ram_sv import ram_p::*, util_p::*; (
                 EXECUTE: begin
                     if (ram_write.valid) begin
                         ram_write.ready <= 1'b1;
-                       // マスクに応じて書き込み(マスクが立っていない番地・実容量を超える番地は元の値を保持する)．
-                       // 読み出しと同様，全レーン共通のワード番地に対し，(address[1:0]+i)%4番目のレーンへ書き込む
-                       foreach (ram_write.mask[i]) begin
-                           if (ram_write.mask[i] && (ram_write.address[$bits(ram_write.address)-1:2] < WORDS))
-                               // 32ビットのうち，8ビット分を入力
-                               memory_lane[(ram_write.address[1:0] + i) % 4][ram_write.address[$bits(ram_write.address)-1:2]] <= ram_write.data[i*8 + 7:i*8];
-                       end
+                       // 読み出しと同様，4本のレーンそれぞれが対応するデータバス上の位置(pos)を求め，
+                       // 対応するマスクビットが立っているぶんだけ書き込む(立っていない・実容量を超える番地は元の値を保持する)
+                       if (ram_write.mask[lane_to_pos(2'd0, ram_write.address[1:0])] && (ram_write.address[$bits(ram_write.address)-1:2] < WORDS))
+                           memory_lane_0[ram_write.address[$bits(ram_write.address)-1:2]] <= ram_write.data[lane_to_pos(2'd0, ram_write.address[1:0])*8 +: 8];
+
+                       if (ram_write.mask[lane_to_pos(2'd1, ram_write.address[1:0])] && (ram_write.address[$bits(ram_write.address)-1:2] < WORDS))
+                           memory_lane_1[ram_write.address[$bits(ram_write.address)-1:2]] <= ram_write.data[lane_to_pos(2'd1, ram_write.address[1:0])*8 +: 8];
+
+                       if (ram_write.mask[lane_to_pos(2'd2, ram_write.address[1:0])] && (ram_write.address[$bits(ram_write.address)-1:2] < WORDS))
+                           memory_lane_2[ram_write.address[$bits(ram_write.address)-1:2]] <= ram_write.data[lane_to_pos(2'd2, ram_write.address[1:0])*8 +: 8];
+
+                       if (ram_write.mask[lane_to_pos(2'd3, ram_write.address[1:0])] && (ram_write.address[$bits(ram_write.address)-1:2] < WORDS))
+                           memory_lane_3[ram_write.address[$bits(ram_write.address)-1:2]] <= ram_write.data[lane_to_pos(2'd3, ram_write.address[1:0])*8 +: 8];
                         // 書き込みラスト？
                         if (ram_write.last) begin
                             ram_write_state <= RESPONSE;
