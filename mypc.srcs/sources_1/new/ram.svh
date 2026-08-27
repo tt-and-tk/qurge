@@ -19,7 +19,7 @@ package ram_p;
 
     // 変数型
     typedef logic [$clog2(RAM_SIZE)-1:0] address_bus_t;  // アドレスバス幅
-    typedef logic [31:0] data_bus_t;         // データバス幅
+    typedef logic [31:0] data_bus_t;                     // データバス幅
 endpackage
 
 // インターフェース定義
