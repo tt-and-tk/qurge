@@ -34,21 +34,23 @@ module ram_sv import ram_p::*, util_p::*; (
     ram_write_if.slave ram_write
     );
 
-    // 1ワードあたり4バイト(仕様上，RM/WM 1回のアクセスは4バイトワード境界をまたがない．詳細はspecification/memory.md参照)なので，ワード数はRAM_SIZE/4になる
+    // ワード数(1ワード=4バイトとしてRAM_SIZEを割った値．仕様上RM/WM 1回のアクセスは4バイトワード境界をまたがないため，
+    // この単位でメモリを分割できる．詳細はspecification/memory.md参照)
     localparam int WORDS = RAM_SIZE / 4;
 
-    // メモリに保存されるデータ．4バイトを4本の独立したバイトレーンに分割し，各レーンをBlock RAMへ推論させる．
-    // レーンの選択そのものを実行時の可変値で行うとBRAM推論の妨げになるため，4本を別名の配列として持ち，
-    // 各レーンへのアクセスは常に静的な名前(memory_lane_0〜3)で行う
+    // メモリに保存されるデータ．RAM全体を，物理番地 mod 4 == laneであるバイトだけを集めた4本の配列(レーン0〜3)に
+    // 分割し，各レーンをBlock RAMへ推論させる．レーンの選択そのものを実行時の可変値で行うとBRAM推論の妨げになる
+    // ため，4本を別名の配列として持ち，各レーンへのアクセスは常に静的な名前(memory_lane_0〜3)で行う
     (* ram_style = "block" *) logic [7:0] memory_lane_0 [0:WORDS - 1] = '{default: 8'h00};
     (* ram_style = "block" *) logic [7:0] memory_lane_1 [0:WORDS - 1] = '{default: 8'h00};
     (* ram_style = "block" *) logic [7:0] memory_lane_2 [0:WORDS - 1] = '{default: 8'h00};
     (* ram_style = "block" *) logic [7:0] memory_lane_3 [0:WORDS - 1] = '{default: 8'h00};
 
-    // レーンlaneが，このサイクルのデータバス上のどの位置(0〜3)に対応するバイトを持っているかを求める
+    // レーンlaneが，このサイクルの32ビットデータバス(ram_read.data/ram_write.data)上のどの位置(0〜3バイト目)に
+    // 対応するバイトを持っているかを求める
     function automatic logic [1:0] lane_to_pos(input logic [1:0] lane, input logic [1:0] addr_low);
-        // レーンlaneは物理番地 mod 4 == laneのバイトを保持し，データバス位置iはaddress+i番地を指すため，
-        // lane == (addr_low+i) mod 4をiについて解く(負の剰余を避けるため4を足してから%4する)
+        // データバス位置iはaddress+i番地を指すため，lane(== (address+i) mod 4 == (addr_low+i) mod 4)をiについて解く．
+        // addr_lowが0(addressが4バイト境界に揃っている)ときはi=laneとなり，位置とレーンがそのまま一致する
         lane_to_pos = (4 + lane - addr_low) % 4;
     endfunction
 
