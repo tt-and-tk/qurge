@@ -34,9 +34,7 @@ module ram_sv import ram_p::*, util_p::*; (
     ram_write_if.slave ram_write
     );
 
-    // 1ワードあたり4バイト(仕様上，RM/WM 1回のアクセスは4バイトワード境界をまたがない．詳細はspecification/memory.md参照)なので，
-    // ワード数はRAM_SIZE/4になる．addressのビット幅はRAM_SIZEちょうどに合わせているため，後述のWORDS比較は現状のパラメータでは
-    // 常に真になるが，仕様上の境界チェックとして明示的に書いておく
+    // 1ワードあたり4バイト(仕様上，RM/WM 1回のアクセスは4バイトワード境界をまたがない．詳細はspecification/memory.md参照)なので，ワード数はRAM_SIZE/4になる
     localparam int WORDS = RAM_SIZE / 4;
 
     // メモリに保存されるデータ．4バイトを4本の独立したバイトレーンに分割し，各レーンをBlock RAMへ推論させる．
@@ -47,19 +45,14 @@ module ram_sv import ram_p::*, util_p::*; (
     (* ram_style = "block" *) logic [7:0] memory_lane_2 [0:WORDS - 1] = '{default: 8'h00};
     (* ram_style = "block" *) logic [7:0] memory_lane_3 [0:WORDS - 1] = '{default: 8'h00};
 
-    // レーンlane(0〜3の固定値)が，このサイクルのデータバス上のどの位置(0〜3)に対応するバイトを持っているかを求める．
-    // レーンlaneは物理的に「番地 mod 4 == lane」であるバイトを保持している．一方データバス位置iは「address+i番地」を指す．
-    // したがって「レーンlaneがデータバス位置iに対応する」のは lane == (address+i) mod 4 == (addr_low+i) mod 4 のとき．
-    // これをiについて解くと i == (lane - addr_low) mod 4 になる(負の剰余を避けるため4を足してから%4する)．
-    // 例: addr_low(addressの下位2ビット)が1のとき，データバス位置0(address+0番地)は物理番地の下位2ビットが1のレーン，
-    // つまりlane=1が対応する．検算: lane_to_pos(1, 1) = (4+1-1)%4 = 0 で一致する
+    // レーンlaneが，このサイクルのデータバス上のどの位置(0〜3)に対応するバイトを持っているかを求める
     function automatic logic [1:0] lane_to_pos(input logic [1:0] lane, input logic [1:0] addr_low);
+        // レーンlaneは物理番地 mod 4 == laneのバイトを保持し，データバス位置iはaddress+i番地を指すため，
+        // lane == (addr_low+i) mod 4をiについて解く(負の剰余を避けるため4を足してから%4する)
         lane_to_pos = (4 + lane - addr_low) % 4;
     endfunction
 
     // 4本のレーンそれぞれが，このサイクルで対応するデータバス位置(0〜3)．読み出し・書き込みで別々に求める
-    // (foreach等で毎回関数を呼び直すのではなく，あらかじめ4レーンぶんを計算しておくことで，同じ入力に対する
-    // 重複した回路が生まれないようにする)
     logic [1:0] read_pos_0, read_pos_1, read_pos_2, read_pos_3;
     assign read_pos_0 = lane_to_pos(2'd0, ram_read.address[1:0]);
     assign read_pos_1 = lane_to_pos(2'd1, ram_read.address[1:0]);
