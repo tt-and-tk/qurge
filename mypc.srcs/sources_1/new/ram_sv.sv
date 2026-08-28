@@ -49,8 +49,8 @@ module ram_sv import ram_p::*, util_p::*; (
     // レーンlaneが，このサイクルの32ビットデータバス(ram_read.data/ram_write.data)上のどの位置(0〜3バイト目)に
     // 対応するバイトを持っているかを求める
     function automatic logic [1:0] lane_to_pos(input logic [1:0] lane, input logic [1:0] addr_low);
-        // データバス位置iはaddress+i番地を指すため，lane(== (address+i) mod 4 == (addr_low+i) mod 4)をiについて解く．
-        // addr_lowが0(addressが4バイト境界に揃っている)ときはi=laneとなり，位置とレーンがそのまま一致する
+        // データバス位置iはaddress+i番地を指すため，lane(= (address+i) mod 4 = (addr_low+i) mod 4)をiについて解く．
+        // addr_lowが0(addressが4バイト境界に揃っている)ときはiとlaneが等しくなり，位置とレーンがそのまま一致する
         lane_to_pos = (4 + lane - addr_low) % 4;
     endfunction
 
