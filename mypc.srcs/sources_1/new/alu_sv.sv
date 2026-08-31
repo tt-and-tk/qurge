@@ -152,6 +152,13 @@ module alu_sv (
     util_p::state_enum stdin_state = IDLE;     // 標準入力(SCAN)の実行状態
     util_p::state_enum stdout_state = IDLE;    // 標準出力(PRINT)の実行状態
     util_p::state_enum div_state = IDLE;       // 割り算(DIV)の実行状態
+    util_p::state_enum mul_state = IDLE;       // 掛け算(MUL)の実行状態
+
+    // MULの乗算結果(DSP48E1の出力)を一旦保持するレジスタ．乗算結果を確定させるサイクルと，
+    // それを使って次命令へフォワーディングするかどうかを判定するサイクルを分離するために使う
+    // (issue #87．乗算とフォワーディング判定の比較・マルチプレクサが同一サイクルの組み合わせ
+    // 論理として直列に連なるとタイミング違反になるため，間にこのレジスタを挟んで2サイクルに割る)
+    register_t mul_result_r = '0;
 
     // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
     // 実行フェーズの間のみ意味を持つ(それ以外のフェーズでは直前に実行した命令の値が残っている)
@@ -344,6 +351,10 @@ module alu_sv (
             dividend_tvalid <= 1'b0;
             div_state <= IDLE;
 
+            // 掛け算回路用
+            mul_state <= IDLE;
+            mul_result_r <= '0;
+
             // メモリの読み込み・書き出し状態をリセット
             ram_read_state <= IDLE;
             ram_write_state <= IDLE;
@@ -477,7 +488,32 @@ module alu_sv (
                                 NAND: write_value = ~(rs1_val_r & rs2_val_r);
                                 ADD:  write_value = rs1_val_r + rs2_val_r;
                                 SUB:  write_value = rs1_val_r - rs2_val_r;
-                                MUL:  write_value = rs1_val_r * rs2_val_r;
+
+                                // 掛け算(issue #87．乗算結果の確定サイクルと，それを次命令へ
+                                // フォワーディングするか判定するサイクルを分離した2サイクル構成．
+                                // 1サイクル目で乗算結果をmul_result_rへ確定させ，2サイクル目で
+                                // その安定した値を使って書き込み・次命令への遷移を行う)
+                                MUL: begin
+                                    unique case (mul_state)
+                                        // 乗算を実行し，結果が確定するまで待つ
+                                        IDLE: begin
+                                            mul_result_r <= rs1_val_r * rs2_val_r;
+                                            mul_state <= RESPONSE;
+                                        end
+
+                                        // 確定した乗算結果を使って書き込み・次命令への遷移を行う
+                                        RESPONSE: begin
+                                            register[rd_addr_r] <= mul_result_r;
+                                            register[PC_ADDR] <= next_pc;
+                                            mul_state <= IDLE;
+                                            advance_to_next_instruction(1'b1, rd_addr_r, mul_result_r, 1'b0, '0, '0);
+                                        end
+                                        default: is_halted <= 1'b1;
+                                    endcase
+                                    // MULはこのcase内で書き込み・遷移まで完結させるため，
+                                    // 下の共通処理(541行目付近)には委ねない
+                                    write_valid = 1'b0;
+                                end
 
                                 // 割り算
                                 DIV: begin
@@ -525,9 +561,10 @@ module alu_sv (
                                 end
                             endcase
 
-                            // DIV以外はここでPCインクリメント・次命令への遷移(不正なfuncでは
-                            // レジスタ書き込み・PC更新・次命令への遷移のいずれも行わない)
-                            if (func_r != DIV && write_valid) begin
+                            // DIV・MUL以外はここでPCインクリメント・次命令への遷移(不正なfuncでは
+                            // レジスタ書き込み・PC更新・次命令への遷移のいずれも行わない．
+                            // DIV・MULはそれぞれのcase内で書き込み・遷移まで完結させている)
+                            if (func_r != DIV && func_r != MUL && write_valid) begin
                                 register[rd_addr_r] <= write_value;
                                 register[PC_ADDR] <= next_pc;
                                 advance_to_next_instruction(1'b1, rd_addr_r, write_value, 1'b0, '0, '0);
