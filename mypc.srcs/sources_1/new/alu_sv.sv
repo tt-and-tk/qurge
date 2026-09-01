@@ -151,13 +151,12 @@ module alu_sv (
     util_p::state_enum ram_write_state = IDLE; // メモリ書き込み(WM)の実行状態
     util_p::state_enum stdin_state = IDLE;     // 標準入力(SCAN)の実行状態
     util_p::state_enum stdout_state = IDLE;    // 標準出力(PRINT)の実行状態
-    util_p::state_enum div_state = IDLE;       // 割り算(DIV)の実行状態
     util_p::state_enum mul_state = IDLE;       // 掛け算(MUL)の実行状態
+    util_p::state_enum div_state = IDLE;       // 割り算(DIV)の実行状態
 
-    // MULの乗算結果(DSP48E1の出力)を一旦保持するレジスタ．乗算結果を確定させるサイクルと，
-    // それを使って次命令へフォワーディングするかどうかを判定するサイクルを分離するために使う
-    // (issue #87．乗算とフォワーディング判定の比較・マルチプレクサが同一サイクルの組み合わせ
-    // 論理として直列に連なるとタイミング違反になるため，間にこのレジスタを挟んで2サイクルに割る)
+    // MULの乗算結果(DSP48E1の出力)を保持するレジスタ．write_valueはCPU_EXECUTE内で毎サイクル
+    // 上書きされるブロッキング代入のスクラッチ変数であり，サイクルをまたいで値を保持できないため，
+    // 乗算結果を次サイクルまで安定して持ち越すには専用のノンブロッキング代入レジスタが要る
     register_t mul_result_r = '0;
 
     // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
@@ -344,16 +343,16 @@ module alu_sv (
             imm_r <= '0;
             mask_r <= '0;
 
+            // 掛け算回路用
+            mul_state <= IDLE;
+            mul_result_r <= '0;
+
             // 割り算回路用
             divisor_tdata <= '0;
             divisor_tvalid <= 1'b0;
             dividend_tdata <= '0;
             dividend_tvalid <= 1'b0;
             div_state <= IDLE;
-
-            // 掛け算回路用
-            mul_state <= IDLE;
-            mul_result_r <= '0;
 
             // メモリの読み込み・書き出し状態をリセット
             ram_read_state <= IDLE;
@@ -489,10 +488,10 @@ module alu_sv (
                                 ADD:  write_value = rs1_val_r + rs2_val_r;
                                 SUB:  write_value = rs1_val_r - rs2_val_r;
 
-                                // 掛け算(issue #87．乗算結果の確定サイクルと，それを次命令へ
-                                // フォワーディングするか判定するサイクルを分離した2サイクル構成．
-                                // 1サイクル目で乗算結果をmul_result_rへ確定させ，2サイクル目で
-                                // その安定した値を使って書き込み・次命令への遷移を行う)
+                                // 掛け算．乗算(DSP48E1)の結果と，次命令へのフォワーディング判定
+                                // (アドレス比較・マルチプレクサ)を同一サイクルの組み合わせ論理で
+                                // つなぐとタイミングが厳しいため，mul_result_rに一旦確定させてから
+                                // 判定を行う2サイクル構成にしている
                                 MUL: begin
                                     unique case (mul_state)
                                         // 乗算を実行し，結果が確定するまで待つ
@@ -508,10 +507,12 @@ module alu_sv (
                                             mul_state <= IDLE;
                                             advance_to_next_instruction(1'b1, rd_addr_r, mul_result_r, 1'b0, '0, '0);
                                         end
+
+                                        // その他
                                         default: is_halted <= 1'b1;
                                     endcase
                                     // MULはこのcase内で書き込み・遷移まで完結させるため，
-                                    // 下の共通処理(541行目付近)には委ねない
+                                    // 下の共通処理には委ねない
                                     write_valid = 1'b0;
                                 end
 
