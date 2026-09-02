@@ -31,13 +31,13 @@
 // CHECK(実行可否を確認する)→EXECUTEの4フェーズを基本とする．ROMはクロックに同期した読み出しの
 // ため，番地を出した次のサイクルにならないと結果が確定しない．
 //
-// 実行に複数サイクルかかる命令(DIV・RM/WM・SCAN/PRINTの応答待ちなど)の待機中は，次に実行する
+// 実行に複数サイクルかかる命令(MUL・DIV・RM/WM・SCAN/PRINTの応答待ちなど)の待機中は，次に実行する
 // 命令の番地が既に確定しているため，あらかじめROMから取得してデコードしておく．読み出し・
 // 書き込みに使うレジスタ番地の依存関係もこの時点で確認しておき，直前の命令がこのサイクルに
 // 書き込む値をレジスタの読み出し結果の代わりに使う(フォワーディング)ことで，命令完了時に
 // FETCH/FETCH_CAPTURE/CHECKを省略して直接次の命令のEXECUTEから始められる場合がある．
-// 1サイクルで完了する命令(P/S/A/F/J/N_TYPE)はこの先読みが間に合わないため，毎回4フェーズ
-// すべてを経る．
+// 1サイクルで完了する命令(MUL・DIVを除くP/S/A/F/J/N_TYPE)はこの先読みが間に合わないため，
+// 毎回4フェーズすべてを経る．
 module alu_sv (
     input logic clk,
     input logic resetn,
@@ -151,7 +151,11 @@ module alu_sv (
     util_p::state_enum ram_write_state = IDLE; // メモリ書き込み(WM)の実行状態
     util_p::state_enum stdin_state = IDLE;     // 標準入力(SCAN)の実行状態
     util_p::state_enum stdout_state = IDLE;    // 標準出力(PRINT)の実行状態
+    util_p::state_enum mul_state = IDLE;       // 掛け算(MUL)の実行状態
     util_p::state_enum div_state = IDLE;       // 割り算(DIV)の実行状態
+
+    // write_valueは毎クロック初期化されてしまうため，掛け算の結果はこちらの専用レジスタへ格納する
+    register_t mul_result_r = '0;
 
     // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
     // 実行フェーズの間のみ意味を持つ(それ以外のフェーズでは直前に実行した命令の値が残っている)
@@ -337,6 +341,10 @@ module alu_sv (
             imm_r <= '0;
             mask_r <= '0;
 
+            // 掛け算回路用
+            mul_state <= IDLE;
+            mul_result_r <= '0;
+
             // 割り算回路用
             divisor_tdata <= '0;
             divisor_tvalid <= 1'b0;
@@ -477,7 +485,32 @@ module alu_sv (
                                 NAND: write_value = ~(rs1_val_r & rs2_val_r);
                                 ADD:  write_value = rs1_val_r + rs2_val_r;
                                 SUB:  write_value = rs1_val_r - rs2_val_r;
-                                MUL:  write_value = rs1_val_r * rs2_val_r;
+
+                                // 掛け算．結果が確定するまで1サイクル待ってから，書き込み・
+                                // 次命令への遷移を行う
+                                MUL: begin
+                                    unique case (mul_state)
+                                        // 乗算を実行し，結果が確定するまで待つ
+                                        IDLE: begin
+                                            mul_result_r <= rs1_val_r * rs2_val_r;
+                                            mul_state <= RESPONSE;
+                                        end
+
+                                        // 確定した乗算結果を使って書き込み・次命令への遷移を行う
+                                        RESPONSE: begin
+                                            register[rd_addr_r] <= mul_result_r;
+                                            register[PC_ADDR] <= next_pc;
+                                            mul_state <= IDLE;
+                                            advance_to_next_instruction(1'b1, rd_addr_r, mul_result_r, 1'b0, '0, '0);
+                                        end
+
+                                        // その他
+                                        default: is_halted <= 1'b1;
+                                    endcase
+                                    // MULはこのcase内で書き込み・遷移まで完結させるため，
+                                    // 下の共通処理には委ねない
+                                    write_valid = 1'b0;
+                                end
 
                                 // 割り算
                                 DIV: begin
@@ -525,9 +558,10 @@ module alu_sv (
                                 end
                             endcase
 
-                            // DIV以外はここでPCインクリメント・次命令への遷移(不正なfuncでは
-                            // レジスタ書き込み・PC更新・次命令への遷移のいずれも行わない)
-                            if (func_r != DIV && write_valid) begin
+                            // DIV・MUL以外はここでPCインクリメント・次命令への遷移(不正なfuncでは
+                            // レジスタ書き込み・PC更新・次命令への遷移のいずれも行わない．
+                            // DIV・MULはそれぞれのcase内で書き込み・遷移まで完結させている)
+                            if (func_r != DIV && func_r != MUL && write_valid) begin
                                 register[rd_addr_r] <= write_value;
                                 register[PC_ADDR] <= next_pc;
                                 advance_to_next_instruction(1'b1, rd_addr_r, write_value, 1'b0, '0, '0);
@@ -894,7 +928,7 @@ module alu_sv (
 
                     // 次の命令を先読みしてよい状態(can_prefetch)で，かつ今サイクルにはまだ次の命令へ
                     // 進んでいない(!advancing)場合に，次の命令をprefetched_instructionへ先読みする．
-                    // これに該当するのは，DIVの完了待ちやRM/WM/SCAN/PRINTの応答待ちなど，命令の実行が
+                    // これに該当するのは，MUL/DIVの完了待ちやRM/WM/SCAN/PRINTの応答待ちなど，命令の実行が
                     // 複数サイクルにまたがりまだ完了(advance_to_next_instruction()の呼び出し)に至って
                     // いないサイクル．
                     // このブロックはunique caseの後(CPU_EXECUTE末尾)に置き，かつ!advancingで
