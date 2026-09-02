@@ -22,14 +22,12 @@ int extract_token(char buf[], char token[]) {
     return i;
 }
 
-// bufのtoken_len文字目以降(先頭トークンの直後の空白を1つだけ読み飛ばした位置)からヌル終端までをoutへコピーする
+// bufのtoken_len文字目以降(先頭トークンの直後に連続する空白をすべて読み飛ばした位置)からヌル終端までをoutへコピーする
 void extract_rest(char buf[], int token_len, char out[]) {
-    int start;  // outへのコピー開始位置
+    int start = token_len;  // outへのコピー開始位置
     int i = 0;
-    if (buf[token_len] == ' ') {
-        start = token_len + 1;
-    } else {
-        start = token_len;
+    while (buf[start] == ' ') {
+        start = start + 1;
     }
     while (buf[start + i] != '\0') {
         out[i] = buf[start + i];
