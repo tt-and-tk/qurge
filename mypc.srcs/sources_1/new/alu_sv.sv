@@ -154,9 +154,7 @@ module alu_sv (
     util_p::state_enum mul_state = IDLE;       // 掛け算(MUL)の実行状態
     util_p::state_enum div_state = IDLE;       // 割り算(DIV)の実行状態
 
-    // MULの乗算結果(DSP48E1の出力)を保持するレジスタ．write_valueはCPU_EXECUTE内で毎サイクル
-    // 上書きされるブロッキング代入のスクラッチ変数であり，サイクルをまたいで値を保持できないため，
-    // 乗算結果を次サイクルまで安定して持ち越すには専用のノンブロッキング代入レジスタが要る
+    // write_valueは毎クロック初期化されてしまうため，掛け算の結果はこちらの専用レジスタへ格納する
     register_t mul_result_r = '0;
 
     // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
@@ -488,10 +486,8 @@ module alu_sv (
                                 ADD:  write_value = rs1_val_r + rs2_val_r;
                                 SUB:  write_value = rs1_val_r - rs2_val_r;
 
-                                // 掛け算．乗算(DSP48E1)の結果と，次命令へのフォワーディング判定
-                                // (アドレス比較・マルチプレクサ)を同一サイクルの組み合わせ論理で
-                                // つなぐとタイミングが厳しいため，mul_result_rに一旦確定させてから
-                                // 判定を行う2サイクル構成にしている
+                                // 掛け算．結果が確定するまで1サイクル待ってから，書き込み・
+                                // 次命令への遷移を行う
                                 MUL: begin
                                     unique case (mul_state)
                                         // 乗算を実行し，結果が確定するまで待つ
