@@ -54,6 +54,16 @@ int find_free_entry(void) {
     return -1;
 }
 
+// nameの先頭7文字(ヌル終端が先に来ればそこまで)をtruncatedへコピーし，ヌル終端する
+void truncate_name(char name[], char truncated[]) {
+    int i = 0;
+    while (name[i] != '\0' && i < 7) {
+        truncated[i] = name[i];
+        i = i + 1;
+    }
+    truncated[i] = '\0';
+}
+
 // nameの内容をentries[entry].nameへ1文字ずつコピーする(7文字を超える分は切り捨てる)
 void rename_file(int entry, char name[]) {
     int i = 0;
@@ -148,18 +158,25 @@ void print_content(int entry) {
     print("\n");
 }
 
-// touchコマンド: コマンド名以降の引数部分を名前とするファイルを1件作成する
+// touchコマンド: コマンド名以降の引数部分を名前とするファイルを1件作成する(既に7文字切り詰め後で同名のファイルがあれば作成しない)
 void handle_touch(int cmd_len) {
     char args[64];  // コマンド名を除いた引数部分(作成するファイル名)
+    char truncated_name[8];  // argsを7文字に切り詰めた名前(重複判定・作成の両方で使う)
     int entry;      // 割り当てたエントリのインデックス
     extract_rest(input, cmd_len, args);
     if (args[0] == '\0') {  // 名前が指定されていなければ何もしない
         print("touch: missing file name\n");
         return;
     }
+    // 保存後の名前(7文字切り詰め後)で重複判定するため，先に切り詰めておく
+    truncate_name(args, truncated_name);
+    if (find_entry_by_name(truncated_name) != -1) {  // 既に同名(切り詰め後)のファイルがあれば作成しない
+        print("touch: file already exists\n");
+        return;
+    }
     entry = find_free_entry();
     if (entry != -1) {
-        create_file(entry, args);
+        create_file(entry, truncated_name);
     } else {
         print("no free entry\n");
     }
