@@ -290,10 +290,10 @@ module alu_sv (
 
         // デバッグ用
         // led     = register[6'h05][3:0];
-        led = register[6'h32][3:0];
+        led = register[STDIN_SIGNAL_ADDR][3:0];
         rgb_led = 6'h0;
         // number  = register[PC_ADDR][7:0];
-        number  = register[6'h31][7:0];
+        number  = register[STDIN_DATA_ADDR][7:0];
 
         // ROMへ番地を出力する
         if (cpu_phase == CPU_FETCH || cpu_phase == CPU_FETCH_CAPTURE) begin
@@ -393,16 +393,16 @@ module alu_sv (
         // 命令実行
         else begin
             // IOからレジスタに値を格納する
-            register[6'h20] <= {4'b0, btn};
-            register[6'h21] <= {6'b0, sw};
-            register[6'h31] <= stdin_tdata;
-            register[6'h32][2] <= stdin_tlast;
-            register[6'h32][1] <= stdin_tvalid;
-            register[6'h32][0] <= stdin_tready;
-            register[6'h33] <= stdout_tdata;
-            register[6'h34][2] <= stdout_tlast;
-            register[6'h34][1] <= stdout_tvalid;
-            register[6'h34][0] <= stdout_tready;
+            register[BTN_ADDR] <= {4'b0, btn};
+            register[SW_ADDR] <= {6'b0, sw};
+            register[STDIN_DATA_ADDR] <= stdin_tdata;
+            register[STDIN_SIGNAL_ADDR][2] <= stdin_tlast;
+            register[STDIN_SIGNAL_ADDR][1] <= stdin_tvalid;
+            register[STDIN_SIGNAL_ADDR][0] <= stdin_tready;
+            register[STDOUT_DATA_ADDR] <= stdout_tdata;
+            register[STDOUT_SIGNAL_ADDR][2] <= stdout_tlast;
+            register[STDOUT_SIGNAL_ADDR][1] <= stdout_tvalid;
+            register[STDOUT_SIGNAL_ADDR][0] <= stdout_tready;
 
             // can_prefetchの1サイクル遅延版を更新する(ROMの同期読み出しは番地を出した次の
             // サイクルにならないと結果が確定しないため，先読みの取り込み可否判定に使う)
