@@ -195,11 +195,8 @@ package alu_p;
             is_writable = util_p::FALSE;
     endfunction
 
-    // 命令の種類・使用するfunc・読み書きに使うレジスタ番地から，その命令がそのまま実行可能か
-    // (読み書きに使うレジスタ番地が全て有効で，かつ命令の種類・funcが定義済みの組み合わせで，
-    // かつ命令自体をROMの範囲内から取得できているか)を判定する．
-    // 実行可否判定の唯一の実装．条件を変える場合はこの関数だけを直すこと(呼び出し元に条件を
-    // 書き足すと二重管理になる)．
+    // 命令のデコード時点で分かる情報(命令種別・func・レジスタ番地)から，その命令が実行可能かを
+    // 判定する．
     function util_p::bool_t is_instruction_executable(
         logic             pc_valid,  // 命令をROMの範囲内から取得できたか
         machine_p::type_t m_type,

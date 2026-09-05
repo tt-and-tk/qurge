@@ -31,6 +31,10 @@
 // CHECK(実行可否を確認する)→EXECUTEの4フェーズを基本とする．ROMはクロックに同期した読み出しの
 // ため，番地を出した次のサイクルにならないと結果が確定しない．
 //
+// 実行可否の確認は，命令のデコード時点で分かる情報(命令種別・func・レジスタ番地など)はCHECK
+// フェーズでalu.svh::is_instruction_executable()により一括判定する．レジスタの値そのものに基づく
+// 判定は値が確定するまで行えないため，値が確定するEXECUTE中に個別に判定する．
+//
 // 実行に複数サイクルかかる命令(MUL・DIV・RM/WM・SCAN/PRINTの応答待ちなど)の待機中は，次に実行する
 // 命令の番地が既に確定しているため，あらかじめROMから取得してデコードしておく．読み出し・
 // 書き込みに使うレジスタ番地の依存関係もこの時点で確認しておき，直前の命令がこのサイクルに
@@ -517,11 +521,16 @@ module alu_sv (
                                     unique case (div_state)
                                         // 入力をIPへ送信
                                         IDLE: begin
-                                            dividend_tdata  <= rs1_val_r;
-                                            divisor_tdata   <= rs2_val_r;
-                                            dividend_tvalid <= 1'b1;
-                                            divisor_tvalid  <= 1'b1;
-                                            div_state <= EXECUTE;
+                                            // 除数が0なら送信せず停止する
+                                            if (rs2_val_r == '0) begin
+                                                is_halted <= 1'b1;
+                                            end else begin
+                                                dividend_tdata  <= rs1_val_r;
+                                                divisor_tdata   <= rs2_val_r;
+                                                dividend_tvalid <= 1'b1;
+                                                divisor_tvalid  <= 1'b1;
+                                                div_state <= EXECUTE;
+                                            end
                                         end
 
                                         // IPはtreadyなし（常にready）なので1サイクル待ってRESPONSEへ
