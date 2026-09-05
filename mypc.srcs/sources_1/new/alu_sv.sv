@@ -33,8 +33,7 @@
 //
 // 実行可否の確認は，命令のデコード時点で分かる情報(命令種別・func・レジスタ番地など)はCHECK
 // フェーズでalu.svh::is_instruction_executable()により一括判定する．レジスタの値そのものに基づく
-// 判定(RM/WMの番地範囲外チェック，DIVの除数ゼロチェックなど)は値が確定するまで行えないため，
-// 値が確定するEXECUTE中に個別に判定する．
+// 判定は値が確定するまで行えないため，値が確定するEXECUTE中に個別に判定する．
 //
 // 実行に複数サイクルかかる命令(MUL・DIV・RM/WM・SCAN/PRINTの応答待ちなど)の待機中は，次に実行する
 // 命令の番地が既に確定しているため，あらかじめROMから取得してデコードしておく．読み出し・
@@ -520,8 +519,9 @@ module alu_sv (
                                 // 割り算
                                 DIV: begin
                                     unique case (div_state)
-                                        // 入力をIPへ送信(除数が0なら送信せず停止する)
+                                        // 入力をIPへ送信
                                         IDLE: begin
+                                            // 除数が0なら送信せず停止する
                                             if (rs2_val_r == '0) begin
                                                 is_halted <= 1'b1;
                                             end else begin
