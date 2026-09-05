@@ -79,7 +79,25 @@ module alu_sv (
     output logic [ 3:0] stdout_tkeep,
     output logic        stdout_tlast,
     input  logic        stdout_tready,
-    output logic        stdout_tvalid
+    output logic        stdout_tvalid,
+
+    // Pmod A・Pmod B
+    output logic [7:0] ja,
+    output logic [7:0] jb,
+
+    // Arduino
+    output logic [13:0] ar,       // AR0(ar[0])〜AR13(ar[13])
+    output logic         a,       // 単体のデジタルI/Oピン
+    output logic         ar_sda,
+    output logic         ar_scl,
+    output logic         ck_mosi,
+    output logic         ck_sck,
+    output logic         ck_ss,
+    input  logic         ck_miso,
+
+    // ラズパイヘッダー(GPIO6〜GPIO24相当．物理ピン番号でgpio[8]〜gpio[26]．
+    // GPIO0〜5はPmod Aと物理ピンを共有するため結線しない)
+    output logic [26:8] gpio
     );
 
     // import文
@@ -299,6 +317,25 @@ module alu_sv (
         // number  = register[PC_ADDR][7:0];
         number  = register[STDIN_DATA_ADDR][7:0];
 
+        // Pmod A・Pmod B(書き込み専用)
+        ja = register[PMOD_A_ADDR][7:0];
+        jb = register[PMOD_B_ADDR][7:0];
+
+        // Arduino(書き込み専用．AR0〜AR7とAR8〜AR13はレジスタが分かれているため
+        // ビット位置をAR番号にそのまま合わせている(0x26・0x28のみ他のレジスタと逆順))
+        ar = {register[AR_HIGH_ADDR][5:0], register[AR_LOW_ADDR][7:0]};
+        a       = register[AR_MISC_ADDR][2];
+        ar_sda  = register[AR_MISC_ADDR][1];
+        ar_scl  = register[AR_MISC_ADDR][0];
+
+        // Arduino SPI(MOSI・SCK・SSは書き込み専用．MISOは下のIO取り込みでレジスタへミラーする)
+        ck_mosi = register[SPI_ADDR][1];
+        ck_sck  = register[SPI_ADDR][2];
+        ck_ss   = register[SPI_ADDR][0];
+
+        // ラズパイヘッダー(書き込み専用．GPIOn(n=6〜24)はgpio[n+2]に対応する)
+        gpio = {register[GPIO3_ADDR][0], register[GPIO2_ADDR][7:0], register[GPIO1_ADDR][7:0], register[GPIO0_ADDR][7:6]};
+
         // ROMへ番地を出力する
         if (cpu_phase == CPU_FETCH || cpu_phase == CPU_FETCH_CAPTURE) begin
             // フェッチ中(1サイクル目・同期読み出しの結果を待つ間とも)は，これから実行する
@@ -407,6 +444,9 @@ module alu_sv (
             register[STDOUT_SIGNAL_ADDR][2] <= stdout_tlast;
             register[STDOUT_SIGNAL_ADDR][1] <= stdout_tvalid;
             register[STDOUT_SIGNAL_ADDR][0] <= stdout_tready;
+            // Arduino SPIのMISOビットのみ外部ピンを毎サイクル取り込む(SCK・MOSI・SSビットは
+            // CPUの書き込みをそのまま保持し，このブロックでは触れない)
+            register[SPI_ADDR][3] <= ck_miso;
 
             // can_prefetchの1サイクル遅延版を更新する(ROMの同期読み出しは番地を出した次の
             // サイクルにならないと結果が確定しないため，先読みの取り込み可否判定に使う)
