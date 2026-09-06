@@ -86,16 +86,15 @@ module alu_sv (
 
     // Arduino
     output logic [13:0] ar,       // AR0(ar[0])〜AR13(ar[13])
-    output logic         a,       // 単体のデジタルI/Oピン
-    output logic         ar_sda,
-    output logic         ar_scl,
-    output logic         ck_mosi,
-    output logic         ck_sck,
-    output logic         ck_ss,
-    input  logic         ck_miso,
+    output logic        a,        // 単体のデジタルI/Oピン
+    output logic        ar_sda,
+    output logic        ar_scl,
+    output logic        ck_mosi,
+    output logic        ck_sck,
+    output logic        ck_ss,
+    input  logic        ck_miso,
 
-    // ラズパイヘッダー(GPIO6〜GPIO24相当．物理ピン番号でgpio[8]〜gpio[26]．
-    // GPIO0〜5はPmod Aと物理ピンを共有するため結線しない)
+    // ラズパイヘッダー
     output logic [26:8] gpio
     );
 
@@ -314,23 +313,22 @@ module alu_sv (
         led = register[STDIN_SIGNAL_ADDR][3:0];
         rgb_led = 6'h0;
 
-        // Pmod A・Pmod B(書き込み専用)
+        // Pmod A・Pmod B
         ja = register[PMOD_A_ADDR][7:0];
         jb = register[PMOD_B_ADDR][7:0];
 
-        // Arduino(書き込み専用．AR0〜AR7とAR8〜AR13はレジスタが分かれているため
-        // ビット位置をAR番号にそのまま合わせている(0x26・0x28のみ他のレジスタと逆順))
+        // Arduino．AR0〜AR7とAR8〜AR13はレジスタが分かれているため，ビット位置をAR番号にそのまま合わせている
         ar = {register[AR_HIGH_ADDR][5:0], register[AR_LOW_ADDR][7:0]};
         a       = register[AR_MISC_ADDR][2];
         ar_sda  = register[AR_MISC_ADDR][1];
         ar_scl  = register[AR_MISC_ADDR][0];
 
-        // Arduino SPI(MOSI・SCK・SSは書き込み専用．MISOは下のIO取り込みでレジスタへミラーする)
+        // Arduino SPI．MISOは下のIO取り込みでレジスタへミラーする
         ck_mosi = register[SPI_ADDR][1];
         ck_sck  = register[SPI_ADDR][2];
         ck_ss   = register[SPI_ADDR][0];
 
-        // ラズパイヘッダー(書き込み専用．GPIOn(n=6〜24)はgpio[n+2]に対応する)
+        // ラズパイヘッダー．GPIOn(n=6〜24)はgpio[n+2]に対応する
         gpio = {register[GPIO3_ADDR][0], register[GPIO2_ADDR][7:0], register[GPIO1_ADDR][7:0], register[GPIO0_ADDR][7:6]};
 
         // ROMへ番地を出力する

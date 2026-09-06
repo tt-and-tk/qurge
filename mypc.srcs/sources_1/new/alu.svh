@@ -72,22 +72,22 @@ package alu_p;
         // RGB LED
         else if (addr == 6'h23)
             is_readable = util_p::FALSE;
-        // Pmod A(書き込み専用)
+        // Pmod A
         else if (addr == 6'h24)
             is_readable = util_p::FALSE;
-        // Pmod B(書き込み専用)
+        // Pmod B
         else if (addr == 6'h25)
             is_readable = util_p::FALSE;
-        // AR(書き込み専用)
+        // AR
         else if (addr == 6'h26 || addr == 6'h28)
             is_readable = util_p::FALSE;
-        // I2C(書き込み専用)
+        // I2C
         else if (addr == 6'h27)
             is_readable = util_p::FALSE;
         // AR_RST
         else if (addr == 6'h29)
             is_readable = util_p::TRUE;
-        // SPI(MISOビットのみ読み出せるため，レジスタ単位では読み出し可能とする)
+        // SPI
         else if (addr == 6'h2a)
             is_readable = util_p::TRUE;
         // アナログピン
@@ -96,7 +96,7 @@ package alu_p;
         // XADC
         else if (addr == 6'h2c)
             is_readable = util_p::FALSE;    // オミット
-        // GPIO(書き込み専用)
+        // GPIO
         else if (6'h2d <= addr && addr <= 6'h30)
             is_readable = util_p::FALSE;
         // 標準入力(データ)

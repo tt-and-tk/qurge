@@ -130,8 +130,6 @@ set_property -dict { PACKAGE_PIN P16   IOSTANDARD LVCMOS33 } [get_ports { ar_scl
 set_property -dict { PACKAGE_PIN P15   IOSTANDARD LVCMOS33 } [get_ports { ar_sda }]; #IO_L24P_T3_34 Sch=ar_sda
 
 ##Raspberry Digital I/O
-##NOTE: rpio_02_r〜rpio_07_r(PACKAGE_PIN W18/W19/Y18/Y19/U18/U19)はPmodA(ja[6]/ja[7]/ja[0]/ja[1]/ja[4]/ja[5])と
-##      物理ピンを共有しているため，PmodAと排他利用になる．本プロジェクトではPmodA側を優先し，このレンジ(GPIO0〜5相当)は結線しない
 
 #set_property -dict { PACKAGE_PIN W18   IOSTANDARD LVCMOS33 } [get_ports { rpio_02_r }]; #IO_L22P_T3_34 Sch=rpio_02_r
 #set_property -dict { PACKAGE_PIN W19   IOSTANDARD LVCMOS33 } [get_ports { rpio_03_r }]; #IO_L22N_T3_34 Sch=rpio_03_r
