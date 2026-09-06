@@ -54,7 +54,7 @@ void extract_text_arg(char buf[], int pos, char arg[]) {
 int has_extra_args(char buf[], int pos) {
     // 先頭の空白を読み飛ばす
     pos = skip_spaces(buf, pos);
-    // 空白の先がヌル終端なら，末尾に空白が続いているだけで引数は残っていない
+    // 読み飛ばした先がヌル終端なら引数は残っていない
     return buf[pos] != '\0';
 }
 
@@ -376,6 +376,7 @@ void handle_help(int pos) {
 
 // 未対応コマンドのエラーメッセージを表示する
 void handle_unknown(void) {
+    // 未対応である旨のエラーを出力する
     print_error("unknown command\n");
 }
 
