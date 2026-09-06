@@ -11,99 +11,70 @@ struct FileEntry {
 struct FileEntry entries[4];  // ファイルテーブル本体(最大4件)
 char file_used[4];            // 各エントリの使用中フラグ(0:未使用，1:使用中)
 
-// bufのpos文字目以降に連続する半角空白を読み飛ばした位置を返す
-// 引数の区切りの規則をここに集め，引数の取り出しと残数の確認とで食い違わないようにする
-// 区切りとして扱うのは半角空白だけで，タブ等の他の空白文字は引数の一部になる
+// bufのpos文字目以降に連続する空白を読み飛ばした位置を返す
 int skip_spaces(char buf[], int pos) {
+    // 区切りとして扱うのは半角空白だけで，タブ等の他の空白文字は引数の一部になる
     while (buf[pos] == ' ') {
         pos = pos + 1;
     }
     return pos;
 }
 
-// bufのpos文字目以降で先頭の連続する空白を読み飛ばし，次の空白かヌル終端の直前までをargへコピーする
-// 戻り値は取り出した引数の直後の位置であり，これを次の呼び出しのposへ渡して引数を順に取り出す
-// 引数が残っていなければargは空文字列になる
-// argは1つの引数が行全体になり得るため，inputと同じ幅で確保する(コピー量を制限する手段を持たない)
+// bufのpos文字目以降から引数を1つargへ取り出し，その直後の位置を返す
 int extract_arg(char buf[], int pos, char arg[]) {
     int i = 0;
+    // 引数の手前に連続する空白を読み飛ばす
     pos = skip_spaces(buf, pos);
+    // 次の空白かヌル終端の直前までを1つの引数としてコピーする(引数が無ければ空文字列になる)
     while (buf[pos + i] != ' ' && buf[pos + i] != '\0') {
         arg[i] = buf[pos + i];
         i = i + 1;
     }
     arg[i] = '\0';
+    // 戻り値を次の呼び出しのposへ渡して，引数を先頭から順に取り出す
     return pos + i;
 }
 
-// bufのpos文字目以降を丸ごと1つの引数としてargへコピーする(前後の空白は取り除き，途中の空白はそのまま残す)
-// 空白を区切りとして扱わない自由テキスト(echoの出力内容・writeの書き込み内容)専用の取り出し方
-// argはextract_argと同じく，行全体を受け取れるようinputと同じ幅で確保する
+// bufのpos文字目以降を丸ごと1つの引数としてargへ取り出す
 void extract_text_arg(char buf[], int pos, char arg[]) {
-    int i = 0;    // bufから読み出した文字数
-    int len = 0;  // 末尾の空白を除いたargの長さ
+    int i = 0;
+    // 引数の手前に連続する空白を読み飛ばす
     pos = skip_spaces(buf, pos);
+    // 残りは原文のままコピーする(空白を区切りとせず引数の一部として扱う)
     while (buf[pos + i] != '\0') {
         arg[i] = buf[pos + i];
-        if (buf[pos + i] != ' ') {
-            len = i + 1;  // 空白以外を書いた位置までを長さとし，末尾に続く空白を切り捨てる
-        }
         i = i + 1;
     }
-    arg[len] = '\0';
+    arg[i] = '\0';
 }
 
 // bufのpos文字目以降に引数が残っていれば1，残っていなければ0を返す
-// (extract_argで取り出して空文字列か調べる形にすると，捨てるためだけのバッファをinputと同じ幅で用意することになる)
 int has_extra_args(char buf[], int pos) {
+    // 末尾に続く空白だけが残っている場合は引数と見なさない
     pos = skip_spaces(buf, pos);
     return buf[pos] != '\0';
 }
 
-// エラーは"<コマンド名>: <内容>"の形式で出力する．接頭辞をここに集め，内容は呼び出し側が続けて出力する
-// コマンド名は，実行中のコマンドを保持するグローバル配列cmdから取る(実行が終わるまで書き換わらない)
-// (printは直接配列のみを受け付け配列パラメータを渡せないため，内容を引数として渡すことはできない)
-void error_prefix(void) {
+// エラーを"<コマンド名>: <msg>"の形式で出力する
+void print_error(char msg[]) {
+    char msg_buf[32];  // 出力用の一時バッファ(printは直接配列のみ受け付けるため)
+    int i = 0;
+    while (msg[i] != '\0') {
+        msg_buf[i] = msg[i];
+        i = i + 1;
+    }
+    msg_buf[i] = '\0';
+    // どのコマンドが出したエラーかが分かるよう，実行中のコマンド名を前置する
     print(cmd);
     print(": ");
+    print(msg_buf);
 }
 
-// 複数のコマンドが出す内容は関数として置き，同じ文言をコマンドの数だけ持たないようにする
-void error_missing_arg(void) {
-    error_prefix();
-    print("missing argument\n");
-}
-
-void error_too_many_args(void) {
-    error_prefix();
-    print("too many arguments\n");
-}
-
-void error_no_such_file(void) {
-    error_prefix();
-    print("no such file\n");
-}
-
-// 引数をちょうど1つだけ取るコマンドの共通処理: 引数をargへ取り出し，取り出せれば1を返す
-// 引数が無いか2つ以上あれば，エラーを出力して0を返す
-int require_one_arg(char buf[], int pos, char arg[]) {
-    pos = extract_arg(buf, pos, arg);
-    if (arg[0] == '\0') {
-        error_missing_arg();
-        return 0;
-    }
-    if (has_extra_args(buf, pos)) {
-        error_too_many_args();
-        return 0;
-    }
-    return 1;
-}
-
-// echoコマンド: 引数をそのまま出力する(引数を持たない場合は空行を出力する)
+// echoコマンド: コマンド名以降の引数部分をそのまま出力する
 void handle_echo(int pos) {
-    char text[64];  // 出力する内容
-    extract_text_arg(input, pos, text);
-    print(text);
+    char args[64];  // コマンド名を除いた引数部分
+    extract_text_arg(input, pos, args);
+    print(args);
     print("\n");
 }
 
@@ -204,8 +175,9 @@ void print_entry(int entry) {
 
 // lsコマンド: 使用中の全エントリの名前を順に出力する
 void handle_ls(int pos) {
+    // 引数を取らないコマンドのため，指定されていれば何もしない
     if (has_extra_args(input, pos)) {
-        error_too_many_args();
+        print_error("too many arguments\n");
         return;
     }
     for (int i = 0; i < 4; i++) {
@@ -228,116 +200,165 @@ void print_content(int entry) {
     print("\n");
 }
 
-// touchコマンド: 引数のファイル名で空のファイルを1件作成する(既に同名のファイルがあれば作成しない)
+// touchコマンド: 引数のファイル名でファイルを1件作成する(既に同名のファイルがあれば作成しない)
 void handle_touch(int pos) {
-    char name[64];  // 作成するファイル名
+    char name[64];  // 先頭の引数(作成するファイル名)
     int entry;      // 割り当てたエントリのインデックス
 
-    if (require_one_arg(input, pos, name) == 0) {
+    // コマンド名(touch)の直後の引数をファイル名として取り出す
+    pos = extract_arg(input, pos, name);
+    // ファイル名が指定されていなければ何もしない
+    if (name[0] == '\0') {
+        print_error("missing argument\n");
+        return;
+    }
+    // ファイル名の後に余分な引数があれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
         return;
     }
 
-    if (find_entry_by_name(name) != -1) {  // 既に同名のファイルがあれば作成しない
-        error_prefix();
-        print("file already exists\n");
+    // 既に同名のファイルがあれば作成しない
+    if (find_entry_by_name(name) != -1) {
+        print_error("file already exists\n");
         return;
     }
+    // 空きエントリが無ければ作成できない
     entry = find_free_entry();
     if (entry == -1) {
-        error_prefix();
-        print("no free entry\n");
+        print_error("no free entry\n");
         return;
     }
+    // 空きエントリを取り出したファイル名で使用中にする
     create_file(entry, name);
 }
 
-// writeコマンド: 第1引数のファイルの内容を，第2引数の内容で丸ごと上書きする
+// writeコマンド: 引数の先頭トークンをファイル名，残りを内容として丸ごと上書きする
 void handle_write(int pos) {
-    char name[64];     // 書き込み先のファイル名
-    char content[64];  // 書き込む内容
+    char name[64];     // 先頭トークン(ファイル名)
+    char content[64];  // ファイル名を除いた残り(書き込む内容)
     int entry;         // 対象エントリのインデックス
 
+    // コマンド名(write)の直後の引数をファイル名として取り出す
     pos = extract_arg(input, pos, name);
+    // ファイル名が指定されていなければ何もしない
     if (name[0] == '\0') {
-        error_missing_arg();
+        print_error("missing argument\n");
         return;
     }
-    // 内容は空白を区切りとしない自由テキストであり，行末までが1つの引数になる
-    // (内容が空の場合はファイルを空にする指示として扱うため，引数不足とはしない)
+
+    // ファイル名以降の引数部分を丸ごと書き込む内容として取り出す
     extract_text_arg(input, pos, content);
 
+    // ファイル名から対象エントリを探す
     entry = find_entry_by_name(name);
-    if (entry == -1) {  // 対象ファイルが無ければ何もしない(自動作成はしない)
-        error_no_such_file();
+    // 対象ファイルが無ければ何もしない(自動作成はしない)
+    if (entry == -1) {
+        print_error("no such file\n");
         return;
     }
+
+    // 取り出した内容でエントリの中身を丸ごと上書きする
     write_file(entry, content);
-}
-
-// 対象のファイル名を1つだけ引数に取るコマンドの共通処理: 引数を検証し，対象エントリのインデックスを返す
-// 引数の個数が違うか，その名前のファイルが無ければ，エラーを出力して-1を返す
-int resolve_file_arg(char buf[], int pos) {
-    char name[64];  // 対象のファイル名
-    int entry;      // 対象エントリのインデックス
-
-    if (require_one_arg(buf, pos, name) == 0) {
-        return -1;
-    }
-
-    entry = find_entry_by_name(name);
-    if (entry == -1) {
-        error_no_such_file();
-    }
-    return entry;
 }
 
 // catコマンド: 引数のファイル名に対応する内容を出力する
 void handle_cat(int pos) {
-    int entry;  // 対象エントリのインデックス
-    entry = resolve_file_arg(input, pos);
-    if (entry != -1) {
-        print_content(entry);
+    char name[64];  // 先頭の引数(読み出すファイル名)
+    int entry;      // 対象エントリのインデックス
+
+    // コマンド名(cat)の直後の引数をファイル名として取り出す
+    pos = extract_arg(input, pos, name);
+    // ファイル名が指定されていなければ何もしない
+    if (name[0] == '\0') {
+        print_error("missing argument\n");
+        return;
     }
+    // ファイル名の後に余分な引数があれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return;
+    }
+
+    // ファイル名から対象エントリを探す
+    entry = find_entry_by_name(name);
+    // 対象ファイルが無ければ何もしない
+    if (entry == -1) {
+        print_error("no such file\n");
+        return;
+    }
+
+    // 見つかったエントリの内容を出力する
+    print_content(entry);
 }
 
 // rmコマンド: 引数のファイル名に対応するエントリを削除する
 void handle_rm(int pos) {
-    int entry;  // 対象エントリのインデックス
-    entry = resolve_file_arg(input, pos);
-    if (entry != -1) {
-        delete_file(entry);
+    char name[64];  // 先頭の引数(削除するファイル名)
+    int entry;      // 対象エントリのインデックス
+
+    // コマンド名(rm)の直後の引数をファイル名として取り出す
+    pos = extract_arg(input, pos, name);
+    // ファイル名が指定されていなければ何もしない
+    if (name[0] == '\0') {
+        print_error("missing argument\n");
+        return;
     }
+    // ファイル名の後に余分な引数があれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return;
+    }
+
+    // ファイル名から対象エントリを探す
+    entry = find_entry_by_name(name);
+    // 対象ファイルが無ければ何もしない
+    if (entry == -1) {
+        print_error("no such file\n");
+        return;
+    }
+
+    // 見つかったエントリを削除する
+    delete_file(entry);
 }
 
-// mvコマンド: 第1引数のファイルの名前を，第2引数の名前へ変更する
+// mvコマンド: 引数の先頭トークンを旧ファイル名，次のトークンを新ファイル名として名前を変更する
 void handle_mv(int pos) {
-    char old_name[64];  // 旧ファイル名
-    char new_name[64];  // 新ファイル名
+    char old_name[64];  // 先頭トークン(旧ファイル名)
+    char new_name[64];  // 次のトークン(新ファイル名)
     int entry;          // 対象エントリのインデックス
 
+    // コマンド名(mv)の直後の2つの引数を，旧ファイル名・新ファイル名として順に取り出す
     pos = extract_arg(input, pos, old_name);
     pos = extract_arg(input, pos, new_name);
+    // 旧ファイル名・新ファイル名のどちらかが指定されていなければ何もしない
     if (old_name[0] == '\0' || new_name[0] == '\0') {
-        error_missing_arg();
+        print_error("missing argument\n");
         return;
     }
+    // 新ファイル名の後に余分な引数があれば何もしない
     if (has_extra_args(input, pos)) {
-        error_too_many_args();
+        print_error("too many arguments\n");
         return;
     }
 
+    // 旧ファイル名から対象エントリを探す
     entry = find_entry_by_name(old_name);
+    // 対象ファイルが無ければ何もしない
     if (entry == -1) {
-        error_no_such_file();
+        print_error("no such file\n");
         return;
     }
+
+    // 見つかったエントリの名前を付け替える
     rename_file(entry, new_name);
 }
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 void handle_help(int pos) {
+    // 引数を取らないコマンドのため，指定されていれば何もしない
     if (has_extra_args(input, pos)) {
-        error_too_many_args();
+        print_error("too many arguments\n");
         return;
     }
     print("echo\n");
@@ -350,15 +371,13 @@ void handle_help(int pos) {
     print("mv\n");
 }
 
-// 未対応コマンドのエラーメッセージを表示する(何が未対応だったかが分かるよう入力されたコマンド名を出す)
+// 未対応コマンドのエラーメッセージを表示する
 void handle_unknown(void) {
-    error_prefix();
-    print("unknown command\n");
+    // 何が未対応だったかが分かるよう，入力されたコマンド名を前置して出力する
+    print_error("unknown command\n");
 }
 
 // グローバル配列cmdの内容に応じた処理を呼び出す(streqは直接配列のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
-// 引数の個数と種類はコマンドごとに異なるため，dispatchは引数の開始位置を渡すだけで，取り出しと検証はコマンド側が行う
-// 取り出しの対象は1行分の入力を保持するグローバル配列inputで固定のため，位置だけを受け渡す
 void dispatch(int pos) {
     if (streq(cmd, "echo")) {
         handle_echo(pos);
