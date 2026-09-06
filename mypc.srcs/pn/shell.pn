@@ -21,6 +21,7 @@ int skip_spaces(char buf[], int pos) {
 }
 
 // bufのpos文字目以降から引数を1つargへ取り出し，その直後の位置を返す
+// 引数1つが行全体になり得るため，argはbufと同じ幅で確保する(コピー先の幅を知る手段が無く打ち切れない)
 int extract_arg(char buf[], int pos, char arg[]) {
     int i = 0;
     // 引数の手前に連続する空白を読み飛ばす
@@ -36,6 +37,7 @@ int extract_arg(char buf[], int pos, char arg[]) {
 }
 
 // bufのpos文字目以降を丸ごと1つの引数としてargへ取り出す
+// extract_argと同じく，argはbufと同じ幅で確保する
 void extract_text_arg(char buf[], int pos, char arg[]) {
     int i = 0;
     // 引数の手前に連続する空白を読み飛ばす
@@ -59,7 +61,7 @@ int has_extra_args(char buf[], int pos) {
 void print_error(char msg[]) {
     char msg_buf[32];  // 出力用の一時バッファ(printは直接配列のみ受け付けるため)
     int i = 0;
-    while (msg[i] != '\0') {
+    while (msg[i] != '\0' && i < 31) {
         msg_buf[i] = msg[i];
         i = i + 1;
     }
