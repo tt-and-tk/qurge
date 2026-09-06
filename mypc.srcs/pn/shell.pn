@@ -59,21 +59,27 @@ int has_extra_args(char buf[], int pos) {
     return buf[pos] != '\0';
 }
 
-// エラーは"<コマンド名>: <内容>"の形式で出力する．複数のコマンドが使う内容はここに関数として置く
-// (printは直接配列のみを受け付け配列パラメータを渡せないため，内容を引数に取らず内容ごとに関数を分ける)
-void error_missing_arg(void) {
+// エラーは"<コマンド名>: <内容>"の形式で出力する．接頭辞をここに集め，内容は呼び出し側が続けて出力する
+// (printは直接配列のみを受け付け配列パラメータを渡せないため，内容を引数として渡すことはできない)
+void error_prefix(void) {
     print(cmd);
-    print(": missing argument\n");
+    print(": ");
+}
+
+// 複数のコマンドが出す内容は関数として置き，同じ文言をコマンドの数だけ持たないようにする
+void error_missing_arg(void) {
+    error_prefix();
+    print("missing argument\n");
 }
 
 void error_too_many_args(void) {
-    print(cmd);
-    print(": too many arguments\n");
+    error_prefix();
+    print("too many arguments\n");
 }
 
 void error_no_such_file(void) {
-    print(cmd);
-    print(": no such file\n");
+    error_prefix();
+    print("no such file\n");
 }
 
 // echoコマンド: 引数をそのまま出力する(引数を持たない場合は空行を出力する)
@@ -221,16 +227,16 @@ void handle_touch(int pos) {
     }
 
     if (find_entry_by_name(name) != -1) {  // 既に同名のファイルがあれば作成しない
-        print(cmd);
-        print(": file already exists\n");
+        error_prefix();
+        print("file already exists\n");
         return;
     }
     entry = find_free_entry();
     if (entry != -1) {
         create_file(entry, name);
     } else {
-        print(cmd);
-        print(": no free entry\n");
+        error_prefix();
+        print("no free entry\n");
     }
 }
 
@@ -346,8 +352,8 @@ void handle_help(int pos) {
 
 // 未対応コマンドのエラーメッセージを表示する(何が未対応だったかが分かるよう入力されたコマンド名を出す)
 void handle_unknown(void) {
-    print(cmd);
-    print(": unknown command\n");
+    error_prefix();
+    print("unknown command\n");
 }
 
 // グローバル配列cmdの内容に応じた処理を呼び出す(streqは直接配列のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
