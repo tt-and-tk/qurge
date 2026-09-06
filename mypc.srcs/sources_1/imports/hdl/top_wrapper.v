@@ -2,7 +2,7 @@
 //Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //--------------------------------------------------------------------------------
 //Tool Version: Vivado v.2023.2.2 (win64) Build 4126759 Thu Feb  8 23:53:51 MST 2024
-//Date        : Sun Mar  8 15:33:19 2026
+//Date        : Sun Sep  6 09:17:15 2026
 //Host        : owner running 64-bit major release  (build 9200)
 //Command     : generate_target top_wrapper.bd
 //Design      : top_wrapper
@@ -32,7 +32,16 @@ module top_wrapper
     FIXED_IO_ps_clk,
     FIXED_IO_ps_porb,
     FIXED_IO_ps_srstb,
+    a,
+    ar,
+    ar_scl,
+    ar_sda,
     btn,
+    ck_miso,
+    ck_mosi,
+    ck_sck,
+    ck_ss,
+    gpio,
     ja,
     jb,
     led,
@@ -59,7 +68,16 @@ module top_wrapper
   inout FIXED_IO_ps_clk;
   inout FIXED_IO_ps_porb;
   inout FIXED_IO_ps_srstb;
+  output a;
+  output [13:0]ar;
+  output ar_scl;
+  output ar_sda;
   input [3:0]btn;
+  input ck_miso;
+  output ck_mosi;
+  output ck_sck;
+  output ck_ss;
+  output [26:8]gpio;
   output [7:0]ja;
   output [7:0]jb;
   output [3:0]led;
@@ -87,7 +105,16 @@ module top_wrapper
   wire FIXED_IO_ps_clk;
   wire FIXED_IO_ps_porb;
   wire FIXED_IO_ps_srstb;
+  wire a;
+  wire [13:0]ar;
+  wire ar_scl;
+  wire ar_sda;
   wire [3:0]btn;
+  wire ck_miso;
+  wire ck_mosi;
+  wire ck_sck;
+  wire ck_ss;
+  wire [26:8]gpio;
   wire [7:0]ja;
   wire [7:0]jb;
   wire [3:0]led;
@@ -116,7 +143,16 @@ module top_wrapper
         .FIXED_IO_ps_clk(FIXED_IO_ps_clk),
         .FIXED_IO_ps_porb(FIXED_IO_ps_porb),
         .FIXED_IO_ps_srstb(FIXED_IO_ps_srstb),
+        .a(a),
+        .ar(ar),
+        .ar_scl(ar_scl),
+        .ar_sda(ar_sda),
         .btn(btn),
+        .ck_miso(ck_miso),
+        .ck_mosi(ck_mosi),
+        .ck_sck(ck_sck),
+        .ck_ss(ck_ss),
+        .gpio(gpio),
         .ja(ja),
         .jb(jb),
         .led(led),
