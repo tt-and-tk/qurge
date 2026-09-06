@@ -243,12 +243,12 @@ void handle_touch(int pos) {
         return;
     }
     entry = find_free_entry();
-    if (entry != -1) {
-        create_file(entry, name);
-    } else {
+    if (entry == -1) {
         error_prefix();
         print("no free entry\n");
+        return;
     }
+    create_file(entry, name);
 }
 
 // writeコマンド: 第1引数のファイルの内容を，第2引数の内容で丸ごと上書きする
