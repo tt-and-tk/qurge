@@ -1,7 +1,7 @@
 {
   "design": {
     "design_info": {
-      "boundary_crc": "0x26313473540DF511",
+      "boundary_crc": "0x882F846BDB70B91",
       "device": "xc7z020clg400-1",
       "gen_directory": "../../../../mypc.gen/sources_1/bd/top",
       "name": "top",
@@ -14,7 +14,6 @@
       "processing_system7_0": "",
       "mother_board_0": "",
       "proc_sys_reset_0": "",
-      "seven_seg_0": "",
       "axi_dma_0": "",
       "ps7_0_axi_periph": {
         "s00_couplers": {
@@ -239,6 +238,37 @@
         "direction": "I",
         "left": "1",
         "right": "0"
+      },
+      "ck_miso": {
+        "direction": "I"
+      },
+      "ar": {
+        "direction": "O",
+        "left": "13",
+        "right": "0"
+      },
+      "a": {
+        "direction": "O"
+      },
+      "ar_sda": {
+        "direction": "O"
+      },
+      "ar_scl": {
+        "direction": "O"
+      },
+      "ck_mosi": {
+        "direction": "O"
+      },
+      "ck_sck": {
+        "direction": "O"
+      },
+      "ck_ss": {
+        "direction": "O"
+      },
+      "gpio": {
+        "direction": "O",
+        "left": "26",
+        "right": "8"
       }
     },
     "components": {
@@ -345,8 +375,14 @@
           "PCW_CAN0_PERIPHERAL_CLKSRC": {
             "value": "External"
           },
+          "PCW_CAN0_PERIPHERAL_ENABLE": {
+            "value": "0"
+          },
           "PCW_CAN1_PERIPHERAL_CLKSRC": {
             "value": "External"
+          },
+          "PCW_CAN1_PERIPHERAL_ENABLE": {
+            "value": "0"
           },
           "PCW_CAN_PERIPHERAL_CLKSRC": {
             "value": "IO PLL"
@@ -669,6 +705,24 @@
           "PCW_FPGA_FCLK0_ENABLE": {
             "value": "1"
           },
+          "PCW_GP0_EN_MODIFIABLE_TXN": {
+            "value": "1"
+          },
+          "PCW_GP0_NUM_READ_THREADS": {
+            "value": "4"
+          },
+          "PCW_GP0_NUM_WRITE_THREADS": {
+            "value": "4"
+          },
+          "PCW_GP1_EN_MODIFIABLE_TXN": {
+            "value": "1"
+          },
+          "PCW_GP1_NUM_READ_THREADS": {
+            "value": "4"
+          },
+          "PCW_GP1_NUM_WRITE_THREADS": {
+            "value": "4"
+          },
           "PCW_GPIO_BASEADDR": {
             "value": "0xE000A000"
           },
@@ -687,6 +741,12 @@
           "PCW_GPIO_PERIPHERAL_ENABLE": {
             "value": "0"
           },
+          "PCW_I2C0_PERIPHERAL_ENABLE": {
+            "value": "0"
+          },
+          "PCW_I2C1_PERIPHERAL_ENABLE": {
+            "value": "0"
+          },
           "PCW_I2C_RESET_ENABLE": {
             "value": "1"
           },
@@ -698,9 +758,6 @@
           },
           "PCW_INCLUDE_ACP_TRANS_CHECK": {
             "value": "0"
-          },
-          "PCW_IRQ_F2P_MODE": {
-            "value": "DIRECT"
           },
           "PCW_MIO_0_IOTYPE": {
             "value": "LVCMOS 3.3V"
@@ -1338,6 +1395,9 @@
           "PCW_PERIPHERAL_BOARD_PRESET": {
             "value": "part0"
           },
+          "PCW_PJTAG_PERIPHERAL_ENABLE": {
+            "value": "0"
+          },
           "PCW_PLL_BYPASSMODE_ENABLE": {
             "value": "0"
           },
@@ -1479,14 +1539,14 @@
           "PCW_S_AXI_HP1_ID_WIDTH": {
             "value": "6"
           },
-          "PCW_S_AXI_HP2_DATA_WIDTH": {
-            "value": "64"
-          },
-          "PCW_S_AXI_HP3_DATA_WIDTH": {
-            "value": "64"
-          },
           "PCW_TPIU_PERIPHERAL_CLKSRC": {
             "value": "External"
+          },
+          "PCW_TRACE_INTERNAL_WIDTH": {
+            "value": "2"
+          },
+          "PCW_TRACE_PERIPHERAL_ENABLE": {
+            "value": "0"
           },
           "PCW_TTC0_CLK0_PERIPHERAL_CLKSRC": {
             "value": "CPU_1X"
@@ -1506,6 +1566,9 @@
           "PCW_TTC0_CLK2_PERIPHERAL_DIVISOR0": {
             "value": "1"
           },
+          "PCW_TTC0_PERIPHERAL_ENABLE": {
+            "value": "0"
+          },
           "PCW_TTC1_CLK0_PERIPHERAL_CLKSRC": {
             "value": "CPU_1X"
           },
@@ -1523,6 +1586,9 @@
           },
           "PCW_TTC1_CLK2_PERIPHERAL_DIVISOR0": {
             "value": "1"
+          },
+          "PCW_TTC1_PERIPHERAL_ENABLE": {
+            "value": "0"
           },
           "PCW_UART0_BASEADDR": {
             "value": "0xE0000000"
@@ -1853,6 +1919,12 @@
           },
           "PCW_WDT_PERIPHERAL_DIVISOR0": {
             "value": "1"
+          },
+          "PCW_WDT_PERIPHERAL_ENABLE": {
+            "value": "0"
+          },
+          "preset": {
+            "value": "None"
           }
         },
         "interface_ports": {
@@ -1998,7 +2070,7 @@
       },
       "mother_board_0": {
         "vlnv": "xilinx.com:module_ref:mother_board:1.0",
-        "ip_revision": "1772946357",
+        "ip_revision": "1788653822",
         "xci_name": "top_mother_board_0_0",
         "xci_path": "ip\\top_mother_board_0_0\\top_mother_board_0_0.xci",
         "inst_hier_path": "mother_board_0",
@@ -2418,10 +2490,46 @@
             "left": "5",
             "right": "0"
           },
-          "number": {
+          "ja": {
             "direction": "O",
             "left": "7",
             "right": "0"
+          },
+          "jb": {
+            "direction": "O",
+            "left": "7",
+            "right": "0"
+          },
+          "ar": {
+            "direction": "O",
+            "left": "13",
+            "right": "0"
+          },
+          "a": {
+            "direction": "O"
+          },
+          "ar_sda": {
+            "direction": "O"
+          },
+          "ar_scl": {
+            "direction": "O"
+          },
+          "ck_mosi": {
+            "direction": "O"
+          },
+          "ck_sck": {
+            "direction": "O"
+          },
+          "ck_ss": {
+            "direction": "O"
+          },
+          "ck_miso": {
+            "direction": "I"
+          },
+          "gpio": {
+            "direction": "O",
+            "left": "26",
+            "right": "8"
           }
         }
       },
@@ -2431,35 +2539,6 @@
         "xci_name": "top_proc_sys_reset_0_0",
         "xci_path": "ip\\top_proc_sys_reset_0_0\\top_proc_sys_reset_0_0.xci",
         "inst_hier_path": "proc_sys_reset_0"
-      },
-      "seven_seg_0": {
-        "vlnv": "xilinx.com:module_ref:seven_seg:1.0",
-        "ip_revision": "1772327550",
-        "xci_name": "top_seven_seg_0_0",
-        "xci_path": "ip\\top_seven_seg_0_0\\top_seven_seg_0_0.xci",
-        "inst_hier_path": "seven_seg_0",
-        "reference_info": {
-          "ref_type": "hdl",
-          "ref_name": "seven_seg",
-          "boundary_crc": "0x0"
-        },
-        "ports": {
-          "number": {
-            "direction": "I",
-            "left": "7",
-            "right": "0"
-          },
-          "left_number": {
-            "direction": "O",
-            "left": "7",
-            "right": "0"
-          },
-          "right_number": {
-            "direction": "O",
-            "left": "7",
-            "right": "0"
-          }
-        }
       },
       "axi_dma_0": {
         "vlnv": "xilinx.com:ip:axi_dma:7.1",
@@ -3594,16 +3673,76 @@
           "mother_board_0/btn"
         ]
       },
+      "ck_miso_1": {
+        "ports": [
+          "ck_miso",
+          "mother_board_0/ck_miso"
+        ]
+      },
+      "mother_board_0_a": {
+        "ports": [
+          "mother_board_0/a",
+          "a"
+        ]
+      },
+      "mother_board_0_ar": {
+        "ports": [
+          "mother_board_0/ar",
+          "ar"
+        ]
+      },
+      "mother_board_0_ar_scl": {
+        "ports": [
+          "mother_board_0/ar_scl",
+          "ar_scl"
+        ]
+      },
+      "mother_board_0_ar_sda": {
+        "ports": [
+          "mother_board_0/ar_sda",
+          "ar_sda"
+        ]
+      },
+      "mother_board_0_ck_mosi": {
+        "ports": [
+          "mother_board_0/ck_mosi",
+          "ck_mosi"
+        ]
+      },
+      "mother_board_0_ck_sck": {
+        "ports": [
+          "mother_board_0/ck_sck",
+          "ck_sck"
+        ]
+      },
+      "mother_board_0_ck_ss": {
+        "ports": [
+          "mother_board_0/ck_ss",
+          "ck_ss"
+        ]
+      },
+      "mother_board_0_gpio": {
+        "ports": [
+          "mother_board_0/gpio",
+          "gpio"
+        ]
+      },
+      "mother_board_0_ja": {
+        "ports": [
+          "mother_board_0/ja",
+          "ja"
+        ]
+      },
+      "mother_board_0_jb": {
+        "ports": [
+          "mother_board_0/jb",
+          "jb"
+        ]
+      },
       "mother_board_0_led": {
         "ports": [
           "mother_board_0/led",
           "led"
-        ]
-      },
-      "mother_board_0_number": {
-        "ports": [
-          "mother_board_0/number",
-          "seven_seg_0/number"
         ]
       },
       "mother_board_0_rgb_led": {
@@ -3656,18 +3795,6 @@
         "ports": [
           "processing_system7_0/FCLK_RESET0_N",
           "proc_sys_reset_0/ext_reset_in"
-        ]
-      },
-      "seven_seg_0_left_number": {
-        "ports": [
-          "seven_seg_0/left_number",
-          "ja"
-        ]
-      },
-      "seven_seg_0_right_number": {
-        "ports": [
-          "seven_seg_0/right_number",
-          "jb"
         ]
       },
       "sw_1": {
