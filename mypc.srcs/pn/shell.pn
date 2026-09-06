@@ -55,6 +55,7 @@ int find_free_entry(void) {
 }
 
 // nameの先頭7文字(ヌル終端が先に来ればそこまで)をtruncatedへコピーし，ヌル終端する
+// (保存側のrename_fileも同じ7文字の打ち切りを自前で持つ．コピー先がentries[].nameであり，構造体配列のメンバを関数へ渡せないためこの関数を呼べない)
 void truncate_name(char name[], char truncated[]) {
     int i = 0;
     while (name[i] != '\0' && i < 7) {
@@ -74,7 +75,7 @@ void rename_file(int entry, char name[]) {
     entries[entry].name[i] = '\0';
 }
 
-// entries[entry].nameをnameで設定し，内容を空にしたうえで使用中フラグを立てる
+// entries[entry].nameをnameの先頭7文字で設定し，内容を空にしたうえで使用中フラグを立てる
 void create_file(int entry, char name[]) {
     rename_file(entry, name);
     entries[entry].content[0] = '\0';
@@ -104,14 +105,16 @@ int names_match(char name[], int entry) {
         }
         j = j + 1;
     }
-    // 名前欄の上限(8バイト)まで一致
+    // 保存名も検索名(find_entry_by_nameが切り詰める)も7文字以内でヌル終端されるためここへは到達しないが，値を返さない経路を作らないために一致として返す
     return 1;
 }
 
-// nameと一致する使用中エントリのインデックスを返す．無ければ-1を返す
+// nameと一致する使用中エントリのインデックスを返す．無ければ-1を返す(保存名は7文字に切り詰められているため，検索名も同じ規則で切り詰めてから照合する)
 int find_entry_by_name(char name[]) {
+    char truncated[8];  // nameを7文字に切り詰めた検索名
+    truncate_name(name, truncated);
     for (int i = 0; i < 4; i++) {
-        if (file_used[i] == 1 && names_match(name, i)) {
+        if (file_used[i] == 1 && names_match(truncated, i)) {
             return i;
         }
     }
@@ -125,9 +128,9 @@ void delete_file(int entry) {
 
 // entries[entry].nameを一時バッファへ1文字ずつコピーしてから出力する(printは直接配列のみ受け付けるため)
 void print_entry(int entry) {
-    char entry_buf[8];  // 出力用の一時バッファ(7文字+ヌル終端)
+    char entry_buf[8];  // 出力用の一時バッファ(entries[].nameと同じ幅)
     int i = 0;
-    while (entries[entry].name[i] != '\0' && i < 7) {
+    while (entries[entry].name[i] != '\0') {
         entry_buf[i] = entries[entry].name[i];
         i = i + 1;
     }
@@ -147,9 +150,9 @@ void handle_ls(void) {
 
 // entries[entry].contentを一時バッファへ1文字ずつコピーしてから出力する(printは直接配列のみ受け付けるため)
 void print_content(int entry) {
-    char content_buf[32];  // 出力用の一時バッファ(31文字+ヌル終端)
+    char content_buf[32];  // 出力用の一時バッファ(entries[].contentと同じ幅)
     int i = 0;
-    while (entries[entry].content[i] != '\0' && i < 31) {
+    while (entries[entry].content[i] != '\0') {
         content_buf[i] = entries[entry].content[i];
         i = i + 1;
     }
@@ -158,25 +161,22 @@ void print_content(int entry) {
     print("\n");
 }
 
-// touchコマンド: コマンド名以降の引数部分を名前とするファイルを1件作成する(既に7文字切り詰め後で同名のファイルがあれば作成しない)
+// touchコマンド: コマンド名以降の引数部分を名前とするファイルを1件作成する(既に同名のファイルがあれば作成しない)
 void handle_touch(int cmd_len) {
     char args[64];  // コマンド名を除いた引数部分(作成するファイル名)
-    char truncated_name[8];  // argsを7文字に切り詰めた名前(重複判定・作成の両方で使う)
     int entry;      // 割り当てたエントリのインデックス
     extract_rest(input, cmd_len, args);
     if (args[0] == '\0') {  // 名前が指定されていなければ何もしない
         print("touch: missing file name\n");
         return;
     }
-    // 保存後の名前(7文字切り詰め後)で重複判定するため，先に切り詰めておく
-    truncate_name(args, truncated_name);
-    if (find_entry_by_name(truncated_name) != -1) {  // 既に同名(切り詰め後)のファイルがあれば作成しない
+    if (find_entry_by_name(args) != -1) {  // 既に同名のファイルがあれば作成しない
         print("touch: file already exists\n");
         return;
     }
     entry = find_free_entry();
     if (entry != -1) {
-        create_file(entry, truncated_name);
+        create_file(entry, args);
     } else {
         print("no free entry\n");
     }
