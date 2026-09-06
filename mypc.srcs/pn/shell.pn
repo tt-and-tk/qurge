@@ -61,6 +61,7 @@ int has_extra_args(char buf[], int pos) {
 }
 
 // エラーは"<コマンド名>: <内容>"の形式で出力する．接頭辞をここに集め，内容は呼び出し側が続けて出力する
+// コマンド名は，実行中のコマンドを保持するグローバル配列cmdから取る(実行が終わるまで書き換わらない)
 // (printは直接配列のみを受け付け配列パラメータを渡せないため，内容を引数として渡すことはできない)
 void error_prefix(void) {
     print(cmd);
@@ -83,15 +84,15 @@ void error_no_such_file(void) {
     print("no such file\n");
 }
 
-// 引数をちょうど1つだけ取るコマンドの共通処理: 引数をnameへ取り出し，取り出せれば1を返す
+// 引数をちょうど1つだけ取るコマンドの共通処理: 引数をargへ取り出し，取り出せれば1を返す
 // 引数が無いか2つ以上あれば，エラーを出力して0を返す
-int extract_single_arg(int pos, char name[]) {
-    pos = extract_arg(input, pos, name);
-    if (name[0] == '\0') {
+int require_one_arg(char buf[], int pos, char arg[]) {
+    pos = extract_arg(buf, pos, arg);
+    if (arg[0] == '\0') {
         error_missing_arg();
         return 0;
     }
-    if (has_extra_args(input, pos)) {
+    if (has_extra_args(buf, pos)) {
         error_too_many_args();
         return 0;
     }
@@ -232,7 +233,7 @@ void handle_touch(int pos) {
     char name[64];  // 作成するファイル名
     int entry;      // 割り当てたエントリのインデックス
 
-    if (extract_single_arg(pos, name) == 0) {
+    if (require_one_arg(input, pos, name) == 0) {
         return;
     }
 
@@ -275,11 +276,11 @@ void handle_write(int pos) {
 
 // 対象のファイル名を1つだけ引数に取るコマンドの共通処理: 引数を検証し，対象エントリのインデックスを返す
 // 引数の個数が違うか，その名前のファイルが無ければ，エラーを出力して-1を返す
-int resolve_file_arg(int pos) {
+int resolve_file_arg(char buf[], int pos) {
     char name[64];  // 対象のファイル名
     int entry;      // 対象エントリのインデックス
 
-    if (extract_single_arg(pos, name) == 0) {
+    if (require_one_arg(buf, pos, name) == 0) {
         return -1;
     }
 
@@ -293,7 +294,7 @@ int resolve_file_arg(int pos) {
 // catコマンド: 引数のファイル名に対応する内容を出力する
 void handle_cat(int pos) {
     int entry;  // 対象エントリのインデックス
-    entry = resolve_file_arg(pos);
+    entry = resolve_file_arg(input, pos);
     if (entry != -1) {
         print_content(entry);
     }
@@ -302,7 +303,7 @@ void handle_cat(int pos) {
 // rmコマンド: 引数のファイル名に対応するエントリを削除する
 void handle_rm(int pos) {
     int entry;  // 対象エントリのインデックス
-    entry = resolve_file_arg(pos);
+    entry = resolve_file_arg(input, pos);
     if (entry != -1) {
         delete_file(entry);
     }
