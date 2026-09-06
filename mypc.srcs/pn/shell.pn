@@ -263,50 +263,45 @@ void handle_write(int pos) {
     write_file(entry, content);
 }
 
-// catコマンド: 引数のファイル名に対応する内容を出力する
-void handle_cat(int pos) {
-    char name[64];  // 読み出すファイル名
+// 既存のファイル名だけを引数に取るコマンドの共通処理: 引数を検証し，対象エントリのインデックスを返す
+// 引数の個数が違うか対象のファイルが無ければ，エラーを出力して-1を返す
+int resolve_file_arg(int pos) {
+    char name[64];  // 対象のファイル名
     int entry;      // 対象エントリのインデックス
 
     pos = extract_arg(input, pos, name);
     if (name[0] == '\0') {
         error_missing_arg();
-        return;
+        return -1;
     }
     if (has_extra_args(input, pos)) {
         error_too_many_args();
-        return;
+        return -1;
     }
 
     entry = find_entry_by_name(name);
     if (entry == -1) {
         error_no_such_file();
-        return;
     }
-    print_content(entry);
+    return entry;
+}
+
+// catコマンド: 引数のファイル名に対応する内容を出力する
+void handle_cat(int pos) {
+    int entry;  // 対象エントリのインデックス
+    entry = resolve_file_arg(pos);
+    if (entry != -1) {
+        print_content(entry);
+    }
 }
 
 // rmコマンド: 引数のファイル名に対応するエントリを削除する
 void handle_rm(int pos) {
-    char name[64];  // 削除するファイル名
-    int entry;      // 対象エントリのインデックス
-
-    pos = extract_arg(input, pos, name);
-    if (name[0] == '\0') {
-        error_missing_arg();
-        return;
+    int entry;  // 対象エントリのインデックス
+    entry = resolve_file_arg(pos);
+    if (entry != -1) {
+        delete_file(entry);
     }
-    if (has_extra_args(input, pos)) {
-        error_too_many_args();
-        return;
-    }
-
-    entry = find_entry_by_name(name);
-    if (entry == -1) {
-        error_no_such_file();
-        return;
-    }
-    delete_file(entry);
 }
 
 // mvコマンド: 第1引数のファイルの名前を，第2引数の名前へ変更する
