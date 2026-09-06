@@ -51,7 +51,6 @@ module mother_board(
     input  wire [ 1:0] sw,
     output wire [ 3:0] led,
     output wire [ 5:0] rgb_led,
-    output wire [ 7:0] number,
 
     // Pmod A・Pmod B
     output wire [7:0] ja,
@@ -97,7 +96,6 @@ module mother_board(
         .sw(sw),
         .led(led),
         .rgb_led(rgb_led),
-        .number(number),
 
         .ja(ja),
         .jb(jb),

@@ -58,7 +58,6 @@ module alu_sv (
     input  logic [1:0] sw,
     output logic [3:0] led,
     output logic [5:0] rgb_led,
-    output logic [7:0] number,
 
     // 割り算回路用
     output logic [31:0] divisor_tdata,
@@ -314,8 +313,6 @@ module alu_sv (
         // led     = register[6'h05][3:0];
         led = register[STDIN_SIGNAL_ADDR][3:0];
         rgb_led = 6'h0;
-        // number  = register[PC_ADDR][7:0];
-        number  = register[STDIN_DATA_ADDR][7:0];
 
         // Pmod A・Pmod B(書き込み専用)
         ja = register[PMOD_A_ADDR][7:0];

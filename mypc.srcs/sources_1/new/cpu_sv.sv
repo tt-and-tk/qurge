@@ -46,7 +46,6 @@ module cpu_sv import machine_p::*; (
     input  logic [1:0] sw,
     output logic [3:0] led,
     output logic [5:0] rgb_led,
-    output logic [7:0] number,
 
     // 標準入力
     input  logic [31:0] stdin_tdata,
@@ -107,7 +106,6 @@ module cpu_sv import machine_p::*; (
         .sw(sw),
         .led(led),
         .rgb_led(rgb_led),
-        .number(number),
         // 標準入出力
         .stdin_tdata(stdin_tdata),
         .stdin_tkeep(stdin_tkeep),
