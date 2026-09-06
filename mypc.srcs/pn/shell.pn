@@ -75,7 +75,7 @@ void rename_file(int entry, char name[]) {
     entries[entry].name[i] = '\0';
 }
 
-// entries[entry].nameをnameで設定し，内容を空にしたうえで使用中フラグを立てる
+// entries[entry].nameをnameの先頭7文字で設定し，内容を空にしたうえで使用中フラグを立てる
 void create_file(int entry, char name[]) {
     rename_file(entry, name);
     entries[entry].content[0] = '\0';
