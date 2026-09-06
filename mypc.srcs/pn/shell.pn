@@ -37,6 +37,7 @@ int extract_arg(char buf[], int pos, char arg[]) {
 
 // bufのpos文字目以降を丸ごと1つの引数としてargへコピーする(前後の空白は取り除き，途中の空白はそのまま残す)
 // 空白を区切りとして扱わない自由テキスト(echoの出力内容・writeの書き込み内容)専用の取り出し方
+// argはextract_argと同じく，行全体を受け取れるようinputと同じ幅で確保する
 void extract_text_arg(char buf[], int pos, char arg[]) {
     int i = 0;    // bufから読み出した文字数
     int len = 0;  // 末尾の空白を除いたargの長さ
