@@ -21,7 +21,7 @@ int skip_spaces(char buf[], int pos) {
 }
 
 // bufのpos文字目以降から引数を1つargへ取り出し，その直後の位置を返す
-// 引数1つが行全体になり得るため，argはbufと同じ幅で確保する(コピー先の幅を知る手段が無く打ち切れない)
+// 引数1つが行全体になり得るため，argはbufと同じ幅で確保すること(コピー先の幅を知る手段が無く打ち切れない)
 int extract_arg(char buf[], int pos, char arg[]) {
     int i = 0;
     // 引数の手前に連続する空白を読み飛ばす
@@ -32,12 +32,12 @@ int extract_arg(char buf[], int pos, char arg[]) {
         i = i + 1;
     }
     arg[i] = '\0';
-    // 戻り値を次の呼び出しのposへ渡して，引数を先頭から順に取り出す
+    // 取り出した引数の直後の位置を返す(次の引数を取り出す際の開始位置になる)
     return pos + i;
 }
 
 // bufのpos文字目以降を丸ごと1つの引数としてargへ取り出す
-// extract_argと同じく，argはbufと同じ幅で確保する
+// extract_argと同じく，argはbufと同じ幅で確保すること
 void extract_text_arg(char buf[], int pos, char arg[]) {
     int i = 0;
     // 引数の手前に連続する空白を読み飛ばす
@@ -52,8 +52,9 @@ void extract_text_arg(char buf[], int pos, char arg[]) {
 
 // bufのpos文字目以降に引数が残っていれば1，残っていなければ0を返す
 int has_extra_args(char buf[], int pos) {
-    // 末尾に続く空白だけが残っている場合は引数と見なさない
+    // 先頭の空白を読み飛ばす
     pos = skip_spaces(buf, pos);
+    // 空白の先がヌル終端なら，末尾に空白が続いているだけで引数は残っていない
     return buf[pos] != '\0';
 }
 
@@ -177,7 +178,7 @@ void print_entry(int entry) {
 
 // lsコマンド: 使用中の全エントリの名前を順に出力する
 void handle_ls(int pos) {
-    // 引数を取らないコマンドのため，指定されていれば何もしない
+    // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
         return;
@@ -358,7 +359,7 @@ void handle_mv(int pos) {
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 void handle_help(int pos) {
-    // 引数を取らないコマンドのため，指定されていれば何もしない
+    // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
         return;
@@ -375,7 +376,6 @@ void handle_help(int pos) {
 
 // 未対応コマンドのエラーメッセージを表示する
 void handle_unknown(void) {
-    // 何が未対応だったかが分かるよう，入力されたコマンド名を前置して出力する
     print_error("unknown command\n");
 }
 
