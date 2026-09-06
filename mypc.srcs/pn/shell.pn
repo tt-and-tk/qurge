@@ -11,15 +11,22 @@ struct FileEntry {
 struct FileEntry entries[4];  // ファイルテーブル本体(最大4件)
 char file_used[4];            // 各エントリの使用中フラグ(0:未使用，1:使用中)
 
+// bufのpos文字目以降に連続する空白を読み飛ばした位置を返す
+// 引数の区切りの規則をここに集め，引数の取り出しと残数の確認とで食い違わないようにする
+int skip_spaces(char buf[], int pos) {
+    while (buf[pos] == ' ') {
+        pos = pos + 1;
+    }
+    return pos;
+}
+
 // bufのpos文字目以降で先頭の連続する空白を読み飛ばし，次の空白かヌル終端の直前までをargへコピーする
 // 戻り値は取り出した引数の直後の位置であり，これを次の呼び出しのposへ渡して引数を順に取り出す
 // 引数が残っていなければargは空文字列になる
 // argは1つの引数が行全体になり得るため，inputと同じ幅で確保する(コピー量を制限する手段を持たない)
 int extract_arg(char buf[], int pos, char arg[]) {
     int i = 0;
-    while (buf[pos] == ' ') {
-        pos = pos + 1;
-    }
+    pos = skip_spaces(buf, pos);
     while (buf[pos + i] != ' ' && buf[pos + i] != '\0') {
         arg[i] = buf[pos + i];
         i = i + 1;
@@ -33,9 +40,7 @@ int extract_arg(char buf[], int pos, char arg[]) {
 void extract_text_arg(char buf[], int pos, char arg[]) {
     int i = 0;    // bufから読み出した文字数
     int len = 0;  // 末尾の空白を除いたargの長さ
-    while (buf[pos] == ' ') {
-        pos = pos + 1;
-    }
+    pos = skip_spaces(buf, pos);
     while (buf[pos + i] != '\0') {
         arg[i] = buf[pos + i];
         if (buf[pos + i] != ' ') {
@@ -49,9 +54,7 @@ void extract_text_arg(char buf[], int pos, char arg[]) {
 // bufのpos文字目以降に引数が残っていなければ1，残っていれば0を返す
 // (extract_argで取り出して空文字列か調べる形にすると，捨てるためだけのバッファをinputと同じ幅で用意することになる)
 int args_end(char buf[], int pos) {
-    while (buf[pos] == ' ') {
-        pos = pos + 1;
-    }
+    pos = skip_spaces(buf, pos);
     return buf[pos] == '\0';
 }
 
