@@ -55,7 +55,7 @@ int find_free_entry(void) {
 }
 
 // nameの先頭7文字(ヌル終端が先に来ればそこまで)をtruncatedへコピーし，ヌル終端する
-// (構造体配列のメンバを関数へ渡せないため，entries[].nameを読み書きするrename_file・print_entryは同じ7文字の打ち切りを個別に持つ)
+// (rename_file・print_entryも同じ7文字の打ち切りを自前で持つ．コピー先・コピー元がentries[].nameであり，構造体配列のメンバを関数へ渡せないためこの関数を呼べない)
 void truncate_name(char name[], char truncated[]) {
     int i = 0;
     while (name[i] != '\0' && i < 7) {
