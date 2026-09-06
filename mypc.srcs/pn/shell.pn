@@ -55,7 +55,7 @@ int args_end(char buf[], int pos) {
     return buf[pos] == '\0';
 }
 
-// エラーを"<コマンド名>: <内容>"の形式で出力する
+// エラーは"<コマンド名>: <内容>"の形式で出力する．複数のコマンドが使う内容はここに関数として置く
 // (printは直接配列のみを受け付け配列パラメータを渡せないため，内容を引数に取らず内容ごとに関数を分ける)
 void error_missing_arg(void) {
     print(cmd);
@@ -217,14 +217,16 @@ void handle_touch(int pos) {
     }
 
     if (find_entry_by_name(name) != -1) {  // 既に同名のファイルがあれば作成しない
-        print("touch: file already exists\n");
+        print(cmd);
+        print(": file already exists\n");
         return;
     }
     entry = find_free_entry();
     if (entry != -1) {
         create_file(entry, name);
     } else {
-        print("no free entry\n");
+        print(cmd);
+        print(": no free entry\n");
     }
 }
 
@@ -338,9 +340,10 @@ void handle_help(int pos) {
     print("mv\n");
 }
 
-// 未対応コマンドのエラーメッセージを表示する
+// 未対応コマンドのエラーメッセージを表示する(何が未対応だったかが分かるよう入力されたコマンド名を出す)
 void handle_unknown(void) {
-    print("unknown command\n");
+    print(cmd);
+    print(": unknown command\n");
 }
 
 // グローバル配列cmdの内容に応じた処理を呼び出す(streqは直接配列のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
