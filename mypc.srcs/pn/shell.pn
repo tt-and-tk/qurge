@@ -57,7 +57,7 @@ int has_extra_args(char buf[], int pos) {
     return buf[pos] != '\0';
 }
 
-// エラーを"<コマンド名>: <msg>"の形式で出力する
+// エラーを"<コマンド名>: <msg>"の形式で出力する(msgは末尾の改行まで含めて渡す)
 void print_error(char msg[]) {
     char msg_buf[32];  // 出力用の一時バッファ(printは直接配列のみ受け付けるため)
     int i = 0;
