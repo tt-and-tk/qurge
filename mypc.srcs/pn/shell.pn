@@ -11,36 +11,72 @@ struct FileEntry {
 struct FileEntry entries[4];  // ファイルテーブル本体(最大4件)
 char file_used[4];            // 各エントリの使用中フラグ(0:未使用，1:使用中)
 
-// bufの先頭から空白またはヌル終端の直前までをtokenへコピーし，コピーした長さを返す
-int extract_token(char buf[], char token[]) {
+// bufのpos文字目以降で先頭の連続する空白を読み飛ばし，次の空白かヌル終端の直前までをargへコピーする
+// 戻り値は取り出した引数の直後の位置であり，これを次の呼び出しのposへ渡して引数を順に取り出す
+// 引数が残っていなければargは空文字列になる
+// argは1つの引数が行全体になり得るため，inputと同じ幅で確保する(コピー量を制限する手段を持たない)
+int extract_arg(char buf[], int pos, char arg[]) {
     int i = 0;
-    while (buf[i] != ' ' && buf[i] != '\0') {
-        token[i] = buf[i];
+    while (buf[pos] == ' ') {
+        pos = pos + 1;
+    }
+    while (buf[pos + i] != ' ' && buf[pos + i] != '\0') {
+        arg[i] = buf[pos + i];
         i = i + 1;
     }
-    token[i] = '\0';
-    return i;
+    arg[i] = '\0';
+    return pos + i;
 }
 
-// bufのtoken_len文字目以降(先頭トークンの直後に連続する空白をすべて読み飛ばした位置)からヌル終端までをoutへコピーする
-void extract_rest(char buf[], int token_len, char out[]) {
-    int start = token_len;  // outへのコピー開始位置
-    int i = 0;
-    while (buf[start] == ' ') {
-        start = start + 1;
+// bufのpos文字目以降を丸ごと1つの引数としてargへコピーする(前後の空白は取り除き，途中の空白はそのまま残す)
+// 空白を区切りとして扱わない自由テキスト(echoの出力内容・writeの書き込み内容)専用の取り出し方
+void extract_text_arg(char buf[], int pos, char arg[]) {
+    int i = 0;    // bufから読み出した文字数
+    int len = 0;  // 末尾の空白を除いたargの長さ
+    while (buf[pos] == ' ') {
+        pos = pos + 1;
     }
-    while (buf[start + i] != '\0') {
-        out[i] = buf[start + i];
+    while (buf[pos + i] != '\0') {
+        arg[i] = buf[pos + i];
+        if (buf[pos + i] != ' ') {
+            len = i + 1;  // 空白以外を書いた位置までを長さとし，末尾に続く空白を切り捨てる
+        }
         i = i + 1;
     }
-    out[i] = '\0';
+    arg[len] = '\0';
 }
 
-// echoコマンド: コマンド名以降の引数部分をそのまま出力する
-void handle_echo(int cmd_len) {
-    char args[64];  // コマンド名を除いた引数部分
-    extract_rest(input, cmd_len, args);
-    print(args);
+// bufのpos文字目以降に引数が残っていなければ1，残っていれば0を返す
+// (extract_argで取り出して空文字列か調べる形にすると，捨てるためだけのバッファをinputと同じ幅で用意することになる)
+int args_end(char buf[], int pos) {
+    while (buf[pos] == ' ') {
+        pos = pos + 1;
+    }
+    return buf[pos] == '\0';
+}
+
+// エラーを"<コマンド名>: <内容>"の形式で出力する
+// (printは直接配列のみを受け付け配列パラメータを渡せないため，内容を引数に取らず内容ごとに関数を分ける)
+void error_missing_arg(void) {
+    print(cmd);
+    print(": missing argument\n");
+}
+
+void error_too_many_args(void) {
+    print(cmd);
+    print(": too many arguments\n");
+}
+
+void error_no_such_file(void) {
+    print(cmd);
+    print(": no such file\n");
+}
+
+// echoコマンド: 引数をそのまま出力する(引数を持たない場合は空行を出力する)
+void handle_echo(int pos) {
+    char text[64];  // 出力する内容
+    extract_text_arg(input, pos, text);
+    print(text);
     print("\n");
 }
 
@@ -140,7 +176,11 @@ void print_entry(int entry) {
 }
 
 // lsコマンド: 使用中の全エントリの名前を順に出力する
-void handle_ls(void) {
+void handle_ls(int pos) {
+    if (args_end(input, pos) == 0) {
+        error_too_many_args();
+        return;
+    }
     for (int i = 0; i < 4; i++) {
         if (file_used[i] == 1) {
             print_entry(i);
@@ -161,151 +201,133 @@ void print_content(int entry) {
     print("\n");
 }
 
-// touchコマンド: コマンド名以降の引数部分を名前とするファイルを1件作成する(既に同名のファイルがあれば作成しない)
-void handle_touch(int cmd_len) {
-    char args[64];  // コマンド名を除いた引数部分(作成するファイル名)
+// touchコマンド: 引数のファイル名で空のファイルを1件作成する(既に同名のファイルがあれば作成しない)
+void handle_touch(int pos) {
+    char name[64];  // 作成するファイル名
     int entry;      // 割り当てたエントリのインデックス
-    extract_rest(input, cmd_len, args);
-    if (args[0] == '\0') {  // 名前が指定されていなければ何もしない
-        print("touch: missing file name\n");
+
+    pos = extract_arg(input, pos, name);
+    if (name[0] == '\0') {
+        error_missing_arg();
         return;
     }
-    if (find_entry_by_name(args) != -1) {  // 既に同名のファイルがあれば作成しない
+    if (args_end(input, pos) == 0) {
+        error_too_many_args();
+        return;
+    }
+
+    if (find_entry_by_name(name) != -1) {  // 既に同名のファイルがあれば作成しない
         print("touch: file already exists\n");
         return;
     }
     entry = find_free_entry();
     if (entry != -1) {
-        create_file(entry, args);
+        create_file(entry, name);
     } else {
         print("no free entry\n");
     }
 }
 
-// writeコマンド: 引数の先頭トークンをファイル名，残りを内容として丸ごと上書きする
-void handle_write(int cmd_len) {
-    char rest[64];  // "name content..." (コマンド名を除いた部分)
-    char name[64];  // 先頭トークン(ファイル名)
-    char content[64];  // 名前トークンを除いた残り(書き込む内容)
-    int name_len;   // 名前トークンの文字数
-    int entry;      // 対象エントリのインデックス
+// writeコマンド: 第1引数のファイルの内容を，第2引数の内容で丸ごと上書きする
+void handle_write(int pos) {
+    char name[64];     // 書き込み先のファイル名
+    char content[64];  // 書き込む内容
+    int entry;         // 対象エントリのインデックス
 
-    // コマンド名(write)を除いた"name content..."を取り出す
-    extract_rest(input, cmd_len, rest);
-
-    // 先頭トークンをファイル名として切り出す
-    name_len = extract_token(rest, name);
-    // ファイル名が指定されていなければ何もしない
+    pos = extract_arg(input, pos, name);
     if (name[0] == '\0') {
-        print("write: missing file name\n");
+        error_missing_arg();
         return;
     }
+    // 内容は空白を区切りとしない自由テキストであり，行末までが1つの引数になる
+    // (内容が空の場合はファイルを空にする指示として扱うため，引数不足とはしない)
+    extract_text_arg(input, pos, content);
 
-    // ファイル名から対象エントリを探す
     entry = find_entry_by_name(name);
-    // 対象ファイルが無ければ何もしない(自動作成はしない)
-    if (entry == -1) {
-        print("write: no such file\n");
+    if (entry == -1) {  // 対象ファイルが無ければ何もしない(自動作成はしない)
+        error_no_such_file();
         return;
     }
-
-    // ファイル名トークンを除いた残りを内容として取り出す
-    extract_rest(rest, name_len, content);
-    // 取り出した内容でエントリの中身を丸ごと上書きする
     write_file(entry, content);
 }
 
 // catコマンド: 引数のファイル名に対応する内容を出力する
-void handle_cat(int cmd_len) {
-    char name[64];  // コマンド名を除いた引数部分(読み出すファイル名)
+void handle_cat(int pos) {
+    char name[64];  // 読み出すファイル名
     int entry;      // 対象エントリのインデックス
 
-    // コマンド名(cat)を除いた部分をファイル名として取り出す
-    extract_rest(input, cmd_len, name);
-    // ファイル名が指定されていなければ何もしない
+    pos = extract_arg(input, pos, name);
     if (name[0] == '\0') {
-        print("cat: missing file name\n");
+        error_missing_arg();
+        return;
+    }
+    if (args_end(input, pos) == 0) {
+        error_too_many_args();
         return;
     }
 
-    // ファイル名から対象エントリを探す
     entry = find_entry_by_name(name);
-    // 対象ファイルが無ければ何もしない
     if (entry == -1) {
-        print("cat: no such file\n");
+        error_no_such_file();
         return;
     }
-
-    // 見つかったエントリの内容を出力する
     print_content(entry);
 }
 
 // rmコマンド: 引数のファイル名に対応するエントリを削除する
-void handle_rm(int cmd_len) {
-    char name[64];  // コマンド名を除いた引数部分(削除するファイル名)
+void handle_rm(int pos) {
+    char name[64];  // 削除するファイル名
     int entry;      // 対象エントリのインデックス
 
-    // コマンド名(rm)を除いた部分をファイル名として取り出す
-    extract_rest(input, cmd_len, name);
-    // ファイル名が指定されていなければ何もしない
+    pos = extract_arg(input, pos, name);
     if (name[0] == '\0') {
-        print("rm: missing file name\n");
+        error_missing_arg();
+        return;
+    }
+    if (args_end(input, pos) == 0) {
+        error_too_many_args();
         return;
     }
 
-    // ファイル名から対象エントリを探す
     entry = find_entry_by_name(name);
-    // 対象ファイルが無ければ何もしない
     if (entry == -1) {
-        print("rm: no such file\n");
+        error_no_such_file();
         return;
     }
-
-    // 見つかったエントリを削除する
     delete_file(entry);
 }
 
-// mvコマンド: 引数の先頭トークンを旧ファイル名，残りを新ファイル名として名前を変更する
-void handle_mv(int cmd_len) {
-    char rest[64];  // "old new..." (コマンド名を除いた部分)
-    char old_name[64];  // 先頭トークン(旧ファイル名)
-    char new_name[64];  // 旧ファイル名トークンを除いた残り(新ファイル名)
-    int old_len;    // 旧ファイル名トークンの文字数
-    int entry;      // 対象エントリのインデックス
+// mvコマンド: 第1引数のファイルの名前を，第2引数の名前へ変更する
+void handle_mv(int pos) {
+    char old_name[64];  // 旧ファイル名
+    char new_name[64];  // 新ファイル名
+    int entry;          // 対象エントリのインデックス
 
-    // コマンド名(mv)を除いた"old new..."を取り出す
-    extract_rest(input, cmd_len, rest);
-
-    // 先頭トークンを旧ファイル名として切り出す
-    old_len = extract_token(rest, old_name);
-    // 旧ファイル名が指定されていなければ何もしない
-    if (old_name[0] == '\0') {
-        print("mv: missing file name\n");
+    pos = extract_arg(input, pos, old_name);
+    pos = extract_arg(input, pos, new_name);
+    if (old_name[0] == '\0' || new_name[0] == '\0') {
+        error_missing_arg();
+        return;
+    }
+    if (args_end(input, pos) == 0) {
+        error_too_many_args();
         return;
     }
 
-    // 旧ファイル名から対象エントリを探す
     entry = find_entry_by_name(old_name);
-    // 対象ファイルが無ければ何もしない
     if (entry == -1) {
-        print("mv: no such file\n");
+        error_no_such_file();
         return;
     }
-
-    // 旧ファイル名トークンを除いた残りを新ファイル名として取り出す
-    extract_rest(rest, old_len, new_name);
-    // 新ファイル名が指定されていなければ何もしない
-    if (new_name[0] == '\0') {
-        print("mv: missing new name\n");
-        return;
-    }
-
-    // 見つかったエントリの名前を付け替える
     rename_file(entry, new_name);
 }
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
-void handle_help(void) {
+void handle_help(int pos) {
+    if (args_end(input, pos) == 0) {
+        error_too_many_args();
+        return;
+    }
     print("echo\n");
     print("help\n");
     print("ls\n");
@@ -322,37 +344,38 @@ void handle_unknown(void) {
 }
 
 // グローバル配列cmdの内容に応じた処理を呼び出す(streqは直接配列のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
-void dispatch(int cmd_len) {
+// 引数の個数と種類はコマンドごとに異なるため，引数の取り出しと検証は各handle_*が自分で行う
+void dispatch(int pos) {
     if (streq(cmd, "echo")) {
-        handle_echo(cmd_len);
+        handle_echo(pos);
     } else if (streq(cmd, "help")) {
-        handle_help();
+        handle_help(pos);
     } else if (streq(cmd, "ls")) {
-        handle_ls();
+        handle_ls(pos);
     } else if (streq(cmd, "touch")) {
-        handle_touch(cmd_len);
+        handle_touch(pos);
     } else if (streq(cmd, "write")) {
-        handle_write(cmd_len);
+        handle_write(pos);
     } else if (streq(cmd, "cat")) {
-        handle_cat(cmd_len);
+        handle_cat(pos);
     } else if (streq(cmd, "rm")) {
-        handle_rm(cmd_len);
+        handle_rm(pos);
     } else if (streq(cmd, "mv")) {
-        handle_mv(cmd_len);
+        handle_mv(pos);
     } else {
         handle_unknown();
     }
 }
 
 void main(void) {
-    int cmd_len;  // コマンド名の文字数
+    int pos;  // コマンド名の直後の位置(引数の取り出し開始位置)
     for (int i = 0; i < 4; i++) {  // グローバル配列の初期値は不定なため，起動時に明示的にクリアする
         file_used[i] = 0;
     }
     while (1) {
         print("> ");  // 入力待ちであることを示すプロンプト
         scan(input);
-        cmd_len = extract_token(input, cmd);
-        dispatch(cmd_len);
+        pos = extract_arg(input, 0, cmd);
+        dispatch(pos);
     }
 }
