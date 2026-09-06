@@ -51,11 +51,11 @@ void extract_text_arg(char buf[], int pos, char arg[]) {
     arg[len] = '\0';
 }
 
-// bufのpos文字目以降に引数が残っていなければ1，残っていれば0を返す
+// bufのpos文字目以降に引数が残っていれば1，残っていなければ0を返す
 // (extract_argで取り出して空文字列か調べる形にすると，捨てるためだけのバッファをinputと同じ幅で用意することになる)
-int args_end(char buf[], int pos) {
+int has_extra_args(char buf[], int pos) {
     pos = skip_spaces(buf, pos);
-    return buf[pos] == '\0';
+    return buf[pos] != '\0';
 }
 
 // エラーは"<コマンド名>: <内容>"の形式で出力する．複数のコマンドが使う内容はここに関数として置く
@@ -180,7 +180,7 @@ void print_entry(int entry) {
 
 // lsコマンド: 使用中の全エントリの名前を順に出力する
 void handle_ls(int pos) {
-    if (args_end(input, pos) == 0) {
+    if (has_extra_args(input, pos)) {
         error_too_many_args();
         return;
     }
@@ -214,7 +214,7 @@ void handle_touch(int pos) {
         error_missing_arg();
         return;
     }
-    if (args_end(input, pos) == 0) {
+    if (has_extra_args(input, pos)) {
         error_too_many_args();
         return;
     }
@@ -266,7 +266,7 @@ void handle_cat(int pos) {
         error_missing_arg();
         return;
     }
-    if (args_end(input, pos) == 0) {
+    if (has_extra_args(input, pos)) {
         error_too_many_args();
         return;
     }
@@ -289,7 +289,7 @@ void handle_rm(int pos) {
         error_missing_arg();
         return;
     }
-    if (args_end(input, pos) == 0) {
+    if (has_extra_args(input, pos)) {
         error_too_many_args();
         return;
     }
@@ -314,7 +314,7 @@ void handle_mv(int pos) {
         error_missing_arg();
         return;
     }
-    if (args_end(input, pos) == 0) {
+    if (has_extra_args(input, pos)) {
         error_too_many_args();
         return;
     }
@@ -329,7 +329,7 @@ void handle_mv(int pos) {
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 void handle_help(int pos) {
-    if (args_end(input, pos) == 0) {
+    if (has_extra_args(input, pos)) {
         error_too_many_args();
         return;
     }
