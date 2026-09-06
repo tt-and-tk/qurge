@@ -380,6 +380,7 @@ void handle_unknown(void) {
 }
 
 // グローバル配列cmdの内容に応じた処理を呼び出す(streqは直接配列のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
+// 引数の取り出し対象は1行分の入力を保持するinputで固定のため，コマンド側へは位置だけを渡す
 void dispatch(int pos) {
     if (streq(cmd, "echo")) {
         handle_echo(pos);
