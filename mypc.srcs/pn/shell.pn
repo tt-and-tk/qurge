@@ -242,7 +242,7 @@ void handle_touch(int pos) {
         print_error("no free entry\n");
         return;
     }
-    // 空きエントリを取り出したファイル名で使用中にする(既に同名のファイルがあれば作成しない)
+    // 空きエントリを取り出したファイル名で使用中にする．既に同名のファイルがあれば作成されない
     if (create_file(entry, name) == 0) {
         print_error("file already exists\n");
         return;
@@ -366,7 +366,7 @@ void handle_mv(int pos) {
         return;
     }
 
-    // 見つかったエントリの名前を付け替える(新ファイル名が他のファイルと重複していれば付け替えない)
+    // 見つかったエントリの名前を付け替える．新ファイル名が他のファイルと重複していれば付け替えられない
     if (rename_file(entry, new_name) == 0) {
         print_error("file already exists\n");
         return;
