@@ -82,6 +82,21 @@ void error_no_such_file(void) {
     print("no such file\n");
 }
 
+// 引数をちょうど1つだけ取るコマンドの共通処理: 引数をnameへ取り出し，取り出せれば1を返す
+// 引数が無いか2つ以上あれば，エラーを出力して0を返す
+int extract_single_arg(int pos, char name[]) {
+    pos = extract_arg(input, pos, name);
+    if (name[0] == '\0') {
+        error_missing_arg();
+        return 0;
+    }
+    if (has_extra_args(input, pos)) {
+        error_too_many_args();
+        return 0;
+    }
+    return 1;
+}
+
 // echoコマンド: 引数をそのまま出力する(引数を持たない場合は空行を出力する)
 void handle_echo(int pos) {
     char text[64];  // 出力する内容
@@ -216,13 +231,7 @@ void handle_touch(int pos) {
     char name[64];  // 作成するファイル名
     int entry;      // 割り当てたエントリのインデックス
 
-    pos = extract_arg(input, pos, name);
-    if (name[0] == '\0') {
-        error_missing_arg();
-        return;
-    }
-    if (has_extra_args(input, pos)) {
-        error_too_many_args();
+    if (extract_single_arg(pos, name) == 0) {
         return;
     }
 
@@ -269,13 +278,7 @@ int resolve_file_arg(int pos) {
     char name[64];  // 対象のファイル名
     int entry;      // 対象エントリのインデックス
 
-    pos = extract_arg(input, pos, name);
-    if (name[0] == '\0') {
-        error_missing_arg();
-        return -1;
-    }
-    if (has_extra_args(input, pos)) {
-        error_too_many_args();
+    if (extract_single_arg(pos, name) == 0) {
         return -1;
     }
 
