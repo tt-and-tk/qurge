@@ -74,16 +74,16 @@ package alu_p;
             is_readable = util_p::FALSE;
         // Pmod A
         else if (addr == 6'h24)
-            is_readable = util_p::TRUE;
+            is_readable = util_p::FALSE;
         // Pmod B
         else if (addr == 6'h25)
-            is_readable = util_p::TRUE;
+            is_readable = util_p::FALSE;
         // AR
         else if (addr == 6'h26 || addr == 6'h28)
-            is_readable = util_p::TRUE;
+            is_readable = util_p::FALSE;
         // I2C
         else if (addr == 6'h27)
-            is_readable = util_p::TRUE;
+            is_readable = util_p::FALSE;
         // AR_RST
         else if (addr == 6'h29)
             is_readable = util_p::TRUE;
@@ -98,7 +98,7 @@ package alu_p;
             is_readable = util_p::FALSE;    // オミット
         // GPIO
         else if (6'h2d <= addr && addr <= 6'h30)
-            is_readable = util_p::TRUE;
+            is_readable = util_p::FALSE;
         // 標準入力(データ)
         else if (addr == 6'h31)
             is_readable = util_p::TRUE;

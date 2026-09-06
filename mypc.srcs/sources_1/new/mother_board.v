@@ -51,7 +51,23 @@ module mother_board(
     input  wire [ 1:0] sw,
     output wire [ 3:0] led,
     output wire [ 5:0] rgb_led,
-    output wire [ 7:0] number
+
+    // Pmod A・Pmod B
+    output wire [7:0] ja,
+    output wire [7:0] jb,
+
+    // Arduino
+    output wire [13:0] ar,
+    output wire         a,
+    output wire         ar_sda,
+    output wire         ar_scl,
+    output wire         ck_mosi,
+    output wire         ck_sck,
+    output wire         ck_ss,
+    input  wire         ck_miso,
+
+    // ラズパイヘッダー
+    output wire [26:8] gpio
     );
 
     mother_board_sv mother_board_sv_0 (
@@ -80,7 +96,18 @@ module mother_board(
         .sw(sw),
         .led(led),
         .rgb_led(rgb_led),
-        .number(number)
+
+        .ja(ja),
+        .jb(jb),
+        .ar(ar),
+        .a(a),
+        .ar_sda(ar_sda),
+        .ar_scl(ar_scl),
+        .ck_mosi(ck_mosi),
+        .ck_sck(ck_sck),
+        .ck_ss(ck_ss),
+        .ck_miso(ck_miso),
+        .gpio(gpio)
     );
 
 endmodule
