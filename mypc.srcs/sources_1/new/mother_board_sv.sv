@@ -54,7 +54,24 @@ module mother_board_sv(
     input  logic [ 1:0] sw,
     output logic [ 3:0] led,
     output logic [ 5:0] rgb_led,
-    output logic [ 7:0] number
+    output logic [ 7:0] number,
+
+    // Pmod A・Pmod B
+    output logic [7:0] ja,
+    output logic [7:0] jb,
+
+    // Arduino
+    output logic [13:0] ar,
+    output logic         a,
+    output logic         ar_sda,
+    output logic         ar_scl,
+    output logic         ck_mosi,
+    output logic         ck_sck,
+    output logic         ck_ss,
+    input  logic         ck_miso,
+
+    // ラズパイヘッダー
+    output logic [26:8] gpio
     );
 
     // メインメモリ読み込み・書き込みインターフェース
@@ -104,7 +121,18 @@ module mother_board_sv(
         .stdout_tkeep(stdout_tkeep),
         .stdout_tlast(stdout_tlast),
         .stdout_tready(stdout_tready),
-        .stdout_tvalid(stdout_tvalid)
+        .stdout_tvalid(stdout_tvalid),
+        .ja(ja),
+        .jb(jb),
+        .ar(ar),
+        .a(a),
+        .ar_sda(ar_sda),
+        .ar_scl(ar_scl),
+        .ck_mosi(ck_mosi),
+        .ck_sck(ck_sck),
+        .ck_ss(ck_ss),
+        .ck_miso(ck_miso),
+        .gpio(gpio)
     );
 
     // プログラムメモリ
