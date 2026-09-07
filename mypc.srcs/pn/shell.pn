@@ -102,16 +102,22 @@ void truncate_name(char name[], char truncated[]) {
     truncated[i] = '\0';
 }
 
-// nameの内容をentries[entry].nameへ1文字ずつコピーする(7文字を超える分は切り捨てる)
-// 名前を付けるすべての経路がここを通るため，同名のエントリが2件できないことをこの1箇所で保証する
-// (名前が重複する場合は何も書き換えず0を返す．書き込めた場合は1を返す)
-int rename_file(int entry, char name[]) {
-    int i = 0;
+// nameをentryへ付けると同名のエントリが2件できるかを判定する
+// 戻り値: 1(重複する) / 0(重複しない)．entry自身が同名なのは名前が変わらない場合であり重複には当たらない
+// 名前を付ける関数はいずれもこの判定を通すため，重複の条件はこの1箇所だけを直せばよい
+int is_name_duplicated(int entry, char name[]) {
     int found;  // nameと同名の使用中エントリ(無ければ-1)
 
     found = find_entry_by_name(name);
-    // 自分自身が見つかるのは名前が変わらない場合であり，重複には当たらない
-    if (found != -1 && found != entry) {
+    return found != -1 && found != entry;
+}
+
+// nameの内容をentries[entry].nameへ1文字ずつコピーする(7文字を超える分は切り捨てる)
+// (名前が重複する場合は何も書き換えず0を返す．書き込めた場合は1を返す)
+int rename_file(int entry, char name[]) {
+    int i = 0;
+
+    if (is_name_duplicated(entry, name)) {
         return 0;
     }
 
@@ -126,9 +132,11 @@ int rename_file(int entry, char name[]) {
 // entries[entry].nameをnameの先頭7文字で設定し，内容を空にしたうえで使用中フラグを立てる
 // 名前が重複して付けられない場合は作成せず0を返す．作成できた場合は1を返す
 int create_file(int entry, char name[]) {
-    if (rename_file(entry, name) == 0) {
+    // entryは未使用エントリであり自分自身が一致することはないため，どのエントリとの重複も許さない判定になる
+    if (is_name_duplicated(entry, name)) {
         return 0;
     }
+    rename_file(entry, name);
     entries[entry].content[0] = '\0';
     file_used[entry] = 1;
     return 1;
