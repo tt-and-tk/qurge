@@ -103,11 +103,13 @@ void truncate_name(char name[], char truncated[]) {
 }
 
 // nameが使用中のエントリのファイル名と重複しているかを判定する
-// 戻り値: 1(重複する) / 0(重複しない)．entry自身が同名なのは名前が変わらない場合であり重複には当たらない
+// 戻り値: 1(重複する) / 0(重複しない)
 int is_name_duplicated(int entry, char name[]) {
     int found;  // nameと同名の使用中エントリ(無ければ-1)
 
+    // 同名のエントリを探す
     found = find_entry_by_name(name);
+    // entry自身が見つかるのは名前が変わらない場合であり，重複には当たらない
     return found != -1 && found != entry;
 }
 
