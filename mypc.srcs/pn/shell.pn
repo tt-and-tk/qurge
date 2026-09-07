@@ -104,7 +104,6 @@ void truncate_name(char name[], char truncated[]) {
 
 // nameをentryへ付けると同名のエントリが2件できるかを判定する
 // 戻り値: 1(重複する) / 0(重複しない)．entry自身が同名なのは名前が変わらない場合であり重複には当たらない
-// 名前を付ける関数はいずれもこの判定を通すため，重複の条件はこの1箇所だけを直せばよい
 int is_name_duplicated(int entry, char name[]) {
     int found;  // nameと同名の使用中エントリ(無ければ-1)
 
