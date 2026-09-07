@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "vivado-doc-search": {
+      "type": "http",
+      "url": "https://vivado.amd.com/mcp/doc-search"
+    }
+  }
+}
