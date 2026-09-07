@@ -113,7 +113,7 @@ int is_name_duplicated(int entry, char name[]) {
 }
 
 // nameの内容をentries[entry].nameへ1文字ずつコピーする(7文字を超える分は切り捨てる)
-// (名前が重複する場合は何も書き換えず0を返す．書き込めた場合は1を返す)
+// 戻り値: 1(付けた) / 0(名前が重複するため何も書き換えなかった)
 int rename_file(int entry, char name[]) {
     int i = 0;
 
@@ -130,7 +130,7 @@ int rename_file(int entry, char name[]) {
 }
 
 // entries[entry].nameをnameの先頭7文字で設定し，内容を空にしたうえで使用中フラグを立てる
-// 名前が重複して付けられない場合は作成せず0を返す．作成できた場合は1を返す
+// 戻り値: 1(作成した) / 0(名前が重複するため作成しなかった)
 int create_file(int entry, char name[]) {
     // entryは未使用エントリであり自分自身が一致することはないため，どのエントリとの重複も許さない判定になる
     if (is_name_duplicated(entry, name)) {
