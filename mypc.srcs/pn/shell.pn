@@ -102,21 +102,45 @@ void truncate_name(char name[], char truncated[]) {
     truncated[i] = '\0';
 }
 
+// nameが使用中のエントリのファイル名と重複しているかを判定する
+// 戻り値: 1(重複する) / 0(重複しない)
+int is_name_duplicated(int entry, char name[]) {
+    int found;  // nameと同名の使用中エントリ(無ければ-1)
+
+    // 同名のエントリを探す
+    found = find_entry_by_name(name);
+    // entry自身が見つかるのは名前が変わらない場合であり，重複には当たらない
+    return found != -1 && found != entry;
+}
+
 // nameの内容をentries[entry].nameへ1文字ずつコピーする(7文字を超える分は切り捨てる)
-void rename_file(int entry, char name[]) {
+// 戻り値: 1(付けた) / 0(名前が重複するため何も書き換えなかった)
+int rename_file(int entry, char name[]) {
     int i = 0;
+
+    if (is_name_duplicated(entry, name)) {
+        return 0;
+    }
+
     while (name[i] != '\0' && i < 7) {
         entries[entry].name[i] = name[i];
         i = i + 1;
     }
     entries[entry].name[i] = '\0';
+    return 1;
 }
 
 // entries[entry].nameをnameの先頭7文字で設定し，内容を空にしたうえで使用中フラグを立てる
-void create_file(int entry, char name[]) {
+// 戻り値: 1(作成した) / 0(名前が重複するため作成しなかった)
+int create_file(int entry, char name[]) {
+    // entryは未使用エントリであり自分自身が一致することはないため，どのエントリとの重複も許さない判定になる
+    if (is_name_duplicated(entry, name)) {
+        return 0;
+    }
     rename_file(entry, name);
     entries[entry].content[0] = '\0';
     file_used[entry] = 1;
+    return 1;
 }
 
 // contentの内容をentries[entry].contentへ1文字ずつコピーする(31文字を超える分は切り捨てる)
@@ -221,19 +245,17 @@ void handle_touch(int pos) {
         return;
     }
 
-    // 既に同名のファイルがあれば作成しない
-    if (find_entry_by_name(name) != -1) {
-        print_error("file already exists\n");
-        return;
-    }
     // 空きエントリが無ければ作成できない
     entry = find_free_entry();
     if (entry == -1) {
         print_error("no free entry\n");
         return;
     }
-    // 空きエントリを取り出したファイル名で使用中にする
-    create_file(entry, name);
+    // 空きエントリを取り出したファイル名で使用中にする．既に同名のファイルがあれば作成されない
+    if (create_file(entry, name) == 0) {
+        print_error("file already exists\n");
+        return;
+    }
 }
 
 // writeコマンド: 引数の先頭トークンをファイル名，残りを内容として丸ごと上書きする
@@ -353,8 +375,11 @@ void handle_mv(int pos) {
         return;
     }
 
-    // 見つかったエントリの名前を付け替える
-    rename_file(entry, new_name);
+    // 見つかったエントリの名前を付け替える．新ファイル名が他のファイルと重複していれば付け替えられない
+    if (rename_file(entry, new_name) == 0) {
+        print_error("file already exists\n");
+        return;
+    }
 }
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
