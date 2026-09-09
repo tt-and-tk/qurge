@@ -175,6 +175,12 @@ int sd_init(void) {
     response = sd_command(8, 0x000001aa, 0x87);
     print("CMD8: ");
     print_hex(response);
+    // 無応答を表す0xffはillegal commandビットも含むため，v1カードの判定より先に切り分ける
+    // 続く4バイトも意味を持たないため読み出さずに打ち切る
+    if (response == 0xff) {
+        print(" (no response)\n");
+        return 0;
+    }
     // 応答はR7(R1+4バイト)で，末尾2バイトに0x01 0xaaがそのまま戻れば電圧が受理されている
     for (int i = 0; i < 4; i++) {
         print(" ");
