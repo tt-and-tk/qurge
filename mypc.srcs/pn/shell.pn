@@ -145,22 +145,12 @@ int sd_command(int cmd_index, int arg, int crc) {
     return 0xff;
 }
 
-// SDカードをSPIモードへ入れ，初期化完了まで進める
+// カードを選択した状態で初期化のコマンド列を順に発行する(SSの制御はsd_initが行う)
 // 各段の応答を表示し，どこで失敗したかを切り分けられるようにする
 // 戻り値: 1(初期化完了) / 0(失敗)
-int sd_init(void) {
+int sd_init_commands(void) {
     int response;  // 各コマンドのR1応答
     int ready;     // ACMD41が完了を返したか(0:未完了，1:完了)
-
-    // カードは自前の発振器を持たずSCKで内部回路を動かすため，電源投入後に74クロック以上を与える必要がある
-    // SSをHighのまま送ることで，カードはこれをコマンドと解釈せず単なるクロック供給として受け取る
-    spi_ss = 1;
-    for (int i = 0; i < 10; i++) {
-        spi_transfer(0xff);
-    }
-
-    // カードはCMD0を受け取った瞬間のSSでモードを決めるため，ここで選択しておくことがSPIモードへの切り替えになる
-    spi_ss = 0;
 
     // CMD0(GO_IDLE_STATE): ソフトリセット．アイドル状態へ入ればin idle stateのみが立った0x01が返る
     response = sd_command(0, 0x00000000, 0x95);
@@ -212,8 +202,28 @@ int sd_init(void) {
     print("ACMD41: ");
     print_hex(response);
     print("\n");
+    return ready;
+}
 
-    // カードの内部状態機械はSCKでしか進まないため，SSを戻した後に8クロック与えて後始末とMISOの解放を完了させる
+// SDカードをSPIモードへ入れ，ACMD41が完了を返すまで進める
+// アドレッシング方式(SDHC:ブロック単位 / SDSC:バイト単位)の判定は行わないため，読み書きの前にCMD58が別途必要になる
+// 戻り値: 1(初期化完了) / 0(失敗)
+int sd_init(void) {
+    int ready;  // 初期化コマンド列の結果
+
+    // カードは自前の発振器を持たずSCKで内部回路を動かすため，電源投入後に74クロック以上を与える必要がある
+    // SSをHighのまま送ることで，カードはこれをコマンドと解釈せず単なるクロック供給として受け取る
+    spi_ss = 1;
+    for (int i = 0; i < 10; i++) {
+        spi_transfer(0xff);
+    }
+
+    // カードはCMD0を受け取った瞬間のSSでモードを決めるため，ここで選択しておくことがSPIモードへの切り替えになる
+    spi_ss = 0;
+    ready = sd_init_commands();
+
+    // 途中で失敗してもカードがMISOを掴んだままにならないよう，成否によらずここで解放する
+    // カードの内部状態機械はSCKでしか進まないため，SSを戻した後に8クロック与えて後始末を完了させる
     spi_ss = 1;
     spi_transfer(0xff);
     return ready;
