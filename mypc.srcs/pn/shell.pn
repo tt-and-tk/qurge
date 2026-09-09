@@ -11,6 +11,11 @@ struct FileEntry {
 struct FileEntry entries[4];  // ファイルテーブル本体(最大4件)
 char file_used[4];            // 各エントリの使用中フラグ(0:未使用，1:使用中)
 
+// SS(チップセレクト)の出力レベル(0:カードを選択中，1:非選択)
+// AR_SPIへの書き込みは常に全ビットを同時に置き換えるため，SSだけを別に保ち回す
+// リセット直後のAR_SPIは全ビット0(SS=Low)のため，初期値は非選択にしておく
+int spi_ss = 1;
+
 // bufのpos文字目以降に連続する空白を読み飛ばした位置を返す
 int skip_spaces(char buf[], int pos) {
     // 区切りとして扱うのは半角空白だけで，タブ等の他の空白文字は引数の一部になる
@@ -71,6 +76,141 @@ void print_error(char msg[]) {
     print(cmd);
     print(": ");
     print(msg_buf);
+}
+
+// 0〜15の値を16進数1桁の文字へ変換する
+char hex_digit(int value) {
+    if (value < 10) {
+        return '0' + value;
+    }
+    return 'a' + value - 10;
+}
+
+// valueの下位1バイトを"0x??"の形式で出力する(改行は付けない)
+void print_hex(int value) {
+    char hex_buf[5];  // 出力用の一時バッファ(表示内容が実行時に決まるため，文字列リテラルを直接渡せない)
+    hex_buf[0] = '0';
+    hex_buf[1] = 'x';
+    hex_buf[2] = hex_digit((value >> 4) & 0x0f);  // 上位4ビット
+    hex_buf[3] = hex_digit(value & 0x0f);         // 下位4ビット
+    hex_buf[4] = '\0';
+    print(hex_buf);
+}
+
+// SPIモード0のビットバンギングで1バイトを送信し，同時に受信した1バイトを返す
+// SPIは全二重で送信と受信が常に対になるため，受信だけしたい場合は0xffを渡してクロックだけを供給する
+int spi_transfer(int data) {
+    int received = 0;  // MISOから上位ビット順に組み立てる受信バイト
+    int level;         // SSとMOSIを反映したAR_SPIへの書き込み値(SCKはLow)
+
+    for (int i = 7; i >= 0; i--) {
+        // SPI上の送信順は上位ビットからのため，iビット目を取り出してMOSI(bit1)へ置く
+        level = spi_ss | (((data >> i) & 1) << 1);
+        // SCKをLowに保ったままMOSIを確定させる
+        AR_SPI = level;
+        // SCK(bit2)をHighへ上げ，この立ち上がりでカードがMOSIを取り込み，MISOを確定させる
+        AR_SPI = level | 4;
+        // 確定したMISO(bit3)を読み，受信バイトの下位へ積む
+        received = (received << 1) | ((AR_SPI >> 3) & 1);
+    }
+    // 8ビット送り終えたらSCKをLowへ戻し，MOSIはアイドルのHighにして次の転送に備える
+    AR_SPI = spi_ss | 2;
+    return received;
+}
+
+// SDカードへコマンドを送り，R1応答(1バイト)を返す(応答が得られなければ0xffを返す)
+int sd_command(int cmd_index, int arg, int crc) {
+    int response;  // カードから受け取った1バイト
+
+    // 直前の処理でカードがビジーならば抜けさせるためのクロックを8回与える
+    spi_transfer(0xff);
+    // コマンドフレームは6バイト固定で，先頭バイトの上位2ビット'01'がホストからの送信を表す
+    spi_transfer(0x40 | cmd_index);
+    // 引数32ビットを上位バイトから順に送る
+    spi_transfer((arg >> 24) & 0xff);
+    spi_transfer((arg >> 16) & 0xff);
+    spi_transfer((arg >> 8) & 0xff);
+    spi_transfer(arg & 0xff);
+    // SPIモードではCRCは基本的に無視されるが，CMD0とCMD8だけは正しい値が必須のため呼び出し元から受け取る
+    spi_transfer(crc);
+
+    // 応答が返るまでの間はMISOがHigh(0xff)のままなので，最上位ビットが0のバイトが応答の先頭になる
+    // 規格上の待ち時間(NCR)は最大8バイトのため，余裕を見て16回まで読む
+    for (int i = 0; i < 16; i++) {
+        response = spi_transfer(0xff);
+        if ((response & 0x80) == 0) {
+            return response;
+        }
+    }
+    return 0xff;
+}
+
+// SDカードをSPIモードへ入れ，初期化完了まで進める
+// 各段の応答を表示し，どこで失敗したかを切り分けられるようにする
+// 戻り値: 1(初期化完了) / 0(失敗)
+int sd_init(void) {
+    int response;  // 各コマンドのR1応答
+    int ready;     // ACMD41が完了を返したか(0:未完了，1:完了)
+
+    // カードは自前の発振器を持たずSCKで内部回路を動かすため，電源投入後に74クロック以上を与える必要がある
+    // SSをHighのまま送ることで，カードはこれをコマンドと解釈せず単なるクロック供給として受け取る
+    spi_ss = 1;
+    for (int i = 0; i < 10; i++) {
+        spi_transfer(0xff);
+    }
+
+    // カードはCMD0を受け取った瞬間のSSでモードを決めるため，ここで選択しておくことがSPIモードへの切り替えになる
+    spi_ss = 0;
+
+    // CMD0(GO_IDLE_STATE): ソフトリセット．アイドル状態へ入ればin idle stateのみが立った0x01が返る
+    response = sd_command(0, 0x00000000, 0x95);
+    print("CMD0: ");
+    print_hex(response);
+    print("\n");
+    if (response != 0x01) {
+        return 0;
+    }
+
+    // CMD8(SEND_IF_COND): 2.7〜3.6Vで動かせるかの問い合わせ．引数下位の0xaaはエコーバックされるチェックパターン
+    response = sd_command(8, 0x000001aa, 0x87);
+    print("CMD8: ");
+    print_hex(response);
+    // 応答はR7(R1+4バイト)で，末尾2バイトに0x01 0xaaがそのまま戻れば電圧が受理されている
+    for (int i = 0; i < 4; i++) {
+        print(" ");
+        print_hex(spi_transfer(0xff));
+    }
+    print("\n");
+    // CMD8はSD規格v2で追加されたため，v1カードはillegal command(bit2)を立てて拒否する
+    // v1カードは以降のACMD41の引数が異なりサポート外のため，ここで止める
+    if ((response & 0x04) != 0) {
+        print("unsupported card (SD v1)\n");
+        return 0;
+    }
+    if (response != 0x01) {
+        return 0;
+    }
+
+    // ACMD41(SD_SEND_OP_COND): 初期化の開始指示．内部初期化中は0x01を返し続け，完了すると0x00になる
+    // 完了まで最大1秒かかることが規格上許容されているため，遅いカードを取りこぼさない回数を見る
+    ready = 0;
+    for (int i = 0; i < 1000 && ready == 0; i++) {
+        // ACMDはCMDとは別の命令セットで，CMD55の直後の1コマンドだけがそちらとして解釈される
+        sd_command(55, 0x00000000, 0x65);
+        // 引数のbit30(HCS)で大容量カード(SDHC/SDXC)を扱えるホストであることを申告する
+        response = sd_command(41, 0x40000000, 0x77);
+        if (response == 0x00) {
+            ready = 1;
+        }
+    }
+    print("ACMD41: ");
+    print_hex(response);
+    print("\n");
+
+    // カードの内部状態機械はSCKでしか進まないため，SSを戻した後に8クロック与えて後始末とMISOの解放を完了させる
+    spi_ss = 1;
+    spi_transfer(0xff);
+    return ready;
 }
 
 // echoコマンド: コマンド名以降の引数部分をそのまま出力する
@@ -382,6 +522,21 @@ void handle_mv(int pos) {
     }
 }
 
+// sdinitコマンド: SDカードの初期化を実行する
+void handle_sdinit(int pos) {
+    // 引数を取らないコマンドのため，引数が指定されていれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return;
+    }
+    // 途中経過はsd_initが表示するため，ここでは最終結果だけを伝える
+    if (sd_init() == 0) {
+        print_error("initialization failed\n");
+        return;
+    }
+    print("card ready\n");
+}
+
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 void handle_help(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
@@ -397,6 +552,7 @@ void handle_help(int pos) {
     print("cat\n");
     print("rm\n");
     print("mv\n");
+    print("sdinit\n");
 }
 
 // 未対応コマンドのエラーメッセージを表示する
@@ -424,6 +580,8 @@ void dispatch(int pos) {
         handle_rm(pos);
     } else if (streq(cmd, "mv")) {
         handle_mv(pos);
+    } else if (streq(cmd, "sdinit")) {
+        handle_sdinit(pos);
     } else {
         handle_unknown();
     }
