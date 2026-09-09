@@ -150,6 +150,8 @@ int sd_command(int cmd_index, int arg, int crc) {
 // 戻り値: 1(初期化完了) / 0(失敗)
 int sd_init_commands(void) {
     int response;  // 各コマンドのR1応答
+    int received;  // R7の残り4バイトを1バイトずつ受け取る変数
+    int echoed;    // R7の末尾2バイト(受理された電圧範囲とチェックパターン)
     int ready;     // ACMD41が完了を返したか(0:未完了，1:完了)
 
     // CMD0(GO_IDLE_STATE): ソフトリセット．アイドル状態へ入ればin idle stateのみが立った0x01が返る
@@ -166,24 +168,32 @@ int sd_init_commands(void) {
     print("CMD8: ");
     print_hex(response);
     // 無応答を表す0xffはillegal commandビットも含むため，v1カードの判定より先に切り分ける
-    // 続く4バイトも意味を持たないため読み出さずに打ち切る
     if (response == 0xff) {
         print(" (no response)\n");
         return 0;
     }
-    // 応答はR7(R1+4バイト)で，末尾2バイトに0x01 0xaaがそのまま戻れば電圧が受理されている
-    for (int i = 0; i < 4; i++) {
-        print(" ");
-        print_hex(spi_transfer(0xff));
-    }
-    print("\n");
     // CMD8はSD規格v2で追加されたため，v1カードはillegal command(bit2)を立てて拒否する
-    // v1カードは以降のACMD41の引数が異なりサポート外のため，ここで止める
+    // 拒否された場合はR1しか返らないため続く4バイトを読まず，ACMD41の引数も異なるサポート外としてここで止める
     if ((response & 0x04) != 0) {
-        print("unsupported card (SD v1)\n");
+        print(" (SD v1, unsupported)\n");
         return 0;
     }
     if (response != 0x01) {
+        print("\n");
+        return 0;
+    }
+    // 受理された場合の応答はR7(R1+4バイト)で，末尾2バイトが受理された電圧範囲と送ったチェックパターンのエコーバックになる
+    echoed = 0;
+    for (int i = 0; i < 4; i++) {
+        received = spi_transfer(0xff);
+        print(" ");
+        print_hex(received);
+        echoed = ((echoed << 8) | received) & 0xffff;  // 末尾2バイトだけを残す
+    }
+    print("\n");
+    // 引数で送った0x1(2.7〜3.6V)と0xaaがそのまま戻らなければ，配線か電圧に問題がある
+    if (echoed != 0x01aa) {
+        print("check pattern mismatch\n");
         return 0;
     }
 
