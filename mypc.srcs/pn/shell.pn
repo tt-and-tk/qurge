@@ -192,7 +192,15 @@ int sd_init_commands(void) {
     ready = 0;
     for (int i = 0; i < 1000 && ready == 0; i++) {
         // ACMDはCMDとは別の命令セットで，CMD55の直後の1コマンドだけがそちらとして解釈される
-        sd_command(55, 0x00000000, 0x65);
+        response = sd_command(55, 0x00000000, 0x65);
+        // CMD55が通っていないと続くコマンドは通常のCMD41として解釈されるため，前提が崩れたまま繰り返さず止める
+        // カードはACMD41が完了するまでアイドル状態にあるため，in idle state(bit0)以外が立っていれば失敗とみなす
+        if ((response & 0xfe) != 0) {
+            print("CMD55: ");
+            print_hex(response);
+            print("\n");
+            return 0;
+        }
         // 引数のbit30(HCS)で大容量カード(SDHC/SDXC)を扱えるホストであることを申告する
         response = sd_command(41, 0x40000000, 0x77);
         if (response == 0x00) {
