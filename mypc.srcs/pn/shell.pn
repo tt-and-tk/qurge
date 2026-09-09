@@ -191,7 +191,7 @@ int sd_init_commands(void) {
         echoed = ((echoed << 8) | received) & 0xffff;  // 末尾2バイトだけを残す
     }
     print("\n");
-    // 引数で送った0x1(2.7〜3.6V)と0xaaがそのまま戻らなければ，配線か電圧に問題がある
+    // CMD8の引数0x000001aaの下位2バイト(0x01=2.7〜3.6V，0xaa=チェックパターン)がそのまま戻らなければ，配線か電圧に問題がある
     if (echoed != 0x01aa) {
         print("check pattern mismatch\n");
         return 0;
