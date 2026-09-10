@@ -105,6 +105,8 @@ module alu_sv (
     import util_p::*;
 
     // 内部レジスタ
+    // 要素ごとに異なる初期値を与えないのは，Vivado合成が配列の宣言時初期化で先頭要素以外を
+    // 黙って0にするため(AR 56211)．非選択で始めたいSSも下のリセット処理側で立てている
     register_t register[REGISTER_MAX_ADDR:0] = '{(REGISTER_MAX_ADDR + 1){32'h0}};
 
     // 実行フェーズ
