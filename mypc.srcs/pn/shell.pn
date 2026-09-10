@@ -79,7 +79,7 @@ void print_error(char msg[]) {
 }
 
 // 0〜15の値を16進数1桁の文字へ変換する
-char hex_digit(int value) {
+char hex(int value) {
     if (value < 10) {
         return '0' + value;
     }
@@ -88,18 +88,20 @@ char hex_digit(int value) {
 
 // valueの下位1バイトを"0x??"の形式で出力する(改行は付けない)
 void print_hex(int value) {
-    char hex_buf[5];  // 出力用の一時バッファ(表示内容が実行時に決まるため，文字列リテラルを直接渡せない)
+    char hex_buf[5];  // 出力用の一時バッファ
     hex_buf[0] = '0';
     hex_buf[1] = 'x';
-    hex_buf[2] = hex_digit((value >> 4) & 0x0f);  // 上位4ビット
-    hex_buf[3] = hex_digit(value & 0x0f);         // 下位4ビット
+    hex_buf[2] = hex((value >> 4) & 0x0f);  // 上位4ビット
+    hex_buf[3] = hex(value & 0x0f);         // 下位4ビット
     hex_buf[4] = '\0';
     print(hex_buf);
 }
 
 // SPIモード0のビットバンギングで1バイトを送信し，同時に受信した1バイトを返す
-// SPIは全二重で送信と受信が常に対になるため，受信だけしたい場合は0xffを渡してクロックだけを供給する
-int spi_transfer(int data) {
+// SPIは全二重で送信と受信が常に対になるため，受信だけしたい場合は0xffを渡してクロックだけを供給すること
+int spi_transfer(char data) {
+    // AR_SPIのビット割り当て(bit0:SS(アクティブLow) / bit1:MOSI / bit2:SCK / bit3:MISO(入力))
+    // 受信側をcharにしないのは，charが符号付きで0xffが-1として読み戻り，呼び出し元の0xffとの比較が成り立たなくなるため
     int received = 0;  // MISOから上位ビット順に組み立てる受信バイト
     int level;         // SSとMOSIを反映したAR_SPIへの書き込み値(SCKはLow)
 
@@ -118,7 +120,8 @@ int spi_transfer(int data) {
     return received;
 }
 
-// SDカードへコマンドを送り，R1応答(1バイト)を返す(応答が得られなければ0xffを返す)
+// SDカードへコマンドを送り，R1応答を返す(応答が得られなければ0xffを返す)
+// R1はどのコマンドにも共通する1バイトのステータスで，bit0がin idle state，bit2がillegal command，bit7は常に0
 int sd_command(int cmd_index, int arg, int crc) {
     int response;  // カードから受け取った1バイト
 
@@ -126,11 +129,11 @@ int sd_command(int cmd_index, int arg, int crc) {
     spi_transfer(0xff);
     // コマンドフレームは6バイト固定で，先頭バイトの上位2ビット'01'がホストからの送信を表す
     spi_transfer(0x40 | cmd_index);
-    // 引数32ビットを上位バイトから順に送る
-    spi_transfer((arg >> 24) & 0xff);
-    spi_transfer((arg >> 16) & 0xff);
-    spi_transfer((arg >> 8) & 0xff);
-    spi_transfer(arg & 0xff);
+    // 引数32ビットを上位バイトから順に送る(下位8ビット以外は引数の型が切り捨てる)
+    spi_transfer(arg >> 24);
+    spi_transfer(arg >> 16);
+    spi_transfer(arg >> 8);
+    spi_transfer(arg);
     // SPIモードではCRCは基本的に無視されるが，CMD0とCMD8だけは正しい値が必須のため呼び出し元から受け取る
     spi_transfer(crc);
 
@@ -145,8 +148,8 @@ int sd_command(int cmd_index, int arg, int crc) {
     return 0xff;
 }
 
-// カードを選択した状態で初期化のコマンド列を順に発行する(SSの制御はsd_initが行う)
-// 各段の応答を表示し，どこで失敗したかを切り分けられるようにする
+// 初期化のコマンド列を順に発行し，各段の応答を表示している(どこで失敗したかを切り分けられるようにするため)
+// 呼び出す前にspi_ssを0にしてカードを選択しておくこと
 // 戻り値: 1(初期化完了) / 0(失敗)
 int sd_init_commands(void) {
     int response;  // 各コマンドのR1応答
@@ -182,7 +185,7 @@ int sd_init_commands(void) {
         print("\n");
         return 0;
     }
-    // 受理された場合の応答はR7(R1+4バイト)で，末尾2バイトが受理された電圧範囲と送ったチェックパターンのエコーバックになる
+    // 受理された場合の応答はR7(CMD8専用の形式で，R1に4バイトが続く)で，末尾2バイトが受理された電圧範囲と送ったチェックパターンのエコーバックになる
     echoed = 0;
     for (int i = 0; i < 4; i++) {
         received = spi_transfer(0xff);
@@ -223,12 +226,13 @@ int sd_init_commands(void) {
     return ready;
 }
 
-// SDカードをSPIモードへ入れ，ACMD41が完了を返すまで進める
+// SDカードをSPIモードへ入れ，データを読み書きできる状態まで初期化する
 // アドレッシング方式(SDHC:ブロック単位 / SDSC:バイト単位)の判定は行わないため，読み書きの前にCMD58が別途必要になる
 // 戻り値: 1(初期化完了) / 0(失敗)
 int sd_init(void) {
     int ready;  // 初期化コマンド列の結果
 
+    // 起動用のクロックを80回与える
     // カードは自前の発振器を持たずSCKで内部回路を動かすため，電源投入後に74クロック以上を与える必要がある
     // SSをHighのまま送ることで，カードはこれをコマンドと解釈せず単なるクロック供給として受け取る
     spi_ss = 1;
@@ -236,6 +240,7 @@ int sd_init(void) {
         spi_transfer(0xff);
     }
 
+    // カードを選択してから初期化のコマンド列を発行する
     // カードはCMD0を受け取った瞬間のSSでモードを決めるため，ここで選択しておくことがSPIモードへの切り替えになる
     spi_ss = 0;
     ready = sd_init_commands();
