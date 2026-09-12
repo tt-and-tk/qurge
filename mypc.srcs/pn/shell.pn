@@ -554,7 +554,7 @@ void fs_load(void) {
         entries[i].name[7] = '\0';
         entries[i].content[31] = '\0';
     }
-    // RAM上のテーブルをカードの内容で置き換えたことを伝える(sdinitから呼ばれた場合，それまでに作ったファイルはここで失われる)
+    // RAM上のテーブルをカードの内容で置き換えたことを伝える(既にファイルがある状態で呼ばれた場合，それらはここで失われる)
     print("sd: file table loaded\n");
 }
 
