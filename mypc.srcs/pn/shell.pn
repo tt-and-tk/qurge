@@ -18,12 +18,10 @@ int spi_ss = 1;  // 初期値はハードウェアのリセット値(非選択)�
 int sd_ready = 0;             // カードの初期化が完了しているか(0:未完了，1:完了)
 int sd_block_addressing = 0;  // コマンド引数のアドレスの単位(1:ブロック単位(SDHC/SDXC)，0:バイト単位(SDSC))
 
-// ファイルテーブルの保存先と，そのブロックがテーブルであることを示す署名(いずれも実行中は書き換えない)
-// 署名は'P' 'Y' 'F'に版番号1バイトを続けた値．レイアウト(エントリ件数・名前と内容の幅)は署名に現れないため，
-// それらを変えたときは版番号を上げる(上げないと古いカードを誤った長さで復元してしまう)
-int fs_block = 0;
-int fs_signature = 0x50594601;
-int fs_used_bytes = 8 + 4 * 40;  // 署名4 + 使用中フラグ4 + エントリ4件×40バイト
+// ファイルテーブルを読み書きするための値(いずれも実行中は書き換えない)
+int fs_block = 0;                // ファイルテーブルを保存するブロックの番号
+int fs_signature = 0x50594601;   // そのブロックがファイルテーブルであることを示す署名．'P' 'Y' 'F'に版番号1バイトを続けた値で，レイアウトを変えたときは版番号を上げる(上げないと古いカードを誤った長さで復元してしまう)
+int fs_used_bytes = 8 + 4 * 40;  // ファイルテーブルがブロックの先頭から使うバイト数．署名4バイト + 使用中フラグ4バイト + エントリ4件×40バイト
 
 // bufのpos文字目以降に連続する空白を読み飛ばした位置を返す
 int skip_spaces(char buf[], int pos) {
@@ -452,27 +450,29 @@ int sd_write_end(void) {
 // ファイルテーブルをSDカードへ書き出す
 // カードが使えない状態では何もしない(カードが無いまま操作するたびにエラーを出さないため)
 void fs_save(void) {
-    char value;  // entriesから取り出した1バイト(配列要素のメンバを関数へ直接渡す形は仕様書が非対応としているため経由する)
+    char value;  // 送る1バイトを受けておく変数(配列要素のメンバを関数へ直接渡すのは言語仕様として非対応なので経由する)
 
+    // カードが初期化されていなければ書き込む先がない
     if (sd_ready == 0) {
         return;
     }
+    // 書き込みの手続きに入れなければ保存できない
     if (sd_write_begin(fs_block) == 0) {
         print_error("save failed\n");
         return;
     }
 
-    // 署名を上位バイトから送る．読み出し側はこれが一致したときだけ復元する
+    // 署名を上位バイトから4バイト送る．読み出し側はこれが一致したときだけ復元する
     sd_write_byte(fs_signature >> 24);
     sd_write_byte(fs_signature >> 16);
     sd_write_byte(fs_signature >> 8);
     sd_write_byte(fs_signature);
-    // 使用中フラグ
+    // 4件それぞれの使用中フラグを送る
     for (int i = 0; i < 4; i++) {
         value = file_used[i];
         sd_write_byte(value);
     }
-    // エントリ本体
+    // 4件それぞれのエントリを，名前8バイト・内容32バイトの順に送る
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 8; j++) {
             value = entries[i].name[j];
@@ -483,11 +483,12 @@ void fs_save(void) {
             sd_write_byte(value);
         }
     }
-    // ブロックは512バイト固定のため，テーブルが使わない残りも送り切る
+    // ブロックは512バイト固定で送り切る必要があるため，テーブルが使わない残りを0で埋める
     for (int i = fs_used_bytes; i < 512; i++) {
         sd_write_byte(0);
     }
 
+    // カードが書き込みを受理しなければ，保存できていない
     if (sd_write_end() == 0) {
         print_error("save failed\n");
     }
@@ -503,27 +504,32 @@ void fs_load(void) {
     int value;          // 読み出した1バイト
     int matched;        // 署名が一致したか(0:不一致，1:一致)
 
+    // カードが初期化されていなければ読む先がない
     if (sd_ready == 0) {
         return;
     }
+    // 読み出しの手続きに入れなければ復元できない
     if (sd_read_begin(fs_block) == 0) {
         print("sd: cannot read file table\n");
         return;
     }
 
+    // 先頭4バイトを組み立てて署名と突き合わせ，このブロックがファイルテーブルかどうかを決める
     for (int i = 0; i < 4; i++) {
         signature = (signature << 8) | sd_read_byte();
     }
     matched = signature == fs_signature;
 
-    // 署名が一致しなくても512バイト読み切る(途中で抜けるとカードがデータを送り続け，以降の転送がずれる)
+    // 以降は署名が一致しない場合も読み進める．512バイト読み切らないとカードがデータを送り続け，以降の転送がずれるため
+    // 4件それぞれの使用中フラグを受け取る
     for (int i = 0; i < 4; i++) {
         value = sd_read_byte();
         if (matched == 1) {
-            // 0か1以外が入ると，空きとしても使用中としても扱われないエントリになる
+            // 0か1以外が入ると，空きとしても使用中としても扱われないエントリになるため0か1へ揃える
             file_used[i] = value == 1;
         }
     }
+    // 4件それぞれのエントリを，名前8バイト・内容32バイトの順に受け取る
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 8; j++) {
             value = sd_read_byte();
@@ -538,6 +544,7 @@ void fs_load(void) {
             }
         }
     }
+    // テーブルが使っていない残りは中身を捨てるが，512バイトに満たない分を読み終える必要がある
     for (int i = fs_used_bytes; i < 512; i++) {
         sd_read_byte();
     }
