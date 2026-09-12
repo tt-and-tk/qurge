@@ -107,7 +107,7 @@ module alu_sv (
     // 内部レジスタ
     register_t register[REGISTER_MAX_ADDR:0] = '{(REGISTER_MAX_ADDR + 1){32'h0}};
 
-    // Arduino SPIのMISOの準安定状態を消す2段のシフトレジスタ(ASYNC_REGは2段を隣接配置させる指定)
+    // Arduino SPIのMISOの準安定状態を消す2段のシフトレジスタ
     (* ASYNC_REG = "TRUE" *) logic [1:0] miso_sync = 2'b00;
 
     // 実行フェーズ
@@ -362,6 +362,7 @@ module alu_sv (
     end
 
     // MISOの同期化．非同期入力の準安定状態をシフトレジスタで消してから下のブロックで取り込む
+    // 下の順序回路と分けているのは，リセット中・停止中も止めずに動かし続けるため
     always_ff @(posedge clk) begin
         miso_sync <= {miso_sync[0], ck_miso};
     end
