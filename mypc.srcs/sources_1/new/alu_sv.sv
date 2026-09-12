@@ -107,6 +107,9 @@ module alu_sv (
     // 内部レジスタ
     register_t register[REGISTER_MAX_ADDR:0] = '{(REGISTER_MAX_ADDR + 1){32'h0}};
 
+    // Arduino SPIのMISOの準安定状態を消す2段のシフトレジスタ
+    (* ASYNC_REG = "TRUE" *) logic [1:0] miso_sync = 2'b00;
+
     // 実行フェーズ
     cpu_phase_enum cpu_phase = CPU_FETCH;
 
@@ -358,7 +361,13 @@ module alu_sv (
         stdout_tlast = 1'b1;
     end
 
-    // 順序回路
+    // MISOの同期化．非同期入力の準安定状態をシフトレジスタで消してからメインの順序回路で取り込む
+    // メインの順序回路とブロックを分けているのは，リセット中・停止中も止めずに動かし続けるため
+    always_ff @(posedge clk) begin
+        miso_sync <= {miso_sync[0], ck_miso};
+    end
+
+    // メインの順序回路
     always_ff @(posedge clk) begin
         // リセット
         if (!resetn || is_halted) begin
@@ -444,7 +453,8 @@ module alu_sv (
             register[STDOUT_SIGNAL_ADDR][0] <= stdout_tready;
             // Arduino SPIのMISOビットのみ外部ピンを毎サイクル取り込む(SCK・MOSI・SSビットは
             // CPUの書き込みをそのまま保持し，このブロックでは触れない)
-            register[SPI_ADDR][3] <= ck_miso;
+            // 取り込むのは同期化後の値で，ピンの値が届くまでこの1段と合わせて3サイクルかかる
+            register[SPI_ADDR][3] <= miso_sync[1];
 
             // can_prefetchの1サイクル遅延版を更新する(ROMの同期読み出しは番地を出した次の
             // サイクルにならないと結果が確定しないため，先読みの取り込み可否判定に使う)
