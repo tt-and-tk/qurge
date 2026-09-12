@@ -765,9 +765,10 @@ int sd_verify_block(int block) {
     if (sd_write_begin(block) == 0) {
         return -2;
     }
-    // 位置ごとに異なる値を書くことで，バイトの取り違えや詰まりが位置のずれとして現れる
+    // 1バイトには256通りしか入らないため512箇所すべてを異なる値にはできない
+    // 上位バイトを混ぜることで前半と後半で値がずれ，256バイトちょうどの取り違えも検出できる
     for (int i = 0; i < 512; i++) {
-        sd_write_byte(i);
+        sd_write_byte(i ^ (i >> 8));
     }
     if (sd_write_end() == 0) {
         return -2;
@@ -779,7 +780,7 @@ int sd_verify_block(int block) {
     // 不一致が見つかっても512バイト読み切る(途中で抜けるとカードがデータを送り続け，以降の転送がずれる)
     for (int i = 0; i < 512; i++) {
         value = sd_read_byte();
-        if (value != (i & 0xff) && mismatch == -1) {
+        if (value != ((i ^ (i >> 8)) & 0xff) && mismatch == -1) {
             mismatch = i;
         }
     }
