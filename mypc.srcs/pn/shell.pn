@@ -15,6 +15,9 @@ char file_used[4];            // 各エントリの使用中フラグ(0:未使�
 // AR_SPIへの書き込みは常に全ビットを同時に置き換えるため，SSだけを別に保ち回す
 int spi_ss = 1;  // 初期値はハードウェアのリセット値(非選択)と揃える
 
+int sd_ready = 0;             // カードの初期化が完了しているか(0:未完了，1:完了)
+int sd_block_addressing = 0;  // コマンド引数のアドレスの単位(1:ブロック単位(SDHC/SDXC)，0:バイト単位(SDSC))
+
 // bufのpos文字目以降に連続する空白を読み飛ばした位置を返す
 int skip_spaces(char buf[], int pos) {
     // 区切りとして扱うのは半角空白だけで，タブ等の他の空白文字は引数の一部になる
@@ -85,15 +88,22 @@ char hex(int value) {
     return 'a' + value - 10;
 }
 
-// valueを"0x??"の形式で出力する(改行は付けない)
-void print_hex(char value) {
-    char hex_buf[5];  // 出力用の一時バッファ
+// valueの下位digits桁を"0x…"の形式で出力する(改行は付けない)
+void print_hex_digits(int value, int digits) {
+    char hex_buf[10];  // 出力用の一時バッファ("0x" + 最大7桁 + ヌル終端)
     hex_buf[0] = '0';
     hex_buf[1] = 'x';
-    hex_buf[2] = hex((value >> 4) & 0x0f);  // 上位4ビット
-    hex_buf[3] = hex(value & 0x0f);         // 下位4ビット
-    hex_buf[4] = '\0';
+    for (int i = 0; i < digits; i++) {
+        // 左端が最上位桁になるよう，残りの桁数ぶんだけ右へ寄せてから1桁を取り出す
+        hex_buf[2 + i] = hex((value >> ((digits - 1 - i) * 4)) & 0x0f);
+    }
+    hex_buf[2 + digits] = '\0';
     print(hex_buf);
+}
+
+// valueを"0x??"の形式で出力する(改行は付けない)
+void print_hex(char value) {
+    print_hex_digits(value, 2);
 }
 
 // SPIモード0のビットバンギングで1バイトを送信し，同時に受信した1バイトを返す
@@ -148,17 +158,26 @@ int sd_command(int cmd_index, int arg, int crc) {
     return 0xff;
 }
 
+// カードを非選択へ戻して解放する
+// カードの内部状態機械はSCKでしか進まないため，SSを戻した後に8クロック与えて後始末を完了させる
+void sd_release(void) {
+    spi_ss = 1;
+    spi_transfer(0xff);
+}
+
 // 初期化のコマンド列を順に実行する(どこで失敗したのかが分かるように各段の応答を表示している)
 // 呼び出す前にspi_ssを0にしてカードを選択しておくこと
 // 戻り値: 1(初期化完了) / 0(失敗)
 int sd_init_commands(void) {
     // カードが返す応答の形式
     // R1: どのコマンドにも共通する1バイトのステータス(bit0:in idle state / bit2:illegal command / bit7:常に0)
+    // R3: CMD58だけが返す形式で，R1に4バイトのOCRが続く
     // R7: CMD8だけが返す形式で，R1に4バイトが続く
 
     int response;  // 各コマンドのR1応答
     int received;  // R1に続く4バイトを1バイトずつ受け取る変数
     int echoed;    // R7の末尾2バイト(受理された電圧範囲とチェックパターン)
+    int ocr_high;  // R3のOCRの最上位バイト(CCSビットを含む)
     int ready;     // ACMD41が完了を返したか(0:未完了，1:完了)
 
     // CMD0(GO_IDLE_STATE): ソフトリセット．アイドル状態へ入ればin idle stateのみが立った0x01が返る
@@ -226,15 +245,60 @@ int sd_init_commands(void) {
     }
     print("ACMD41: ");
     print_hex(response);
+    if (ready == 0) {
+        // 上限まで繰り返しても完了しなかった(直前に表示したのが最後に返った応答)
+        print(" (not ready)\n");
+        return 0;
+    }
     print("\n");
-    return ready;
+
+    // CMD58(READ_OCR): アドレスの単位を決めるCCSビットを読む
+    // 応答はR3(R1に4バイトのOCRが続く)で，CCSはOCRの最上位バイトのbit6にある
+    response = sd_command(58, 0x00000000, 0x01);
+    print("CMD58: ");
+    print_hex(response);
+    // 失敗した場合も4バイト読み切らないと以降の転送がずれるため，読み出しは先に済ませる
+    // OCRのbit31(power up status)は確認しない．ACMD41が完了を返した後であり，必ず立っているため
+    ocr_high = 0;
+    for (int i = 0; i < 4; i++) {
+        received = spi_transfer(0xff);
+        print(" ");
+        print_hex(received);
+        if (i == 0) {
+            ocr_high = received;
+        }
+    }
+    if (response != 0x00) {
+        print(" (failed)\n");
+        return 0;
+    }
+    // OCRの最上位バイトのbit6(CCS)がアドレスの単位を表す
+    sd_block_addressing = (ocr_high >> 6) & 1;
+    if (sd_block_addressing == 1) {
+        print(" (block addressing)\n");
+        return 1;
+    }
+    print(" (byte addressing)\n");
+
+    // CMD16(SET_BLOCKLEN): バイト単位アドレスのカードにブロック長を512バイトへ揃えさせる
+    // ブロック単位のカードは512バイト固定でこのコマンドが効かないため，そちらへは送らない
+    response = sd_command(16, 512, 0x01);
+    print("CMD16: ");
+    print_hex(response);
+    print("\n");
+    return response == 0x00;
 }
 
-// SDカードをSPIモードへ入れ，データを読み書きできる状態まで初期化する
-// アドレッシング方式(SDHC:ブロック単位 / SDSC:バイト単位)の判定は行わないため，読み書きの前にCMD58が別途必要になる
+// SDカードをSPIモードへ入れ，ブロックを読み書きできる状態まで初期化する
+// アドレスの単位の判定までを含むため，完了後はブロックの読み書きをそのまま行える
 // 戻り値: 1(初期化完了) / 0(失敗)
 int sd_init(void) {
     int ready;  // 初期化コマンド列の結果
+
+    // 一度成功した後の再実行が失敗した場合に前のカードの値が残らないよう，入口で揃えて初期化する
+    // sd_block_addressingはCMD58に到達しないと設定されないため，そこまで進まず失敗する経路がある
+    sd_ready = 0;
+    sd_block_addressing = 0;
 
     // カードは自前の発振器を持たずSCKで内部回路を動かすため，電源投入後に74クロック以上を与える必要がある(ここでは80クロック)
     // SSをHighのまま送ることで，カードはこれをコマンドと解釈せず単なるクロック供給として受け取る
@@ -249,10 +313,140 @@ int sd_init(void) {
     ready = sd_init_commands();
 
     // 途中で失敗してもカードがMISOを掴んだままにならないよう，成否によらずここで解放する
-    // カードの内部状態機械はSCKでしか進まないため，SSを戻した後に8クロック与えて後始末を完了させる
-    spi_ss = 1;
-    spi_transfer(0xff);
+    sd_release();
+    sd_ready = ready;
     return ready;
+}
+
+// ブロック番号をコマンドの引数へ変換する
+int sd_block_arg(int block) {
+    if (sd_block_addressing == 1) {
+        return block;
+    }
+    return block * 512;
+}
+
+// ブロックの読み出しを開始し，512バイトを受け取れる状態にする
+// 呼び出す前にsd_initを成功させておくこと(アドレスの単位が確定していないと誤った番地を読む)
+// 成功した場合はsd_read_byteを512回呼んだ後にsd_read_endを呼ぶこと(失敗した場合はカードを解放済みのため呼ばない)
+// 戻り値: 1(受信可能) / 0(失敗)
+int sd_read_begin(int block) {
+    int response;  // CMD17のR1応答
+    int token;     // カードから受け取ったトークン
+
+    spi_ss = 0;
+    // CMD17(READ_SINGLE_BLOCK): 1ブロックの読み出し要求．CRCは無視されるためエンドビットのみを立てた値を渡す
+    response = sd_command(17, sd_block_arg(block), 0x01);
+    if (response != 0x00) {
+        print("CMD17: ");
+        print_hex(response);
+        print("\n");
+        sd_release();
+        return 0;
+    }
+
+    // データが揃うまでMISOはHigh(0xff)のままで，先頭に0xfeのデータ開始トークンが現れる
+    // 規格上の読み出し時間の上限(100ms)を上回るだけの回数を見る(1バイトの転送に最低でも数百サイクルかかる)
+    for (int i = 0; i < 200000; i++) {
+        token = spi_transfer(0xff);
+        if (token == 0xfe) {
+            return 1;
+        }
+        // 0xff以外が来た場合はエラートークンであり，待っても0xfeへは変わらない
+        if (token != 0xff) {
+            print("read token: ");
+            print_hex(token);
+            print("\n");
+            sd_release();
+            return 0;
+        }
+    }
+    print("read timeout\n");
+    sd_release();
+    return 0;
+}
+
+// 読み出し中のブロックから1バイト受け取る
+int sd_read_byte(void) {
+    return spi_transfer(0xff);
+}
+
+// 512バイト読み終えた後の後始末を行う
+void sd_read_end(void) {
+    // データの後にCRCが2バイト続く．SPIモードでは検査されないため読み捨てる
+    spi_transfer(0xff);
+    spi_transfer(0xff);
+    sd_release();
+}
+
+// ブロックの書き込みを開始し，512バイトを送れる状態にする
+// 呼び出す前にsd_initを成功させておくこと(アドレスの単位が確定していないと誤った番地へ書く)
+// 成功した場合はsd_write_byteを512回呼んだ後にsd_write_endを呼ぶこと(失敗した場合はカードを解放済みのため呼ばない)
+// 戻り値: 1(送信可能) / 0(失敗)
+int sd_write_begin(int block) {
+    int response;  // CMD24のR1応答
+
+    spi_ss = 0;
+    // CMD24(WRITE_BLOCK): 1ブロックの書き込み要求．CRCは無視されるためエンドビットのみを立てた値を渡す
+    response = sd_command(24, sd_block_arg(block), 0x01);
+    if (response != 0x00) {
+        print("CMD24: ");
+        print_hex(response);
+        print("\n");
+        sd_release();
+        return 0;
+    }
+
+    // 応答とデータ開始トークンの間には1バイト以上の間隔が必要なため，ダミーを1バイト挟む
+    spi_transfer(0xff);
+    // データ開始トークンを送ると，以降の512バイトがブロックの内容として扱われる
+    spi_transfer(0xfe);
+    return 1;
+}
+
+// 書き込み中のブロックへ1バイト送る
+void sd_write_byte(char value) {
+    spi_transfer(value);
+}
+
+// 512バイト送り終えた後の後始末を行い，書き込みが受理されたかを返す
+// 戻り値: 1(書き込み成功) / 0(失敗)
+int sd_write_end(void) {
+    int response;  // データ応答トークン
+
+    // データの後にCRCを2バイト送る．SPIモードでは検査されないためダミーでよい
+    spi_transfer(0xff);
+    spi_transfer(0xff);
+
+    // データ応答トークンはbit4が0で，下位3ビットが受理・CRCエラー・書き込みエラーを表す
+    // トークンが現れるまで0xffが数バイト挟まることがあるため，bit4が0のバイトが来るまで待つ
+    response = 0xff;
+    for (int i = 0; i < 200000; i++) {
+        response = spi_transfer(0xff);
+        if ((response & 0x10) == 0) {
+            break;
+        }
+    }
+    // 下位5ビットが0x05(xxx00101)であれば受理された
+    if ((response & 0x1f) != 0x05) {
+        print("data response: ");
+        print_hex(response);
+        print("\n");
+        sd_release();
+        return 0;
+    }
+
+    // カードは内部の書き込みが終わるまでMISOをLowに保つ(ビジー)．終わると0xffへ戻る
+    // 規格上の書き込み時間の上限(250ms)を上回るだけの回数を見る
+    for (int i = 0; i < 200000; i++) {
+        if (spi_transfer(0xff) == 0xff) {
+            sd_release();
+            return 1;
+        }
+    }
+    print("write timeout\n");
+    sd_release();
+    return 0;
 }
 
 // echoコマンド: コマンド名以降の引数部分をそのまま出力する
@@ -579,6 +773,86 @@ void handle_sdinit(int pos) {
     print("card ready\n");
 }
 
+// 指定ブロックへ連番を512バイト書き込み，読み戻して一致するかを確かめる
+// 戻り値: -1(一致) / -2(手続きの失敗) / 0以上(最初に一致しなかったバイトの位置)
+int sd_verify_block(int block) {
+    int mismatch = -1;  // 最初に一致しなかった位置
+    int value;          // 読み戻した1バイト
+
+    // 書き込みの手続きに入れなければ，比較するデータを用意できないので打ち切る
+    if (sd_write_begin(block) == 0) {
+        return -2;
+    }
+    // 1バイトには256通りしか入らないため512箇所すべてを異なる値にはできない
+    // 上位バイトを混ぜることで前半と後半で値がずれ，256バイトちょうどの取り違えも検出できる
+    for (int i = 0; i < 512; i++) {
+        sd_write_byte(i ^ (i >> 8));
+    }
+    // カードが書き込みを受理しなければ，読み戻しても比較する意味がない
+    if (sd_write_end() == 0) {
+        return -2;
+    }
+
+    // 書いたブロックを読み出す手続きに入る
+    if (sd_read_begin(block) == 0) {
+        return -2;
+    }
+    // 不一致が見つかっても512バイト読み切る(途中で抜けるとカードがデータを送り続け，以降の転送がずれる)
+    for (int i = 0; i < 512; i++) {
+        value = sd_read_byte();
+        if (value != ((i ^ (i >> 8)) & 0xff) && mismatch == -1) {
+            mismatch = i;
+        }
+    }
+    // CRCを読み捨ててカードを解放する
+    sd_read_end();
+    return mismatch;
+}
+
+// sdtestコマンド: ブロックの読み書きが往復できることを確かめる
+void handle_sdtest(int pos) {
+    int result;  // sd_verify_blockの戻り値
+
+    // 引数を取らないコマンドのため，引数が指定されていれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return;
+    }
+    // 初期化を済ませていないとCMD17・CMD24が通らず，原因の分かりにくい失敗になる
+    if (sd_ready == 0) {
+        print_error("run sdinit first\n");
+        return;
+    }
+
+    // 書き込みの前に元の内容を退避しないため，実行すると対象ブロックの中身は失われる
+    print("overwrites block 0 and 1\n");
+
+    // ブロック0とブロック1の両方を試す．バイト単位アドレスのカードでは
+    // ブロック番号を512倍する変換が入るため，0番だけでは変換を通らない
+    for (int block = 0; block < 2; block++) {
+        if (block == 0) {
+            print("block 0: ");
+        } else {
+            print("block 1: ");
+        }
+        // 書き込みから読み戻しまでを往復させ，一致しなかった位置を受け取る
+        result = sd_verify_block(block);
+        if (result == -2) {
+            // 手続きのどこかで失敗した．応答の中身は各関数が表示済みのため，ここでは結果だけを伝える
+            print("failed\n");
+            return;
+        }
+        if (result >= 0) {
+            // 往復はできたが中身が変わっていた．書いた値と違っていた最初のバイトの位置を出す
+            print("mismatch at ");
+            print_hex_digits(result, 3);  // 位置は0〜511のため3桁で足りる
+            print("\n");
+            return;
+        }
+        print("ok\n");
+    }
+}
+
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 void handle_help(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
@@ -595,6 +869,7 @@ void handle_help(int pos) {
     print("rm\n");
     print("mv\n");
     print("sdinit\n");
+    print("sdtest\n");
 }
 
 // 未対応コマンドのエラーメッセージを表示する
@@ -624,6 +899,8 @@ void dispatch(int pos) {
         handle_mv(pos);
     } else if (streq(cmd, "sdinit")) {
         handle_sdinit(pos);
+    } else if (streq(cmd, "sdtest")) {
+        handle_sdtest(pos);
     } else {
         handle_unknown();
     }
