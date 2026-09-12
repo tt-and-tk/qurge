@@ -812,6 +812,9 @@ void handle_sdtest(int pos) {
         return;
     }
 
+    // 書き込みの前に元の内容を退避しないため，実行すると対象ブロックの中身は失われる
+    print("overwrites block 0 and 1\n");
+
     // ブロック0とブロック1の両方を試す．バイト単位アドレスのカードでは
     // ブロック番号を512倍する変換が入るため，0番だけでは変換を通らない
     for (int block = 0; block < 2; block++) {
