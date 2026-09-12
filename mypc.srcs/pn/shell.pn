@@ -245,10 +245,12 @@ int sd_init_commands(void) {
     }
     print("ACMD41: ");
     print_hex(response);
-    print("\n");
     if (ready == 0) {
+        // 上限まで繰り返しても完了しなかった(直前に表示したのが最後に返った応答)
+        print(" (not ready)\n");
         return 0;
     }
+    print("\n");
 
     // CMD58(READ_OCR): アドレスの単位を決めるCCSビットを読む
     // 応答はR3(R1に4バイトのOCRが続く)で，CCSはOCRの最上位バイトのbit6にある
@@ -267,9 +269,10 @@ int sd_init_commands(void) {
         }
     }
     if (response != 0x00) {
-        print("\n");
+        print(" (failed)\n");
         return 0;
     }
+    // OCRの最上位バイトのbit6(CCS)がアドレスの単位を表す
     sd_block_addressing = (ocr_high >> 6) & 1;
     if (sd_block_addressing == 1) {
         print(" (block addressing)\n");
@@ -287,7 +290,7 @@ int sd_init_commands(void) {
 }
 
 // SDカードをSPIモードへ入れ，ブロックを読み書きできる状態まで初期化する
-// アドレスの単位の判定までを含むため，完了後はsd_read_begin・sd_write_beginをそのまま呼べる
+// アドレスの単位の判定までを含むため，完了後はブロックの読み書きをそのまま行える
 // 戻り値: 1(初期化完了) / 0(失敗)
 int sd_init(void) {
     int ready;  // 初期化コマンド列の結果
@@ -324,6 +327,7 @@ int sd_block_arg(int block) {
 }
 
 // ブロックの読み出しを開始し，512バイトを受け取れる状態にする
+// 呼び出す前にsd_initを成功させておくこと(アドレスの単位が確定していないと誤った番地を読む)
 // 成功した場合はsd_read_byteを512回呼んだ後にsd_read_endを呼ぶこと(失敗した場合はカードを解放済みのため呼ばない)
 // 戻り値: 1(受信可能) / 0(失敗)
 int sd_read_begin(int block) {
@@ -376,6 +380,7 @@ void sd_read_end(void) {
 }
 
 // ブロックの書き込みを開始し，512バイトを送れる状態にする
+// 呼び出す前にsd_initを成功させておくこと(アドレスの単位が確定していないと誤った番地へ書く)
 // 成功した場合はsd_write_byteを512回呼んだ後にsd_write_endを呼ぶこと(失敗した場合はカードを解放済みのため呼ばない)
 // 戻り値: 1(送信可能) / 0(失敗)
 int sd_write_begin(int block) {
@@ -416,8 +421,11 @@ int sd_write_end(void) {
     // データ応答トークンはbit4が0で，下位3ビットが受理・CRCエラー・書き込みエラーを表す
     // トークンが現れるまで0xffが数バイト挟まることがあるため，bit4が0のバイトが来るまで待つ
     response = 0xff;
-    for (int i = 0; i < 200000 && (response & 0x10) != 0; i++) {
+    for (int i = 0; i < 200000; i++) {
         response = spi_transfer(0xff);
+        if ((response & 0x10) == 0) {
+            break;
+        }
     }
     // 下位5ビットが0x05(xxx00101)であれば受理された
     if ((response & 0x1f) != 0x05) {
@@ -771,6 +779,7 @@ int sd_verify_block(int block) {
     int mismatch = -1;  // 最初に一致しなかった位置
     int value;          // 読み戻した1バイト
 
+    // 書き込みの手続きに入れなければ，比較するデータを用意できないので打ち切る
     if (sd_write_begin(block) == 0) {
         return -2;
     }
@@ -779,10 +788,12 @@ int sd_verify_block(int block) {
     for (int i = 0; i < 512; i++) {
         sd_write_byte(i ^ (i >> 8));
     }
+    // カードが書き込みを受理しなければ，読み戻しても比較する意味がない
     if (sd_write_end() == 0) {
         return -2;
     }
 
+    // 書いたブロックを読み出す手続きに入る
     if (sd_read_begin(block) == 0) {
         return -2;
     }
@@ -793,6 +804,7 @@ int sd_verify_block(int block) {
             mismatch = i;
         }
     }
+    // CRCを読み捨ててカードを解放する
     sd_read_end();
     return mismatch;
 }
@@ -823,13 +835,15 @@ void handle_sdtest(int pos) {
         } else {
             print("block 1: ");
         }
+        // 書き込みから読み戻しまでを往復させ，一致しなかった位置を受け取る
         result = sd_verify_block(block);
         if (result == -2) {
-            // 失敗した箇所の応答は各関数が表示済みのため，ここでは結果だけを伝える
+            // 手続きのどこかで失敗した．応答の中身は各関数が表示済みのため，ここでは結果だけを伝える
             print("failed\n");
             return;
         }
         if (result >= 0) {
+            // 往復はできたが中身が変わっていた．書いた値と違っていた最初のバイトの位置を出す
             print("mismatch at ");
             print_hex_digits(result, 3);  // 位置は0〜511のため3桁で足りる
             print("\n");
