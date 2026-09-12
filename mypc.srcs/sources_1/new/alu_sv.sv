@@ -361,13 +361,13 @@ module alu_sv (
         stdout_tlast = 1'b1;
     end
 
-    // MISOの同期化．非同期入力の準安定状態をシフトレジスタで消してから下のブロックで取り込む
-    // 下の順序回路と分けているのは，リセット中・停止中も止めずに動かし続けるため
+    // MISOの同期化．非同期入力の準安定状態をシフトレジスタで消してからメインの順序回路で取り込む
+    // ブロックを分けているのは，リセット中・停止中も止めずに動かし続けるため
     always_ff @(posedge clk) begin
         miso_sync <= {miso_sync[0], ck_miso};
     end
 
-    // 順序回路
+    // メインの順序回路
     always_ff @(posedge clk) begin
         // リセット
         if (!resetn || is_halted) begin
