@@ -503,11 +503,16 @@ void fs_save(void) {
 // SDカードからファイルテーブルを復元する
 // 署名が一致しないブロック(まだ書き込んでいないカードや他の用途で使ったカード)は読み捨て，
 // 呼び出し元が用意した空のテーブルのまま起動できるようにする
+// fs_saveと対になるよう，カードが使えない状態では何もしない
+// 表示にprint_errorを使わないのは，起動時にも呼ばれ，その時点ではコマンド名が入っていないため
 void fs_load(void) {
     int signature = 0;  // 先頭4バイトを上位バイトから組み立てた値
     int value;          // 読み出した1バイト
     int matched;        // 署名が一致したか(0:不一致，1:一致)
 
+    if (sd_ready == 0) {
+        return;
+    }
     if (sd_read_begin(fs_block) == 0) {
         print("sd: cannot read file table\n");
         return;
@@ -547,7 +552,8 @@ void fs_load(void) {
     sd_read_end();
 
     if (matched == 0) {
-        print("sd: no file table\n");
+        // このブロックは次にテーブルを変えた時点で上書きされるため，中身があるカードなら失われる
+        print("sd: no file table (will be overwritten)\n");
         return;
     }
     // 書き込み途中で電源が落ちた場合に終端の無い文字列が復元され得るため，末尾を終端で固定する
@@ -555,6 +561,8 @@ void fs_load(void) {
         entries[i].name[7] = '\0';
         entries[i].content[31] = '\0';
     }
+    // RAM上のテーブルをカードの内容で置き換えたことを伝える(sdinitから呼ばれた場合，それまでに作ったファイルはここで失われる)
+    print("sd: file table loaded\n");
 }
 
 // echoコマンド: コマンド名以降の引数部分をそのまま出力する
