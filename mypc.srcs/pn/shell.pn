@@ -18,6 +18,12 @@ int spi_ss = 1;  // 初期値はハードウェアのリセット値(非選択)�
 int sd_ready = 0;             // カードの初期化が完了しているか(0:未完了，1:完了)
 int sd_block_addressing = 0;  // コマンド引数のアドレスの単位(1:ブロック単位(SDHC/SDXC)，0:バイト単位(SDSC))
 
+// ファイルテーブルを読み書きするための値(いずれも実行中は書き換えない)
+int fs_block = 0;                // ファイルテーブルを保存するブロックの番号
+int fs_format_name = 0x514653;   // そのブロックがファイルテーブルであることを示すファイルテーブルフォーマット名('Q' 'F' 'S'．Qurge File Systemの略)
+int fs_format_version = 1;       // ファイルテーブルフォーマットのバージョン番号．ファイルテーブルフォーマットを変えたときは上げる(上げないと古いカードを誤った長さで復元してしまう)
+int fs_used_bytes = 8 + 4 * 40;  // ファイルテーブルがブロックの先頭から使うバイト数．ファイルテーブルフォーマット名3バイト + バージョン番号1バイト + 使用中フラグ4バイト + エントリ4件×40バイト
+
 // bufのpos文字目以降に連続する空白を読み飛ばした位置を返す
 int skip_spaces(char buf[], int pos) {
     // 区切りとして扱うのは半角空白だけで，タブ等の他の空白文字は引数の一部になる
@@ -88,22 +94,15 @@ char hex(int value) {
     return 'a' + value - 10;
 }
 
-// valueの下位digits桁を"0x…"の形式で出力する(改行は付けない)
-void print_hex_digits(int value, int digits) {
-    char hex_buf[10];  // 出力用の一時バッファ("0x" + 最大7桁 + ヌル終端)
-    hex_buf[0] = '0';
-    hex_buf[1] = 'x';
-    for (int i = 0; i < digits; i++) {
-        // 左端が最上位桁になるよう，残りの桁数ぶんだけ右へ寄せてから1桁を取り出す
-        hex_buf[2 + i] = hex((value >> ((digits - 1 - i) * 4)) & 0x0f);
-    }
-    hex_buf[2 + digits] = '\0';
-    print(hex_buf);
-}
-
 // valueを"0x??"の形式で出力する(改行は付けない)
 void print_hex(char value) {
-    print_hex_digits(value, 2);
+    char hex_buf[5];  // 出力用の一時バッファ
+    hex_buf[0] = '0';
+    hex_buf[1] = 'x';
+    hex_buf[2] = hex((value >> 4) & 0x0f);  // 上位4ビット
+    hex_buf[3] = hex(value & 0x0f);         // 下位4ビット
+    hex_buf[4] = '\0';
+    print(hex_buf);
 }
 
 // SPIモード0のビットバンギングで1バイトを送信し，同時に受信した1バイトを返す
@@ -449,6 +448,128 @@ int sd_write_end(void) {
     return 0;
 }
 
+// ファイルテーブルをSDカードへ書き出す
+// カードが使えない状態では何もしない(カードが無いまま操作するたびにエラーを出さないため)
+void fs_save(void) {
+    char value;  // 送る1バイトを受けておく変数(配列要素のメンバを関数へ直接渡すのは言語仕様として非対応なので経由する)
+
+    // カードが初期化されていなければ書き込む先がない
+    if (sd_ready == 0) {
+        return;
+    }
+    // 書き込みの手続きに入れなければ保存できない
+    if (sd_write_begin(fs_block) == 0) {
+        print_error("save failed\n");
+        return;
+    }
+
+    // ファイルテーブルフォーマット名を上位バイトから3バイト送り，続けてバージョン番号を1バイト送る
+    // 読み出し側はどちらも一致したときだけ復元する
+    sd_write_byte(fs_format_name >> 16);
+    sd_write_byte(fs_format_name >> 8);
+    sd_write_byte(fs_format_name);
+    sd_write_byte(fs_format_version);
+    // 4件それぞれの使用中フラグを送る
+    for (int i = 0; i < 4; i++) {
+        value = file_used[i];
+        sd_write_byte(value);
+    }
+    // 4件それぞれのエントリを，名前8バイト・内容32バイトの順に送る
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 8; j++) {
+            value = entries[i].name[j];
+            sd_write_byte(value);
+        }
+        for (int j = 0; j < 32; j++) {
+            value = entries[i].content[j];
+            sd_write_byte(value);
+        }
+    }
+    // ブロックは512バイト固定で送り切る必要があるため，テーブルが使わない残りを0で埋める
+    for (int i = fs_used_bytes; i < 512; i++) {
+        sd_write_byte(0);
+    }
+
+    // カードが書き込みを受理しなければ，保存できていない
+    if (sd_write_end() == 0) {
+        print_error("save failed\n");
+    }
+}
+
+// SDカードからファイルテーブルを復元する
+// ファイルテーブルフォーマット名かバージョン番号が一致しないブロック(まだ書き込んでいないカードや，
+// 他の用途・古いファイルテーブルフォーマットで使ったカード)は読み捨て，呼び出し元が用意した空のテーブルのまま起動できるようにする
+// fs_saveと対になるよう，カードが使えない状態では何もしない
+// 表示にprint_errorを使わないのは，起動時にも呼ばれ，その時点ではコマンド名が入っていないため
+void fs_load(void) {
+    int format_name = 0;  // 先頭3バイトを上位バイトから組み立てたファイルテーブルフォーマット名
+    int format_version;   // 4バイト目のバージョン番号
+    int value;            // 読み出した1バイト
+    int matched;          // ファイルテーブルフォーマット名とバージョン番号がどちらも一致したか(0:不一致，1:一致)
+
+    // カードが初期化されていなければ読む先がない
+    if (sd_ready == 0) {
+        return;
+    }
+    // 読み出しの手続きに入れなければ復元できない
+    if (sd_read_begin(fs_block) == 0) {
+        print("sd: cannot read file table\n");
+        return;
+    }
+
+    // 先頭3バイトのファイルテーブルフォーマット名と4バイト目のバージョン番号を読み，このブロックが読める形式のファイルテーブルかどうかを決める
+    for (int i = 0; i < 3; i++) {
+        format_name = (format_name << 8) | sd_read_byte();
+    }
+    format_version = sd_read_byte();
+    matched = format_name == fs_format_name && format_version == fs_format_version;
+
+    // 以降は一致しない場合も読み進める．512バイト読み切らないとカードがデータを送り続け，以降の転送がずれるため
+    // 4件それぞれの使用中フラグを受け取る
+    for (int i = 0; i < 4; i++) {
+        value = sd_read_byte();
+        if (matched == 1) {
+            // 1のときだけ使用中とし，それ以外の値はすべて未使用として扱う
+            // (0と1以外の値をそのまま入れると，空きとしても使用中としても扱われないエントリになる)
+            file_used[i] = value == 1;
+        }
+    }
+    // 4件それぞれのエントリを，名前8バイト・内容32バイトの順に受け取る
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 8; j++) {
+            value = sd_read_byte();
+            if (matched == 1) {
+                entries[i].name[j] = value;
+            }
+        }
+        for (int j = 0; j < 32; j++) {
+            value = sd_read_byte();
+            if (matched == 1) {
+                entries[i].content[j] = value;
+            }
+        }
+    }
+    // テーブルが使っていない残りは中身を捨てるが，512バイトに満たない分を読み終える必要がある
+    for (int i = fs_used_bytes; i < 512; i++) {
+        sd_read_byte();
+    }
+    // CRCを読み捨ててカードを解放する
+    sd_read_end();
+
+    if (matched == 0) {
+        // このブロックは次にテーブルを変えた時点で上書きされるため，中身があるカードなら失われる
+        print("sd: no file table (will be overwritten)\n");
+        return;
+    }
+    // 書き込み途中で電源が落ちた場合に終端の無い文字列が復元され得るため，末尾を終端で固定する
+    for (int i = 0; i < 4; i++) {
+        entries[i].name[7] = '\0';
+        entries[i].content[31] = '\0';
+    }
+    // RAM上のテーブルをカードの内容で置き換えたことを伝える(既にファイルがある状態で呼ばれた場合，それらはここで失われる)
+    print("sd: file table loaded\n");
+}
+
 // echoコマンド: コマンド名以降の引数部分をそのまま出力する
 void handle_echo(int pos) {
     char args[64];  // コマンド名を除いた引数部分
@@ -632,6 +753,8 @@ void handle_touch(int pos) {
         print_error("file already exists\n");
         return;
     }
+    // テーブルを変えたので，電源を切っても残るようカードへ書き出す
+    fs_save();
 }
 
 // writeコマンド: 引数の先頭トークンをファイル名，残りを内容として丸ごと上書きする
@@ -661,6 +784,8 @@ void handle_write(int pos) {
 
     // 取り出した内容でエントリの中身を丸ごと上書きする
     write_file(entry, content);
+    // テーブルを変えたので，電源を切っても残るようカードへ書き出す
+    fs_save();
 }
 
 // catコマンド: 引数のファイル名に対応する内容を出力する
@@ -721,6 +846,8 @@ void handle_rm(int pos) {
 
     // 見つかったエントリを削除する
     delete_file(entry);
+    // テーブルを変えたので，電源を切っても残るようカードへ書き出す
+    fs_save();
 }
 
 // mvコマンド: 引数の先頭トークンを旧ファイル名，次のトークンを新ファイル名として名前を変更する
@@ -756,6 +883,8 @@ void handle_mv(int pos) {
         print_error("file already exists\n");
         return;
     }
+    // テーブルを変えたので，電源を切っても残るようカードへ書き出す
+    fs_save();
 }
 
 // sdinitコマンド: SDカードの初期化を実行する
@@ -771,86 +900,9 @@ void handle_sdinit(int pos) {
         return;
     }
     print("card ready\n");
-}
-
-// 指定ブロックへ連番を512バイト書き込み，読み戻して一致するかを確かめる
-// 戻り値: -1(一致) / -2(手続きの失敗) / 0以上(最初に一致しなかったバイトの位置)
-int sd_verify_block(int block) {
-    int mismatch = -1;  // 最初に一致しなかった位置
-    int value;          // 読み戻した1バイト
-
-    // 書き込みの手続きに入れなければ，比較するデータを用意できないので打ち切る
-    if (sd_write_begin(block) == 0) {
-        return -2;
-    }
-    // 1バイトには256通りしか入らないため512箇所すべてを異なる値にはできない
-    // 上位バイトを混ぜることで前半と後半で値がずれ，256バイトちょうどの取り違えも検出できる
-    for (int i = 0; i < 512; i++) {
-        sd_write_byte(i ^ (i >> 8));
-    }
-    // カードが書き込みを受理しなければ，読み戻しても比較する意味がない
-    if (sd_write_end() == 0) {
-        return -2;
-    }
-
-    // 書いたブロックを読み出す手続きに入る
-    if (sd_read_begin(block) == 0) {
-        return -2;
-    }
-    // 不一致が見つかっても512バイト読み切る(途中で抜けるとカードがデータを送り続け，以降の転送がずれる)
-    for (int i = 0; i < 512; i++) {
-        value = sd_read_byte();
-        if (value != ((i ^ (i >> 8)) & 0xff) && mismatch == -1) {
-            mismatch = i;
-        }
-    }
-    // CRCを読み捨ててカードを解放する
-    sd_read_end();
-    return mismatch;
-}
-
-// sdtestコマンド: ブロックの読み書きが往復できることを確かめる
-void handle_sdtest(int pos) {
-    int result;  // sd_verify_blockの戻り値
-
-    // 引数を取らないコマンドのため，引数が指定されていれば何もしない
-    if (has_extra_args(input, pos)) {
-        print_error("too many arguments\n");
-        return;
-    }
-    // 初期化を済ませていないとCMD17・CMD24が通らず，原因の分かりにくい失敗になる
-    if (sd_ready == 0) {
-        print_error("run sdinit first\n");
-        return;
-    }
-
-    // 書き込みの前に元の内容を退避しないため，実行すると対象ブロックの中身は失われる
-    print("overwrites block 0 and 1\n");
-
-    // ブロック0とブロック1の両方を試す．バイト単位アドレスのカードでは
-    // ブロック番号を512倍する変換が入るため，0番だけでは変換を通らない
-    for (int block = 0; block < 2; block++) {
-        if (block == 0) {
-            print("block 0: ");
-        } else {
-            print("block 1: ");
-        }
-        // 書き込みから読み戻しまでを往復させ，一致しなかった位置を受け取る
-        result = sd_verify_block(block);
-        if (result == -2) {
-            // 手続きのどこかで失敗した．応答の中身は各関数が表示済みのため，ここでは結果だけを伝える
-            print("failed\n");
-            return;
-        }
-        if (result >= 0) {
-            // 往復はできたが中身が変わっていた．書いた値と違っていた最初のバイトの位置を出す
-            print("mismatch at ");
-            print_hex_digits(result, 3);  // 位置は0〜511のため3桁で足りる
-            print("\n");
-            return;
-        }
-        print("ok\n");
-    }
+    // 初期化しただけではRAM上のテーブルは起動時のままであり，このあとの操作で保存すると
+    // カード上のテーブルをそれで上書きしてしまうため，ここで読み直して揃える
+    fs_load();
 }
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
@@ -869,7 +921,6 @@ void handle_help(int pos) {
     print("rm\n");
     print("mv\n");
     print("sdinit\n");
-    print("sdtest\n");
 }
 
 // 未対応コマンドのエラーメッセージを表示する
@@ -899,8 +950,6 @@ void dispatch(int pos) {
         handle_mv(pos);
     } else if (streq(cmd, "sdinit")) {
         handle_sdinit(pos);
-    } else if (streq(cmd, "sdtest")) {
-        handle_sdtest(pos);
     } else {
         handle_unknown();
     }
@@ -910,6 +959,12 @@ void main(void) {
     int pos;  // コマンド名の直後の位置(引数の取り出し開始位置)
     for (int i = 0; i < 4; i++) {  // グローバル配列の初期値は不定なため，起動時に明示的にクリアする
         file_used[i] = 0;
+    }
+    // カードがあればテーブルを復元する．無い場合は上でクリアした空のテーブルのまま起動する
+    if (sd_init() == 1) {
+        fs_load();
+    } else {
+        print("sd: unavailable (files are not saved)\n");
     }
     while (1) {
         print("> ");  // 入力待ちであることを示すプロンプト
