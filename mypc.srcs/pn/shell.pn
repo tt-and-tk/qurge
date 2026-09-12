@@ -88,15 +88,22 @@ char hex(int value) {
     return 'a' + value - 10;
 }
 
-// valueを"0x??"の形式で出力する(改行は付けない)
-void print_hex(char value) {
-    char hex_buf[5];  // 出力用の一時バッファ
+// valueの下位digits桁を"0x…"の形式で出力する(改行は付けない)
+void print_hex_digits(int value, int digits) {
+    char hex_buf[10];  // 出力用の一時バッファ("0x" + 最大7桁 + ヌル終端)
     hex_buf[0] = '0';
     hex_buf[1] = 'x';
-    hex_buf[2] = hex((value >> 4) & 0x0f);  // 上位4ビット
-    hex_buf[3] = hex(value & 0x0f);         // 下位4ビット
-    hex_buf[4] = '\0';
+    for (int i = 0; i < digits; i++) {
+        // 左端が最上位桁になるよう，残りの桁数ぶんだけ右へ寄せてから1桁を取り出す
+        hex_buf[2 + i] = hex((value >> ((digits - 1 - i) * 4)) & 0x0f);
+    }
+    hex_buf[2 + digits] = '\0';
     print(hex_buf);
+}
+
+// valueを"0x??"の形式で出力する(改行は付けない)
+void print_hex(char value) {
+    print_hex_digits(value, 2);
 }
 
 // SPIモード0のビットバンギングで1バイトを送信し，同時に受信した1バイトを返す
@@ -792,8 +799,7 @@ int sd_verify_block(int block) {
 
 // sdtestコマンド: ブロックの読み書きが往復できることを確かめる
 void handle_sdtest(int pos) {
-    char pos_buf[7];  // 不一致位置の出力用の一時バッファ
-    int result;       // sd_verify_blockの戻り値
+    int result;  // sd_verify_blockの戻り値
 
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
@@ -821,16 +827,9 @@ void handle_sdtest(int pos) {
             return;
         }
         if (result >= 0) {
-            // 位置は0〜511のため16進3桁で足りる
             print("mismatch at ");
-            pos_buf[0] = '0';
-            pos_buf[1] = 'x';
-            pos_buf[2] = hex((result >> 8) & 0x0f);
-            pos_buf[3] = hex((result >> 4) & 0x0f);
-            pos_buf[4] = hex(result & 0x0f);
-            pos_buf[5] = '\n';
-            pos_buf[6] = '\0';
-            print(pos_buf);
+            print_hex_digits(result, 3);  // 位置は0〜511のため3桁で足りる
+            print("\n");
             return;
         }
         print("ok\n");
