@@ -107,6 +107,10 @@ module alu_sv (
     // 内部レジスタ
     register_t register[REGISTER_MAX_ADDR:0] = '{(REGISTER_MAX_ADDR + 1){32'h0}};
 
+    // Arduino SPIのMISOを同期化する2段のフリップフロップ(下位が1段目)
+    // ASYNC_REGは2段を隣接配置させる指定で，1段目が準安定状態に入っても2段目までに確定する時間を稼ぐ
+    (* ASYNC_REG = "TRUE" *) logic [1:0] miso_sync = 2'b00;
+
     // 実行フェーズ
     cpu_phase_enum cpu_phase = CPU_FETCH;
 
@@ -358,6 +362,17 @@ module alu_sv (
         stdout_tlast = 1'b1;
     end
 
+    // MISOの同期化
+    // ck_misoはSDカードが駆動する非同期入力であり，クロックの立ち上がり際に変化するとフリップフロップが
+    // 準安定状態に入る．取り込み先のレジスタファイルは動的読み出しなどで多方向へ分岐しているため，
+    // 確定前の値が伝わると読み手ごとに異なる値が確定しうる．2段通してから下のブロックで取り込む．
+    // 下の順序回路へ入れずこのブロックを分けているのは，リセット条件がクロックイネーブルとして
+    // 合成され，非同期入力を受ける1段目が毎サイクル動かなくなるのを避けるため．
+    // 同じ理由でリセットも与えない(2サイクルで正しい値に置き換わるため初期化する意味がない)．
+    always_ff @(posedge clk) begin
+        miso_sync <= {miso_sync[0], ck_miso};
+    end
+
     // 順序回路
     always_ff @(posedge clk) begin
         // リセット
@@ -444,7 +459,8 @@ module alu_sv (
             register[STDOUT_SIGNAL_ADDR][0] <= stdout_tready;
             // Arduino SPIのMISOビットのみ外部ピンを毎サイクル取り込む(SCK・MOSI・SSビットは
             // CPUの書き込みをそのまま保持し，このブロックでは触れない)
-            register[SPI_ADDR][3] <= ck_miso;
+            // 取り込むのは同期化後の値で，ピンの値が届くまでこの1段と合わせて3サイクルかかる
+            register[SPI_ADDR][3] <= miso_sync[1];
 
             // can_prefetchの1サイクル遅延版を更新する(ROMの同期読み出しは番地を出した次の
             // サイクルにならないと結果が確定しないため，先読みの取り込み可否判定に使う)
