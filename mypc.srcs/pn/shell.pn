@@ -107,11 +107,13 @@ int spi_transfer(char data) {
     for (int i = 7; i >= 0; i--) {
         // SPI上の送信順は上位ビットからのため，iビット目を取り出してMOSI(bit1)へ置く
         level = spi_ss | (((data >> i) & 1) << 1);
-        // SCKをLowに保ったままMOSIを確定させる
+        // SCKをLowに保ったままMOSIを確定させる．カードはこの立ち下がりでMISOへ次のビットを載せる
         AR_SPI = level;
-        // SCK(bit2)をHighへ上げ，この立ち上がりでカードがMOSIを取り込み，MISOを確定させる
+        // SCK(bit2)をHighへ上げる．カードはこの立ち上がりでMOSIを取り込む
         AR_SPI = level | 4;
-        // 確定したMISO(bit3)を読み，受信バイトの下位へ積む
+        // MISO(bit3)を読み，受信バイトの下位へ積む
+        // AR_SPIのMISOは同期化を挟むためピンより3サイクル遅れるが，値を載せた立ち下がりから
+        // ここまでに複数の命令を挟んでおり，読む時点では確定した値が現れている
         received = (received << 1) | ((AR_SPI >> 3) & 1);
     }
     // 8ビット送り終えたらSCKをLowへ戻し，MOSIはアイドルのHighにして次の転送に備える
