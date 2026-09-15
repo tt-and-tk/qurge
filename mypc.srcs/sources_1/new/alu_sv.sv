@@ -326,8 +326,7 @@ module alu_sv (
 
         cpu_phase <= CPU_FETCH;
 
-        // 先読み済みの命令は存在しないが，将来この経路の命令に待機サイクルが入った場合に
-        // 古い先読み結果を持ち越さないよう無効化しておく
+        // 先読み済みの命令を無効化する
         prefetched_instruction_valid <= 1'b0;
     endtask
 
