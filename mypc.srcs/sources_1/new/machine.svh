@@ -29,6 +29,7 @@ package machine_p;
     localparam func_t SUB  = 6'h06;
     localparam func_t MUL  = 6'h07;
     localparam func_t DIV  = 6'h08;
+    localparam func_t DIVU = 6'h09;
     localparam func_t SLL  = 6'h00;
     localparam func_t SRL  = 6'h01;
     localparam func_t SLA  = 6'h02;
@@ -40,6 +41,10 @@ package machine_p;
     localparam func_t GT   = 6'h03;
     localparam func_t ELT  = 6'h04;
     localparam func_t EGT  = 6'h05;
+    localparam func_t LTU  = 6'h06;
+    localparam func_t GTU  = 6'h07;
+    localparam func_t ELTU = 6'h08;
+    localparam func_t EGTU = 6'h09;
     localparam func_t JMP  = 6'h00;
     localparam func_t CALL = 6'h01;
     localparam func_t RET  = 6'h02;
@@ -120,6 +125,14 @@ package machine_p;
         input imm_t imm
     );
         div = {3'h1, DIV, 4'h0, rs1, rs2, rd, imm};
+    endfunction
+    function machine_t divu(
+        input addr_t rs1,
+        input addr_t rs2,
+        input addr_t rd,
+        input imm_t imm
+    );
+        divu = {3'h1, DIVU, 4'h0, rs1, rs2, rd, imm};
     endfunction
 
     // シフト系(S系)
@@ -208,6 +221,34 @@ package machine_p;
         input imm_t imm
     );
         egt = {3'h4, EGT, 4'h0, rs1, rs2, 6'h00, imm};
+    endfunction
+    function machine_t ltu(
+        input addr_t rs1,
+        input addr_t rs2,
+        input imm_t imm
+    );
+        ltu = {3'h4, LTU, 4'h0, rs1, rs2, 6'h00, imm};
+    endfunction
+    function machine_t gtu(
+        input addr_t rs1,
+        input addr_t rs2,
+        input imm_t imm
+    );
+        gtu = {3'h4, GTU, 4'h0, rs1, rs2, 6'h00, imm};
+    endfunction
+    function machine_t eltu(
+        input addr_t rs1,
+        input addr_t rs2,
+        input imm_t imm
+    );
+        eltu = {3'h4, ELTU, 4'h0, rs1, rs2, 6'h00, imm};
+    endfunction
+    function machine_t egtu(
+        input addr_t rs1,
+        input addr_t rs2,
+        input imm_t imm
+    );
+        egtu = {3'h4, EGTU, 4'h0, rs1, rs2, 6'h00, imm};
     endfunction
 
     // ジャンプ系(J系)

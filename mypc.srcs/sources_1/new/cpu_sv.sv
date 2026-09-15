@@ -33,13 +33,21 @@ module cpu_sv import machine_p::*; (
     ram_read_if.master ram_read,
     ram_write_if.master ram_write,
 
-    // 割り算回路用
+    // 符号あり割り算回路用
     output logic [31:0] divisor_tdata,
     output logic        divisor_tvalid,
     output logic [31:0] dividend_tdata,
     output logic        dividend_tvalid,
     input  logic [63:0] dout_tdata,
     input  logic        dout_tvalid,
+
+    // 符号なし割り算回路用
+    output logic [31:0] divu_divisor_tdata,
+    output logic        divu_divisor_tvalid,
+    output logic [31:0] divu_dividend_tdata,
+    output logic        divu_dividend_tvalid,
+    input  logic [63:0] divu_dout_tdata,
+    input  logic        divu_dout_tvalid,
 
     // IO
     input  logic [3:0] btn,
@@ -95,13 +103,20 @@ module cpu_sv import machine_p::*; (
         .command(command),
         .ram_read(ram_read),
         .ram_write(ram_write),
-        // 割り算回路用
+        // 符号あり割り算回路用
         .divisor_tdata(divisor_tdata),
         .divisor_tvalid(divisor_tvalid),
         .dividend_tdata(dividend_tdata),
         .dividend_tvalid(dividend_tvalid),
         .dout_tdata(dout_tdata),
         .dout_tvalid(dout_tvalid),
+        // 符号なし割り算回路用
+        .divu_divisor_tdata(divu_divisor_tdata),
+        .divu_divisor_tvalid(divu_divisor_tvalid),
+        .divu_dividend_tdata(divu_dividend_tdata),
+        .divu_dividend_tvalid(divu_dividend_tvalid),
+        .divu_dout_tdata(divu_dout_tdata),
+        .divu_dout_tvalid(divu_dout_tvalid),
         .btn(btn),
         .sw(sw),
         .led(led),
