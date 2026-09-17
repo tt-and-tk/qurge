@@ -640,19 +640,26 @@ module alu_sv (
                                             // 除数が0なら送信せず停止する
                                             if (rs2_val_r == '0) begin
                                                 is_halted <= 1'b1;
-                                            end else begin
-                                                if (func_r == DIV) begin
-                                                    div_dividend_tdata   <= rs1_val_r;
-                                                    div_divisor_tdata    <= rs2_val_r;
-                                                    div_dividend_tvalid  <= 1'b1;
-                                                    div_divisor_tvalid   <= 1'b1;
-                                                end else begin
-                                                    divu_dividend_tdata  <= rs1_val_r;
-                                                    divu_divisor_tdata   <= rs2_val_r;
-                                                    divu_dividend_tvalid <= 1'b1;
-                                                    divu_divisor_tvalid  <= 1'b1;
-                                                end
+                                            end
+                                            // 符号あり除算
+                                            else if (func_r == DIV) begin
+                                                div_dividend_tdata   <= rs1_val_r;
+                                                div_divisor_tdata    <= rs2_val_r;
+                                                div_dividend_tvalid  <= 1'b1;
+                                                div_divisor_tvalid   <= 1'b1;
                                                 div_state <= EXECUTE;
+                                            end
+                                            // 符号なし除算
+                                            else if (func_r == DIVU) begin
+                                                divu_dividend_tdata  <= rs1_val_r;
+                                                divu_divisor_tdata   <= rs2_val_r;
+                                                divu_dividend_tvalid <= 1'b1;
+                                                divu_divisor_tvalid  <= 1'b1;
+                                                div_state <= EXECUTE;
+                                            end
+                                            // 割り算以外の命令はどちらの除算IPへも送信できないため停止する
+                                            else begin
+                                                is_halted <= 1'b1;
                                             end
                                         end
 
