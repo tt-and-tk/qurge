@@ -188,12 +188,17 @@ module alu_sv (
     // write_valueは毎クロック初期化されてしまうため，掛け算の結果はこちらの専用レジスタへ格納する
     register_t mul_result_r = '0;
 
-    // 実行中の割り算命令が応答を待つ除算IPの出力．DIVは符号あり，DIVUは符号なしの除算IPから受け取る．
+    // 実行中の割り算命令が応答を待つ除算IPの出力．DIVは符号あり，DIVUは符号なしの除算IPから受け取り，
+    // 割り算以外の命令では応答が届かない扱い(tvalid・tdataとも0)にする．
     // 2つのIPのtdataをORでまとめないのは，使わない側のIPも前回の除算結果を出し続けているため
     logic        div_result_tvalid;
     logic [63:0] div_result_tdata;
-    assign div_result_tvalid = (func_r == DIV) ? div_dout_tvalid : divu_dout_tvalid;
-    assign div_result_tdata  = (func_r == DIV) ? div_dout_tdata  : divu_dout_tdata;
+    assign div_result_tvalid = (func_r == DIV)  ? div_dout_tvalid
+                             : (func_r == DIVU) ? divu_dout_tvalid
+                             : 1'b0;
+    assign div_result_tdata  = (func_r == DIV)  ? div_dout_tdata
+                             : (func_r == DIVU) ? divu_dout_tdata
+                             : '0;
 
     // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
     // 実行フェーズの間のみ意味を持つ(それ以外のフェーズでは直前に実行した命令の値が残っている)
