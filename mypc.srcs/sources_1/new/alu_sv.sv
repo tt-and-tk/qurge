@@ -153,7 +153,6 @@ module alu_sv (
     command_if command_next();
     assign command_next.machine = prefetched_instruction;
     decoder_sv decoder_sv_next(
-        .resetn(resetn),
         .command(command_next)
     );
 

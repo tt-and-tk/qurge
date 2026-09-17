@@ -84,7 +84,6 @@ module cpu_sv import machine_p::*; (
 
     // デコーダー
     decoder_sv decoder_sv_0(
-        .resetn(resetn),
         .command(command)
     );
 
