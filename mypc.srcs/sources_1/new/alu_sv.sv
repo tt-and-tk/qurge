@@ -60,12 +60,12 @@ module alu_sv (
     output logic [5:0] rgb_led,
 
     // 符号あり割り算回路用(DIV)
-    output logic [31:0] divisor_tdata,
-    output logic        divisor_tvalid,
-    output logic [31:0] dividend_tdata,
-    output logic        dividend_tvalid,
-    input  logic [63:0] dout_tdata,
-    input  logic        dout_tvalid,
+    output logic [31:0] div_divisor_tdata,
+    output logic        div_divisor_tvalid,
+    output logic [31:0] div_dividend_tdata,
+    output logic        div_dividend_tvalid,
+    input  logic [63:0] div_dout_tdata,
+    input  logic        div_dout_tvalid,
 
     // 符号なし割り算回路用(DIVU)
     output logic [31:0] divu_divisor_tdata,
@@ -190,10 +190,10 @@ module alu_sv (
 
     // 実行中の割り算命令が応答を待つ除算IPの出力．DIVは符号あり，DIVUは符号なしの除算IPから受け取る．
     // 2つのIPのtdataをORでまとめないのは，使わない側のIPも前回の除算結果を出し続けているため
-    logic        div_dout_tvalid;
-    logic [63:0] div_dout_tdata;
-    assign div_dout_tvalid = (func_r == DIV) ? dout_tvalid : divu_dout_tvalid;
-    assign div_dout_tdata  = (func_r == DIV) ? dout_tdata  : divu_dout_tdata;
+    logic        div_result_tvalid;
+    logic [63:0] div_result_tdata;
+    assign div_result_tvalid = (func_r == DIV) ? div_dout_tvalid : divu_dout_tvalid;
+    assign div_result_tdata  = (func_r == DIV) ? div_dout_tdata  : divu_dout_tdata;
 
     // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
     // 実行フェーズの間のみ意味を持つ(それ以外のフェーズでは直前に実行した命令の値が残っている)
@@ -454,10 +454,10 @@ module alu_sv (
             mul_result_r <= '0;
 
             // 割り算回路用
-            divisor_tdata <= '0;
-            divisor_tvalid <= 1'b0;
-            dividend_tdata <= '0;
-            dividend_tvalid <= 1'b0;
+            div_divisor_tdata <= '0;
+            div_divisor_tvalid <= 1'b0;
+            div_dividend_tdata <= '0;
+            div_dividend_tvalid <= 1'b0;
             divu_divisor_tdata <= '0;
             divu_divisor_tvalid <= 1'b0;
             divu_dividend_tdata <= '0;
@@ -637,10 +637,10 @@ module alu_sv (
                                                 is_halted <= 1'b1;
                                             end else begin
                                                 if (func_r == DIV) begin
-                                                    dividend_tdata  <= rs1_val_r;
-                                                    divisor_tdata   <= rs2_val_r;
-                                                    dividend_tvalid <= 1'b1;
-                                                    divisor_tvalid  <= 1'b1;
+                                                    div_dividend_tdata   <= rs1_val_r;
+                                                    div_divisor_tdata    <= rs2_val_r;
+                                                    div_dividend_tvalid  <= 1'b1;
+                                                    div_divisor_tvalid   <= 1'b1;
                                                 end else begin
                                                     divu_dividend_tdata  <= rs1_val_r;
                                                     divu_divisor_tdata   <= rs2_val_r;
@@ -654,8 +654,8 @@ module alu_sv (
                                         // IPはtreadyなし（常にready）なので1サイクル待ってRESPONSEへ．
                                         // 送信しなかった側のIPのtvalidは元から0のため，どちらへ送ったかによらず両方を下ろす
                                         EXECUTE: begin
-                                            dividend_tvalid      <= 1'b0;
-                                            divisor_tvalid       <= 1'b0;
+                                            div_dividend_tvalid  <= 1'b0;
+                                            div_divisor_tvalid   <= 1'b0;
                                             divu_dividend_tvalid <= 1'b0;
                                             divu_divisor_tvalid  <= 1'b0;
                                             div_state <= RESPONSE;
@@ -663,18 +663,18 @@ module alu_sv (
 
                                         // 計算結果が返ってくるまで待機
                                         RESPONSE: begin
-                                            if (div_dout_tvalid) begin
+                                            if (div_result_tvalid) begin
                                                 // 商をrdへ格納
-                                                register[rd_addr_r] <= div_dout_tdata[63:32];
+                                                register[rd_addr_r] <= div_result_tdata[63:32];
                                                 // imm[32]=1なら余りをimm[5:0]のアドレスへ格納
                                                 if (imm_r[32]) begin
-                                                    register[imm_r[5:0]] <= div_dout_tdata[31:0];
+                                                    register[imm_r[5:0]] <= div_result_tdata[31:0];
                                                 end
                                                 div_state <= IDLE;
                                                 // 次の命令へ(商・余りの2箇所への書き込みを，代入する順に渡す)
                                                 advance_with_prefetch(
-                                                    1'b1, rd_addr_r, div_dout_tdata[63:32],
-                                                    imm_r[32], imm_r[5:0], div_dout_tdata[31:0]
+                                                    1'b1, rd_addr_r, div_result_tdata[63:32],
+                                                    imm_r[32], imm_r[5:0], div_result_tdata[31:0]
                                                 );
                                             end
                                         end

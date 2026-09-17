@@ -28,12 +28,12 @@ module mother_board_sv(
     input  logic resetn,
 
     // 符号あり割り算回路用
-    output logic [31:0] divisor_tdata,
-    output logic        divisor_tvalid,
-    output logic [31:0] dividend_tdata,
-    output logic        dividend_tvalid,
-    input  logic [63:0] dout_tdata,
-    input  logic        dout_tvalid,
+    output logic [31:0] div_divisor_tdata,
+    output logic        div_divisor_tvalid,
+    output logic [31:0] div_dividend_tdata,
+    output logic        div_dividend_tvalid,
+    input  logic [63:0] div_dout_tdata,
+    input  logic        div_dout_tvalid,
 
     // 符号なし割り算回路用
     output logic [31:0] divu_divisor_tdata,
@@ -106,12 +106,12 @@ module mother_board_sv(
         .ram_read(ram_read),
         .ram_write(ram_write),
         // 符号あり割り算回路用
-        .divisor_tdata(divisor_tdata),
-        .divisor_tvalid(divisor_tvalid),
-        .dividend_tdata(dividend_tdata),
-        .dividend_tvalid(dividend_tvalid),
-        .dout_tdata(dout_tdata),
-        .dout_tvalid(dout_tvalid),
+        .div_divisor_tdata(div_divisor_tdata),
+        .div_divisor_tvalid(div_divisor_tvalid),
+        .div_dividend_tdata(div_dividend_tdata),
+        .div_dividend_tvalid(div_dividend_tvalid),
+        .div_dout_tdata(div_dout_tdata),
+        .div_dout_tvalid(div_dout_tvalid),
         // 符号なし割り算回路用
         .divu_divisor_tdata(divu_divisor_tdata),
         .divu_divisor_tvalid(divu_divisor_tvalid),
