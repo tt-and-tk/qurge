@@ -213,7 +213,7 @@ module alu_sv (
     assign rs_equal         = (rs1_val_r == rs2_val_r);
     assign rs_less_unsigned = (rs1_val_r <  rs2_val_r);
     // 符号ビットが異なれば負である側が小さく，同じなら符号なし整数としての大小と一致する．
-    // $signedで別に比較しないのは，比較器が増えてROM先読み番地に至る組み合わせ回路が長くなるため
+    // $signedで別に比較しないのは，符号あり・符号なしで32ビットの大小比較器を2つ持つことになり回路規模が増えるため
     assign rs_less_signed   = (rs1_val_r[31] != rs2_val_r[31]) ? rs1_val_r[31] : rs_less_unsigned;
 
     // 分岐命令の比較結果がtrueかどうか(定義されていない比較方法はfalseとして扱う)
