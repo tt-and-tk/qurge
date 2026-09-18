@@ -59,13 +59,21 @@ module alu_sv (
     output logic [3:0] led,
     output logic [5:0] rgb_led,
 
-    // 割り算回路用
-    output logic [31:0] divisor_tdata,
-    output logic        divisor_tvalid,
-    output logic [31:0] dividend_tdata,
-    output logic        dividend_tvalid,
-    input  logic [63:0] dout_tdata,
-    input  logic        dout_tvalid,
+    // 符号あり割り算回路用(DIV)
+    output logic [31:0] div_divisor_tdata,
+    output logic        div_divisor_tvalid,
+    output logic [31:0] div_dividend_tdata,
+    output logic        div_dividend_tvalid,
+    input  logic [63:0] div_dout_tdata,
+    input  logic        div_dout_tvalid,
+
+    // 符号なし割り算回路用(DIVU)
+    output logic [31:0] divu_divisor_tdata,
+    output logic        divu_divisor_tvalid,
+    output logic [31:0] divu_dividend_tdata,
+    output logic        divu_dividend_tvalid,
+    input  logic [63:0] divu_dout_tdata,
+    input  logic        divu_dout_tvalid,
 
     // 標準入出力
     input  logic [31:0] stdin_tdata,
@@ -174,10 +182,22 @@ module alu_sv (
     util_p::state_enum stdin_state = IDLE;     // 標準入力(SCAN)の実行状態
     util_p::state_enum stdout_state = IDLE;    // 標準出力(PRINT)の実行状態
     util_p::state_enum mul_state = IDLE;       // 掛け算(MUL)の実行状態
-    util_p::state_enum div_state = IDLE;       // 割り算(DIV)の実行状態
+    util_p::state_enum div_state = IDLE;       // 割り算(DIV/DIVU)の実行状態
 
     // write_valueは毎クロック初期化されてしまうため，掛け算の結果はこちらの専用レジスタへ格納する
     register_t mul_result_r = '0;
+
+    // 実行中の割り算命令が応答を待つ除算IPの出力．DIVは符号あり，DIVUは符号なしの除算IPから受け取り，
+    // 割り算以外の命令では応答が届かない扱い(tvalid・tdataとも0)にする．
+    // 2つのIPのtdataをORでまとめないのは，使わない側のIPも前回の除算結果を出し続けているため
+    logic        div_result_tvalid;
+    logic [63:0] div_result_tdata;
+    assign div_result_tvalid = (func_r == DIV)  ? div_dout_tvalid
+                             : (func_r == DIVU) ? divu_dout_tvalid
+                             : 1'b0;
+    assign div_result_tdata  = (func_r == DIV)  ? div_dout_tdata
+                             : (func_r == DIVU) ? divu_dout_tdata
+                             : '0;
 
     // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
     // 実行フェーズの間のみ意味を持つ(それ以外のフェーズでは直前に実行した命令の値が残っている)
@@ -185,15 +205,29 @@ module alu_sv (
     // ROMへ出力する(切り詰め前の)命令アドレスの値が，ROMのアドレスバス幅に収まっているか
     util_p::bool_t pc_fits_in_width;
 
+    // 分岐命令の比較に使う，rs1とrs2の一致・大小関係．符号あり・符号なしのすべての比較方法で共有する
+    logic rs_equal;            // rs1とrs2が一致するか
+    logic rs_less_unsigned;    // 符号なし整数としてrs1がrs2より小さいか
+    logic rs_less_signed;      // 符号あり整数としてrs1がrs2より小さいか
+    assign rs_equal         = (rs1_val_r == rs2_val_r);
+    assign rs_less_unsigned = (rs1_val_r <  rs2_val_r);
+    // 符号ビットが異なれば負である側が小さく，同じなら符号なし整数としての大小と一致する．
+    // $signedで別に比較しないのは，符号あり・符号なしで32ビットの大小比較器を2つ持つことになり回路規模が増えるため
+    assign rs_less_signed   = (rs1_val_r[31] != rs2_val_r[31]) ? rs1_val_r[31] : rs_less_unsigned;
+
     // 分岐命令の比較結果がtrueかどうか(定義されていない比較方法はfalseとして扱う)
     logic is_branch_taken;
     assign is_branch_taken = (command.m_type == F_TYPE)
-        && ((func_r == EQ  && rs1_val_r == rs2_val_r)
-         || (func_r == NE  && rs1_val_r != rs2_val_r)
-         || (func_r == LT  && $signed(rs1_val_r) <  $signed(rs2_val_r))
-         || (func_r == GT  && $signed(rs1_val_r) >  $signed(rs2_val_r))
-         || (func_r == ELT && $signed(rs1_val_r) <= $signed(rs2_val_r))
-         || (func_r == EGT && $signed(rs1_val_r) >= $signed(rs2_val_r)));
+        && ((func_r == EQ   &&  rs_equal)
+         || (func_r == NE   && !rs_equal)
+         || (func_r == LT   &&  rs_less_signed)
+         || (func_r == GT   && !rs_less_signed && !rs_equal)
+         || (func_r == ELT  &&  (rs_less_signed || rs_equal))
+         || (func_r == EGT  && !rs_less_signed)
+         || (func_r == LTU  &&  rs_less_unsigned)
+         || (func_r == GTU  && !rs_less_unsigned && !rs_equal)
+         || (func_r == ELTU &&  (rs_less_unsigned || rs_equal))
+         || (func_r == EGTU && !rs_less_unsigned));
 
     // 飛び先を指定してプログラムカウンタを書き換える命令かどうか(定義されていない命令コードはfalseとして扱う)
     logic is_jumping;
@@ -424,10 +458,14 @@ module alu_sv (
             mul_result_r <= '0;
 
             // 割り算回路用
-            divisor_tdata <= '0;
-            divisor_tvalid <= 1'b0;
-            dividend_tdata <= '0;
-            dividend_tvalid <= 1'b0;
+            div_divisor_tdata <= '0;
+            div_divisor_tvalid <= 1'b0;
+            div_dividend_tdata <= '0;
+            div_dividend_tvalid <= 1'b0;
+            divu_divisor_tdata <= '0;
+            divu_divisor_tvalid <= 1'b0;
+            divu_dividend_tdata <= '0;
+            divu_dividend_tvalid <= 1'b0;
             div_state <= IDLE;
 
             // メモリの読み込み・書き出し状態をリセット
@@ -593,49 +631,69 @@ module alu_sv (
                                     write_valid = 1'b0;
                                 end
 
-                                // 割り算
-                                DIV: begin
+                                // 割り算．DIVは符号あり，DIVUは符号なしの除算IPで計算する
+                                DIV, DIVU: begin
                                     unique case (div_state)
-                                        // 入力をIPへ送信
+                                        // 命令に対応する除算IPへ入力を送信
                                         IDLE: begin
                                             // 除数が0なら送信せず停止する
                                             if (rs2_val_r == '0) begin
                                                 is_halted <= 1'b1;
-                                            end else begin
-                                                dividend_tdata  <= rs1_val_r;
-                                                divisor_tdata   <= rs2_val_r;
-                                                dividend_tvalid <= 1'b1;
-                                                divisor_tvalid  <= 1'b1;
+                                            end
+                                            // 符号あり除算
+                                            else if (func_r == DIV) begin
+                                                div_dividend_tdata   <= rs1_val_r;
+                                                div_divisor_tdata    <= rs2_val_r;
+                                                div_dividend_tvalid  <= 1'b1;
+                                                div_divisor_tvalid   <= 1'b1;
                                                 div_state <= EXECUTE;
+                                            end
+                                            // 符号なし除算
+                                            else if (func_r == DIVU) begin
+                                                divu_dividend_tdata  <= rs1_val_r;
+                                                divu_divisor_tdata   <= rs2_val_r;
+                                                divu_dividend_tvalid <= 1'b1;
+                                                divu_divisor_tvalid  <= 1'b1;
+                                                div_state <= EXECUTE;
+                                            end
+                                            // 割り算以外の命令はどちらの除算IPへも送信できないため停止する
+                                            else begin
+                                                is_halted <= 1'b1;
                                             end
                                         end
 
-                                        // IPはtreadyなし（常にready）なので1サイクル待ってRESPONSEへ
+                                        // IPはtreadyなし（常にready）なので1サイクル待ってRESPONSEへ．
+                                        // 送信しなかった側のIPのtvalidは元から0のため，どちらへ送ったかによらず両方を下ろす
                                         EXECUTE: begin
-                                            dividend_tvalid <= 1'b0;
-                                            divisor_tvalid  <= 1'b0;
+                                            div_dividend_tvalid  <= 1'b0;
+                                            div_divisor_tvalid   <= 1'b0;
+                                            divu_dividend_tvalid <= 1'b0;
+                                            divu_divisor_tvalid  <= 1'b0;
                                             div_state <= RESPONSE;
                                         end
 
                                         // 計算結果が返ってくるまで待機
                                         RESPONSE: begin
-                                            if (dout_tvalid) begin
+                                            if (div_result_tvalid) begin
                                                 // 商をrdへ格納
-                                                register[rd_addr_r] <= dout_tdata[63:32];
+                                                register[rd_addr_r] <= div_result_tdata[63:32];
                                                 // imm[32]=1なら余りをimm[5:0]のアドレスへ格納
                                                 if (imm_r[32]) begin
-                                                    register[imm_r[5:0]] <= dout_tdata[31:0];
+                                                    register[imm_r[5:0]] <= div_result_tdata[31:0];
                                                 end
                                                 div_state <= IDLE;
                                                 // 次の命令へ(商・余りの2箇所への書き込みを，代入する順に渡す)
                                                 advance_with_prefetch(
-                                                    1'b1, rd_addr_r, dout_tdata[63:32],
-                                                    imm_r[32], imm_r[5:0], dout_tdata[31:0]
+                                                    1'b1, rd_addr_r, div_result_tdata[63:32],
+                                                    imm_r[32], imm_r[5:0], div_result_tdata[31:0]
                                                 );
                                             end
                                         end
                                         default: is_halted <= 1'b1;
                                     endcase
+                                    // 割り算はこのcase内で書き込み・遷移まで完結させるため，
+                                    // 下の共通処理には委ねない
+                                    write_valid = 1'b0;
                                 end
                                 default: begin
                                     is_halted <= 1'b1;
@@ -643,10 +701,9 @@ module alu_sv (
                                 end
                             endcase
 
-                            // DIV・MUL以外はここで書き込み・次命令への遷移(不正なfuncでは
-                            // レジスタ書き込み・次命令への遷移のいずれも行わない．
-                            // DIV・MULはそれぞれのcase内で書き込み・遷移まで完結させている)
-                            if (func_r != DIV && func_r != MUL && write_valid) begin
+                            // 1サイクルで完了する演算はここでレジスタ書き込み・次命令への遷移を行う
+                            // (不正なfuncと，case内で書き込み・遷移まで完結させる演算では，write_validが0になっている)
+                            if (write_valid) begin
                                 register[rd_addr_r] <= write_value;
                                 advance_by_refetch();
                             end
@@ -710,7 +767,7 @@ module alu_sv (
                         F_TYPE: begin
                             // 比較が成立していれば指定されたぶん離れた番地へ，していなければ次の番地へ移動する
                             unique case (func_r)
-                                EQ, NE, LT, GT, ELT, EGT: begin
+                                EQ, NE, LT, GT, ELT, EGT, LTU, GTU, ELTU, EGTU: begin
                                     // 比較結果を反映した番地の次の命令へ
                                     advance_by_refetch();
                                 end

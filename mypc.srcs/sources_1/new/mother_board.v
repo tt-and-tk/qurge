@@ -24,13 +24,21 @@ module mother_board(
     input  wire clk,
     input  wire resetn,
 
-    // 割り算回路用
-    output wire [31:0] divisor_tdata,
-    output wire        divisor_tvalid,
-    output wire [31:0] dividend_tdata,
-    output wire        dividend_tvalid,
-    input  wire [63:0] dout_tdata,
-    input  wire        dout_tvalid,
+    // 符号あり割り算回路用
+    output wire [31:0] div_divisor_tdata,
+    output wire        div_divisor_tvalid,
+    output wire [31:0] div_dividend_tdata,
+    output wire        div_dividend_tvalid,
+    input  wire [63:0] div_dout_tdata,
+    input  wire        div_dout_tvalid,
+
+    // 符号なし割り算回路用
+    output wire [31:0] divu_divisor_tdata,
+    output wire        divu_divisor_tvalid,
+    output wire [31:0] divu_dividend_tdata,
+    output wire        divu_dividend_tvalid,
+    input  wire [63:0] divu_dout_tdata,
+    input  wire        divu_dout_tvalid,
 
     // 標準入力用
     input  wire [31:0] stdin_tdata,
@@ -73,12 +81,19 @@ module mother_board(
     mother_board_sv mother_board_sv_0 (
         .clk(clk), .resetn(resetn),
 
-        .divisor_tdata(divisor_tdata),
-        .divisor_tvalid(divisor_tvalid),
-        .dividend_tdata(dividend_tdata),
-        .dividend_tvalid(dividend_tvalid),
-        .dout_tdata(dout_tdata),
-        .dout_tvalid(dout_tvalid),
+        .div_divisor_tdata(div_divisor_tdata),
+        .div_divisor_tvalid(div_divisor_tvalid),
+        .div_dividend_tdata(div_dividend_tdata),
+        .div_dividend_tvalid(div_dividend_tvalid),
+        .div_dout_tdata(div_dout_tdata),
+        .div_dout_tvalid(div_dout_tvalid),
+
+        .divu_divisor_tdata(divu_divisor_tdata),
+        .divu_divisor_tvalid(divu_divisor_tvalid),
+        .divu_dividend_tdata(divu_dividend_tdata),
+        .divu_dividend_tvalid(divu_dividend_tvalid),
+        .divu_dout_tdata(divu_dout_tdata),
+        .divu_dout_tvalid(divu_dout_tvalid),
 
         .stdin_tdata(stdin_tdata),
         .stdin_tkeep(stdin_tkeep),

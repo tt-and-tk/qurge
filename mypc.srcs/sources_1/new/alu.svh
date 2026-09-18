@@ -212,7 +212,7 @@ package alu_p;
         // rs1・rs2・rdは命令の種類によらず機械語中に必ず存在するフィールドのため，命令が
         // 実際には使わない番地であっても，レジスタ配列の宣言範囲を超えていれば無条件に
         // 実行不可扱いにする(範囲外番地を読み出さないようにするため)．immは番地として
-        // 使われる箇所(DIVの余り書き込み先)が使用時に限られ，そこで個別にチェック済みのためここでは見ない
+        // 使われる箇所(DIV・DIVUの余り書き込み先)が使用時に限られ，そこで個別にチェック済みのためここでは見ない
         end else if (rs1 > REGISTER_MAX_ADDR || rs2 > REGISTER_MAX_ADDR || rd > REGISTER_MAX_ADDR) begin
             is_instruction_executable = util_p::FALSE;
         end else begin
@@ -228,7 +228,7 @@ package alu_p;
                         AND, OR, XOR, NAND, ADD, SUB, MUL:
                             is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd);
                         // 割り算: 読み出し元2つと書き込み先(イミディエイトデータ使用時は余りの書き込み先も)が有効か
-                        DIV:
+                        DIV, DIVU:
                             is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd)
                                 && (!imm[32] || is_writable(imm[5:0]));
                         // それ以外は不正な命令として無効扱い
@@ -260,7 +260,7 @@ package alu_p;
                 F_TYPE: begin
                     unique case (func)
                         // 分岐系: 読み出し元2つが有効で，かつ分岐先はイミディエイトデータでの指定に限る
-                        EQ, NE, LT, GT, ELT, EGT:
+                        EQ, NE, LT, GT, ELT, EGT, LTU, GTU, ELTU, EGTU:
                             is_instruction_executable = is_readable(rs1) && is_readable(rs2) && imm[32];
                         // それ以外は不正な命令として無効扱い
                         default: is_instruction_executable = util_p::FALSE;
