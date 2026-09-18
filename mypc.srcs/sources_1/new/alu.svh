@@ -270,7 +270,7 @@ package alu_p;
                     unique case (func)
                         // ジャンプ・関数呼び出し: ジャンプ先をイミディエイトデータで指定するか，読み出し元が有効か
                         JMP, CALL: is_instruction_executable = imm[32] || is_readable(rs1);
-                        // 関数リターンは引数を使わないので，デコード時点では常に有効(戻り先の有無はSPの値で決まるため実行時に判定する)
+                        // 関数リターンは引数を使わないので，デコード時点では常に有効(実行時にも別途判定する)
                         RET:       is_instruction_executable = util_p::TRUE;
                         // それ以外は不正な命令として無効扱い
                         default:   is_instruction_executable = util_p::FALSE;
