@@ -790,22 +790,33 @@ module alu_sv (
 
                                 // 関数呼び出し
                                 CALL: begin
-                                    // 戻り先(呼び出しの次の番地)を次の戻り先レジスタに保存する
-                                    register[register[SP_ADDR] + 1] <= sequential_pc;
-                                    // スタックポインタを進める
-                                    register[SP_ADDR] <= register[SP_ADDR] + 1;
+                                    // 戻り先レジスタを使い切っている場合は，次の番地以降のレジスタを壊さないよう保存せず停止する
+                                    // (範囲外の値でも必ず停止側に倒すため，==ではなく>=で判定する)
+                                    if (register[SP_ADDR] >= RETURN_LAST_ADDR) begin
+                                        is_halted <= 1'b1;
+                                    end else begin
+                                        // 戻り先(呼び出しの次の番地)を次の戻り先レジスタに保存する
+                                        register[register[SP_ADDR] + 1] <= sequential_pc;
+                                        // スタックポインタを進める
+                                        register[SP_ADDR] <= register[SP_ADDR] + 1;
 
-                                    // 指定された飛び先の命令へ
-                                    advance_by_refetch();
+                                        // 指定された飛び先の命令へ
+                                        advance_by_refetch();
+                                    end
                                 end
 
                                 // 関数リターン
                                 RET: begin
-                                    // スタックポインタを戻す
-                                    register[SP_ADDR] <= register[SP_ADDR] - 1;
+                                    // 戻り先が1つも保存されていない場合は，戻る先が無いため停止する
+                                    if (register[SP_ADDR] < RETURN_FIRST_ADDR) begin
+                                        is_halted <= 1'b1;
+                                    end else begin
+                                        // スタックポインタを戻す
+                                        register[SP_ADDR] <= register[SP_ADDR] - 1;
 
-                                    // スタックポインタが指す戻り先の命令へ
-                                    advance_by_refetch();
+                                        // スタックポインタが指す戻り先の命令へ
+                                        advance_by_refetch();
+                                    end
                                 end
 
                                 // それ以外はオミット
