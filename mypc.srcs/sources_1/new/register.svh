@@ -9,8 +9,8 @@
 
 // アドレスの定義
 parameter machine_p::func_t SP_ADDR            = 6'h10;
-parameter machine_p::func_t RETURN_FIRST_ADDR  = 6'h11;  // 1段目の呼び出しの戻り先を保存するレジスタ
-parameter machine_p::func_t RETURN_LAST_ADDR   = 6'h1a;  // 最も深い呼び出しの戻り先を保存するレジスタ
+parameter machine_p::func_t RETURN_FIRST_ADDR  = 6'h11;
+parameter machine_p::func_t RETURN_LAST_ADDR   = 6'h1a;
 parameter machine_p::func_t FLG_ADDR           = 6'h1c;
 parameter machine_p::func_t RSI_ADDR           = 6'h1d;
 parameter machine_p::func_t RAX_ADDR           = 6'h1e;
