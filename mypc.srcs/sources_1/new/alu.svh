@@ -292,8 +292,8 @@ package alu_p;
                     unique case (func)
                         // 標準入力: 書き込み先が有効か
                         SCAN:    is_instruction_executable = is_writable(rd);
-                        // 標準出力: 出力するデータの読み出し元が有効か
-                        PRINT:   is_instruction_executable = is_readable(rs1);
+                        // 標準出力: 出力するデータをイミディエイトデータで指定するか，読み出し元が有効か
+                        PRINT:   is_instruction_executable = imm[32] || is_readable(rs1);
                         // それ以外は不正な命令として無効扱い
                         default: is_instruction_executable = util_p::FALSE;
                     endcase
