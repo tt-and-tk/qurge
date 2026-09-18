@@ -1,67 +1,71 @@
 {
    "ActiveEmotionalView":"Default View",
-   "Default View_ScaleFactor":"0.395534",
-   "Default View_TopLeft":"-571,3",
+   "Default View_ScaleFactor":"0.377473",
+   "Default View_TopLeft":"-620,3",
    "ExpandedHierarchyInLayout":"",
    "guistr":"# # String gsaved with Nlview 7.5.8 2022-09-21 7111 VDI=41 GEI=38 GUI=JA:10.0
 #  -string -flagsOSRD
 preplace port DDR -pg 1 -lvl 6 -x 1980 -y 70 -defaultsOSRD
 preplace port FIXED_IO -pg 1 -lvl 6 -x 1980 -y 90 -defaultsOSRD
-preplace port port-id_ck_miso -pg 1 -lvl 0 -x 0 -y 1120 -defaultsOSRD
-preplace port port-id_a -pg 1 -lvl 6 -x 1980 -y 1080 -defaultsOSRD
-preplace port port-id_ar_sda -pg 1 -lvl 6 -x 1980 -y 1100 -defaultsOSRD
-preplace port port-id_ar_scl -pg 1 -lvl 6 -x 1980 -y 1120 -defaultsOSRD
-preplace port port-id_ck_mosi -pg 1 -lvl 6 -x 1980 -y 1140 -defaultsOSRD
-preplace port port-id_ck_sck -pg 1 -lvl 6 -x 1980 -y 1160 -defaultsOSRD
-preplace port port-id_ck_ss -pg 1 -lvl 6 -x 1980 -y 1180 -defaultsOSRD
-preplace portBus led -pg 1 -lvl 6 -x 1980 -y 980 -defaultsOSRD
-preplace portBus rgb_led -pg 1 -lvl 6 -x 1980 -y 1000 -defaultsOSRD
-preplace portBus ja -pg 1 -lvl 6 -x 1980 -y 1020 -defaultsOSRD
-preplace portBus jb -pg 1 -lvl 6 -x 1980 -y 1040 -defaultsOSRD
-preplace portBus btn -pg 1 -lvl 0 -x 0 -y 1080 -defaultsOSRD
-preplace portBus sw -pg 1 -lvl 0 -x 0 -y 1100 -defaultsOSRD
-preplace portBus ar -pg 1 -lvl 6 -x 1980 -y 1060 -defaultsOSRD
-preplace portBus gpio -pg 1 -lvl 6 -x 1980 -y 1200 -defaultsOSRD
-preplace inst processing_system7_0 -pg 1 -lvl 5 -x 1710 -y 120 -defaultsOSRD
-preplace inst mother_board_0 -pg 1 -lvl 5 -x 1710 -y 1060 -defaultsOSRD
-preplace inst proc_sys_reset_0 -pg 1 -lvl 1 -x 200 -y 360 -defaultsOSRD
-preplace inst axi_dma_0 -pg 1 -lvl 3 -x 870 -y 420 -defaultsOSRD
-preplace inst ps7_0_axi_periph -pg 1 -lvl 2 -x 530 -y 370 -defaultsOSRD
-preplace inst axi_mem_intercon -pg 1 -lvl 4 -x 1240 -y 450 -defaultsOSRD
-preplace inst div_gen_0 -pg 1 -lvl 4 -x 1240 -y 740 -defaultsOSRD
-preplace netloc btn_1 1 0 5 NJ 1080 NJ 1080 NJ 1080 NJ 1080 NJ
-preplace netloc mother_board_0_led 1 5 1 NJ 980
-preplace netloc mother_board_0_rgb_led 1 5 1 NJ 1000
-preplace netloc proc_sys_reset_0_peripheral_aresetn 1 1 4 380 490 700 540 1070 650 1400J
-preplace netloc processing_system7_0_FCLK_CLK0 1 0 6 30 460 370 500 690 550 1060 240 1460 260 1950
-preplace netloc processing_system7_0_FCLK_RESET0_N 1 0 6 20 210 NJ 210 NJ 210 NJ 210 1480J 250 1940
-preplace netloc sw_1 1 0 5 NJ 1100 NJ 1100 NJ 1100 NJ 1100 NJ
-preplace netloc ck_miso_1 1 0 5 NJ 1120 NJ 1120 NJ 1120 NJ 1120 NJ
-preplace netloc mother_board_0_ar 1 5 1 NJ 1060
-preplace netloc mother_board_0_a 1 5 1 NJ 1080
-preplace netloc mother_board_0_ar_sda 1 5 1 NJ 1100
-preplace netloc mother_board_0_ar_scl 1 5 1 NJ 1120
-preplace netloc mother_board_0_ck_mosi 1 5 1 NJ 1140
-preplace netloc mother_board_0_ck_sck 1 5 1 NJ 1160
-preplace netloc mother_board_0_ck_ss 1 5 1 NJ 1180
-preplace netloc mother_board_0_gpio 1 5 1 NJ 1200
-preplace netloc mother_board_0_ja 1 5 1 NJ 1020
-preplace netloc mother_board_0_jb 1 5 1 NJ 1040
-preplace netloc axi_dma_0_M_AXIS_MM2S 1 3 2 1050 250 1420J
+preplace port port-id_ck_miso -pg 1 -lvl 0 -x 0 -y 1170 -defaultsOSRD
+preplace port port-id_a -pg 1 -lvl 6 -x 1980 -y 1140 -defaultsOSRD
+preplace port port-id_ar_sda -pg 1 -lvl 6 -x 1980 -y 1160 -defaultsOSRD
+preplace port port-id_ar_scl -pg 1 -lvl 6 -x 1980 -y 1180 -defaultsOSRD
+preplace port port-id_ck_mosi -pg 1 -lvl 6 -x 1980 -y 1200 -defaultsOSRD
+preplace port port-id_ck_sck -pg 1 -lvl 6 -x 1980 -y 1220 -defaultsOSRD
+preplace port port-id_ck_ss -pg 1 -lvl 6 -x 1980 -y 1240 -defaultsOSRD
+preplace portBus led -pg 1 -lvl 6 -x 1980 -y 1040 -defaultsOSRD
+preplace portBus rgb_led -pg 1 -lvl 6 -x 1980 -y 1060 -defaultsOSRD
+preplace portBus ja -pg 1 -lvl 6 -x 1980 -y 1080 -defaultsOSRD
+preplace portBus jb -pg 1 -lvl 6 -x 1980 -y 1100 -defaultsOSRD
+preplace portBus btn -pg 1 -lvl 0 -x 0 -y 1130 -defaultsOSRD
+preplace portBus sw -pg 1 -lvl 0 -x 0 -y 1190 -defaultsOSRD
+preplace portBus ar -pg 1 -lvl 6 -x 1980 -y 1120 -defaultsOSRD
+preplace portBus gpio -pg 1 -lvl 6 -x 1980 -y 1260 -defaultsOSRD
+preplace inst processing_system7_0 -pg 1 -lvl 5 -x 1680 -y 120 -defaultsOSRD
+preplace inst mother_board_0 -pg 1 -lvl 5 -x 1680 -y 1100 -defaultsOSRD
+preplace inst proc_sys_reset_0 -pg 1 -lvl 1 -x 200 -y 560 -defaultsOSRD
+preplace inst axi_dma_0 -pg 1 -lvl 3 -x 870 -y 670 -defaultsOSRD
+preplace inst ps7_0_axi_periph -pg 1 -lvl 2 -x 530 -y 620 -defaultsOSRD
+preplace inst axi_mem_intercon -pg 1 -lvl 4 -x 1250 -y 450 -defaultsOSRD
+preplace inst div_gen_0 -pg 1 -lvl 4 -x 1250 -y 740 -defaultsOSRD
+preplace inst divu_gen_0 -pg 1 -lvl 4 -x 1250 -y 980 -defaultsOSRD
+preplace netloc btn_1 1 0 5 NJ 1130 NJ 1130 NJ 1130 NJ 1130 NJ
+preplace netloc ck_miso_1 1 0 5 NJ 1170 NJ 1170 NJ 1170 NJ 1170 NJ
+preplace netloc mother_board_0_a 1 5 1 NJ 1140
+preplace netloc mother_board_0_ar 1 5 1 NJ 1120
+preplace netloc mother_board_0_ar_scl 1 5 1 NJ 1180
+preplace netloc mother_board_0_ar_sda 1 5 1 NJ 1160
+preplace netloc mother_board_0_ck_mosi 1 5 1 NJ 1200
+preplace netloc mother_board_0_ck_sck 1 5 1 NJ 1220
+preplace netloc mother_board_0_ck_ss 1 5 1 NJ 1240
+preplace netloc mother_board_0_gpio 1 5 1 NJ 1260
+preplace netloc mother_board_0_ja 1 5 1 NJ 1080
+preplace netloc mother_board_0_jb 1 5 1 NJ 1100
+preplace netloc mother_board_0_led 1 5 1 NJ 1040
+preplace netloc mother_board_0_rgb_led 1 5 1 NJ 1060
+preplace netloc proc_sys_reset_0_peripheral_aresetn 1 1 4 380 740 690 790 1070 1110 NJ
+preplace netloc processing_system7_0_FCLK_CLK0 1 0 6 30 460 370 750 680 800 1050 250 1440 260 1940
+preplace netloc processing_system7_0_FCLK_RESET0_N 1 0 6 20 230 NJ 230 NJ 230 NJ 230 1450J 250 1910
+preplace netloc sw_1 1 0 5 30J 1150 NJ 1150 NJ 1150 NJ 1150 NJ
+preplace netloc axi_dma_0_M_AXIS_MM2S 1 3 2 N 650 1420J
 preplace netloc axi_dma_0_M_AXI_MM2S 1 3 1 1040 310n
-preplace netloc axi_dma_0_M_AXI_S2MM 1 3 1 1070 330n
-preplace netloc axi_mem_intercon_M00_AXI 1 4 1 1430 100n
-preplace netloc axi_mem_intercon_M01_AXI 1 4 1 1440 120n
-preplace netloc div_gen_0_M_AXIS_DOUT 1 4 1 1410 740n
-preplace netloc mother_board_0_dividend 1 3 3 1050 840 NJ 840 1940
-preplace netloc mother_board_0_divisor 1 3 3 1080 830 NJ 830 1950
-preplace netloc mother_board_0_stdout 1 2 4 700 220 NJ 220 1450J 270 1960
+preplace netloc axi_dma_0_M_AXI_S2MM 1 3 1 1060 330n
+preplace netloc axi_mem_intercon_M00_AXI 1 4 1 1410 100n
+preplace netloc axi_mem_intercon_M01_AXI 1 4 1 1420 120n
+preplace netloc mother_board_0_stdout 1 2 4 700 830 NJ 830 NJ 830 1950
 preplace netloc processing_system7_0_DDR 1 5 1 NJ 70
 preplace netloc processing_system7_0_FIXED_IO 1 5 1 NJ 90
-preplace netloc processing_system7_0_M_AXI_GP0 1 1 5 380 230 NJ 230 NJ 230 1470J 240 1960
-preplace netloc ps7_0_axi_periph_M00_AXI 1 2 1 N 370
-levelinfo -pg 1 0 200 530 870 1240 1710 1980
-pagesize -pg 1 -db -bbox -sgen -110 0 2110 1260
+preplace netloc processing_system7_0_M_AXI_GP0 1 1 5 380 240 NJ 240 NJ 240 NJ 240 1950
+preplace netloc ps7_0_axi_periph_M00_AXI 1 2 1 N 620
+preplace netloc div_gen_0_M_AXIS_DOUT1 1 4 1 1430 740n
+preplace netloc mother_board_0_div_divisor 1 3 3 1090 850 NJ 850 1940
+preplace netloc mother_board_0_div_dividend 1 3 3 1080 860 NJ 860 1930
+preplace netloc divu_gen_0_M_AXIS_DOUT 1 4 1 1410 980n
+preplace netloc mother_board_0_divu_dividend 1 3 3 1080 870 NJ 870 1910
+preplace netloc mother_board_0_divu_divisor 1 3 3 1090 880 NJ 880 1920
+levelinfo -pg 1 0 200 530 870 1250 1680 1980
+pagesize -pg 1 -db -bbox -sgen -110 0 2110 1320
 "
 }
 {
