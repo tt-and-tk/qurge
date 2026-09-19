@@ -247,7 +247,7 @@ module alu_sv (
     // CALLは戻り先を積むスタックポインタの1ワード下，RETは戻り先を下ろすスタックポインタが指す番地，
     // RMR・WMRはrs1にイミディエイトデータを足した番地(32ビットで折り返す)，RM・WMはイミディエイトデータ
     // またはrs1で指定された番地になる．
-    // funcの値は命令タイプごとに割り当てられており(CALLとWMはどちらも6'h01)，命令タイプとあわせて判定する
+    // funcの値は命令タイプごとに割り当てられ，異なる命令タイプで同じ値が現れるため，命令タイプとあわせて判定する
     register_t mem_address;
     assign mem_address = (command.m_type == J_TYPE && func_r == CALL)                   ? register[SP_ADDR] - 4
                        : (command.m_type == J_TYPE && func_r == RET)                    ? register[SP_ADDR]
