@@ -104,13 +104,13 @@ package alu_p;
             is_readable = util_p::TRUE;
         // 標準入力(信号)
         else if (addr == 6'h32)
-            is_readable = util_p::TRUE;  // レジスタ自体の読み込みは一律許可することにする
+            is_readable = util_p::FALSE;
         // 標準出力(データ)
         else if (addr == 6'h33)
             is_readable = util_p::FALSE;
         // 標準出力(信号)
         else if (addr == 6'h34)
-            is_readable = util_p::TRUE;  // レジスタ自体の読み込みは一律許可することにする
+            is_readable = util_p::FALSE;
         // 定義されていない
         else
             is_readable = util_p::FALSE;
@@ -183,13 +183,13 @@ package alu_p;
             is_writable = util_p::FALSE;
         // 標準入力(信号)
         else if (addr == 6'h32)
-            is_writable = util_p::TRUE;  // レジスタ自体の書き込みは一律許可することにする
+            is_writable = util_p::FALSE;
         // 標準出力(データ)
         else if (addr == 6'h33)
             is_writable = util_p::TRUE;
         // 標準出力(信号)
         else if (addr == 6'h34)
-            is_writable = util_p::TRUE;  // レジスタ自体の書き込みは一律許可することにする
+            is_writable = util_p::FALSE;
         // 定義されていない
         else
             is_writable = util_p::FALSE;
