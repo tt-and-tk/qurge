@@ -375,10 +375,9 @@ module alu_sv (
         ram_read.last = 1'b1;
         ram_write.last = 1'b1;
 
-        // デバッグ用
-        // led     = register[6'h05][3:0];
-        led = register[STDIN_SIGNAL_ADDR][3:0];
-        rgb_led = 6'h0;
+        // LED・RGB LED
+        led     = register[LED_ADDR][3:0];
+        rgb_led = register[RGB_LED_ADDR][5:0];
 
         // Pmod A・Pmod B
         ja = register[PMOD_A_ADDR][7:0];
