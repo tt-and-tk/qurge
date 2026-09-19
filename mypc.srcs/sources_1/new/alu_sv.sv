@@ -249,10 +249,10 @@ module alu_sv (
     // またはrs1で指定された番地になる．
     // funcの値は命令タイプごとに割り当てられており(CALLとWMはどちらも6'h01)，命令タイプとあわせて判定する
     register_t mem_address;
-    assign mem_address = (command.m_type == J_TYPE && func_r == CALL) ? register[SP_ADDR] - 4
-                       : (command.m_type == J_TYPE && func_r == RET)  ? register[SP_ADDR]
-                       : (func_r == RMR || func_r == WMR)             ? rs1_val_r + imm_r[31:0]
-                       : imm_r[32]                                    ? imm_r[31:0]
+    assign mem_address = (command.m_type == J_TYPE && func_r == CALL)                   ? register[SP_ADDR] - 4
+                       : (command.m_type == J_TYPE && func_r == RET)                    ? register[SP_ADDR]
+                       : (command.m_type == M_TYPE && (func_r == RMR || func_r == WMR)) ? rs1_val_r + imm_r[31:0]
+                       : imm_r[32]                                                      ? imm_r[31:0]
                        : rs1_val_r;
 
     // 分岐・ジャンプを行わない命令の次の番地(現在の番地の直後)．オペランドの値に依存せず
