@@ -309,7 +309,6 @@ package machine_p;
     );
         bwm = {3'h6, BWM, mask, rs1, rs2, rd, imm};
     endfunction
-    // レジスタ相対のメモリ読み込み(rs1 + immの番地から読み込む．immの使用は必須)
     function machine_t rmr(
         input mask_t mask,
         input addr_t rs1,
@@ -318,7 +317,6 @@ package machine_p;
     );
         rmr = {3'h6, RMR, mask, rs1, 6'h00, rd, imm};
     endfunction
-    // レジスタ相対のメモリ書き込み(rs1 + immの番地へ書き込む．immの使用は必須)
     function machine_t wmr(
         input mask_t mask,
         input addr_t rs1,
