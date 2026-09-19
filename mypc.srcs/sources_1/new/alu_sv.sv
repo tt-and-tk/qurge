@@ -149,7 +149,7 @@ module alu_sv (
     // 次命令を先読みしてよいかどうかを示すフラグ
     logic can_prefetch;
     assign can_prefetch = (cpu_phase == CPU_EXECUTE)    // 実行フェーズの間のみ先読みが可能
-        && (command.m_type != J_TYPE)                   // 飛び先は順番どおりの次の番地ではないため，ジャンプ系の命令では行わない
+        && (command.m_type != J_TYPE)                   // 飛び先が順番どおりの次の番地とは限らないジャンプ系の命令であれば行わない
         && !prefetched_instruction_valid;               // 既に先読み済みの命令があれば行わない
 
     // can_prefetchが1サイクル前も立っていたか．ROMの同期読み出しは番地を出した次のサイクルに
