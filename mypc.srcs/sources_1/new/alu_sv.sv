@@ -892,7 +892,7 @@ module alu_sv (
                         // メモリ系
                         M_TYPE: begin
                             unique case (func_r)
-                                // メモリ読み込み(RMRは番地をレジスタ相対で指定する)
+                                // メモリ読み込み(RMは番地をそのまま，RMRはレジスタ相対で指定する)
                                 RM, RMR: begin
                                     unique case (ram_read_state)
                                         // 待機
@@ -922,7 +922,7 @@ module alu_sv (
                                     endcase
                                 end
 
-                                // メモリ書き込み(WMRは番地をレジスタ相対で指定する)
+                                // メモリ書き込み(WMは番地をそのまま，WMRはレジスタ相対で指定する)
                                 WM, WMR: begin
                                     unique case(ram_write_state)
                                         // 待機
