@@ -243,17 +243,14 @@ module alu_sv (
                        : imm_r[32]       ? imm_r[31:0]
                        : rs1_val_r;
 
-    // メモリを読み書きする命令(M系・CALL・RET)がアクセスする番地(アドレスバス幅へ切り詰める前の値)．
-    // CALLは戻り先を積むスタックポインタの1ワード下，RETは戻り先を下ろすスタックポインタが指す番地，
-    // RMR・WMRはrs1にイミディエイトデータを足した番地(32ビットで折り返す)，RM・WMはイミディエイトデータ
-    // またはrs1で指定された番地になる．
+    // メモリ系の命令と，戻り先を積み下ろすCALL・RETがアクセスする番地(アドレスバス幅へ切り詰める前の値)．
     // funcの値は命令タイプごとに割り当てられ，異なる命令タイプで同じ値が現れるため，命令タイプとあわせて判定する
     register_t mem_address;
-    assign mem_address = (command.m_type == J_TYPE && func_r == CALL)                   ? register[SP_ADDR] - 4
-                       : (command.m_type == J_TYPE && func_r == RET)                    ? register[SP_ADDR]
-                       : (command.m_type == M_TYPE && (func_r == RMR || func_r == WMR)) ? rs1_val_r + imm_r[31:0]
-                       : imm_r[32]                                                      ? imm_r[31:0]
-                       : rs1_val_r;
+    assign mem_address = (command.m_type == J_TYPE && func_r == CALL)                   ? register[SP_ADDR] - 4     // 戻り先を積むスタックポインタの1ワード下
+                       : (command.m_type == J_TYPE && func_r == RET)                    ? register[SP_ADDR]         // 戻り先を下ろすスタックポインタが指す番地
+                       : (command.m_type == M_TYPE && (func_r == RMR || func_r == WMR)) ? rs1_val_r + imm_r[31:0]   // rs1にイミディエイトデータを足した番地(32ビットで折り返す)
+                       : imm_r[32]                                                      ? imm_r[31:0]               // イミディエイトデータで指定された番地
+                       : rs1_val_r;                                                                                 // rs1で指定された番地
 
     // 分岐・ジャンプを行わない命令の次の番地(現在の番地の直後)．オペランドの値に依存せず
     // プログラムカウンタだけから求まる
