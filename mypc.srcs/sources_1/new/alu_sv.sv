@@ -139,6 +139,9 @@ module alu_sv (
 
     // 実行中に先読みしておいた次の命令を保持するバッファ．複数サイクルにまたがる命令の
     // 待機中に埋まり，1サイクルで完了する命令の実行中は埋まらないまま次の命令へ進む．
+    // prefetched_instruction_validが0の間は，取り込んだ直後に破棄された値など意味のない内容が
+    // 残っていることがあるため，prefetched_instruction_validを確かめずに参照してはならない
+    // (prefetched_instruction_pc_validも同様)．
     machine_p::machine_t prefetched_instruction = nop();
     // prefetched_instructionが先読み済みの有効な命令かどうか
     logic prefetched_instruction_valid = 1'b0;
@@ -184,7 +187,8 @@ module alu_sv (
     util_p::state_enum mul_state = IDLE;       // 掛け算(MUL)の実行状態
     util_p::state_enum div_state = IDLE;       // 割り算(DIV/DIVU)の実行状態
 
-    // write_valueは毎クロック初期化されてしまうため，掛け算の結果はこちらの専用レジスタへ格納する
+    // 掛け算の結果．確定まで1サイクル待つため，サイクルをまたいで値を保持できない
+    // 組み合わせ回路(write_value)ではなく，この専用レジスタへ格納する
     register_t mul_result_r = '0;
 
     // 実行中の割り算命令が応答を待つ除算IPの出力．DIVは符号あり，DIVUは符号なしの除算IPから受け取り，
@@ -255,22 +259,58 @@ module alu_sv (
                    : is_jumping      ? jump_target                      // 移動する命令は指定された飛び先へ
                    : sequential_pc;                                     // それ以外は次の番地へ進む
 
-    // ===== CPU_EXECUTE内でのみ一時的に使うスクラッチ変数(ブロッキング代入) =====
+    // ===== 1サイクルで完了する命令の結果の算出(組み合わせ回路) =====
+    // 実行フェーズの間のみ意味を持つ．どの命令の結果をレジスタへ書き込むかと，不正なfuncでの
+    // 停止はメインの順序回路が判定する
 
-    logic advancing;  // 実行中の命令が今サイクルで完了するか(複数サイクル命令では最後のサイクル，1サイクル命令では毎回1．末尾の先読みの可否判定に使う)
+    // 演算系(MUL・DIV/DIVUを除く)・シフト系・代入系(MOV)の結果．それ以外の命令では0になり使われない
+    register_t write_value;
 
-    // 演算系・シフト系・代入系の結果(レジスタへの書き込みに使う)
-    register_t write_value = '0;
+    // シフト系のシフト量．イミディエイトデータまたはrs2の下位5bit(0〜31)のみを使用する
+    logic [4:0] shift_amount;
+    assign shift_amount = imm_r[32] ? imm_r[4:0] : rs2_val_r[4:0];
 
-    // write_valueが有効か．funcが不正(unique caseのdefaultに該当)な場合，is_halted <= 1'b1は
-    // 次のクロックエッジまで反映されないため，このフラグでガードしないと同じサイクル内で
-    // write_valueに残った前回までの値を使って誤った書き込みが発生してしまう
-    logic write_valid;
+    always_comb begin
+        write_value = '0;
+
+        unique case (command.m_type)
+            // 演算系．MUL・DIV/DIVUは結果の確定に複数サイクルかかるためここでは求めない
+            P_TYPE: begin
+                unique case (func_r)
+                    AND:  write_value = rs1_val_r & rs2_val_r;
+                    OR:   write_value = rs1_val_r | rs2_val_r;
+                    XOR:  write_value = rs1_val_r ^ rs2_val_r;
+                    NOT:  write_value = ~rs1_val_r;
+                    NAND: write_value = ~(rs1_val_r & rs2_val_r);
+                    ADD:  write_value = rs1_val_r + rs2_val_r;
+                    SUB:  write_value = rs1_val_r - rs2_val_r;
+                    default: ;
+                endcase
+            end
+
+            // シフト系
+            S_TYPE: begin
+                unique case (func_r)
+                    SLL: write_value = rs1_val_r << shift_amount;
+                    SRL: write_value = rs1_val_r >> shift_amount;
+                    SLA: write_value = rs1_val_r <<< shift_amount;
+                    SRA: write_value = $signed(rs1_val_r) >>> shift_amount;
+                    default: ;
+                endcase
+            end
+
+            // 代入系．mask_rは未実装のため参照せず，常にrdの全バイトへ書き込む
+            A_TYPE: write_value = imm_r[32] ? imm_r[31:0] : rs1_val_r;
+
+            default: ;
+        endcase
+    end
 
     // 命令完了時に次の命令へ遷移する処理は，次の2つのタスクにまとめてある．CPU_EXECUTEフェーズで
     // 命令完了時に次命令へ遷移する箇所は，cpu_phase <= CPU_FETCH;やプログラムカウンタの更新を
     // 直接書かず必ずどちらかのタスクを呼ぶこと(先読み機構(prefetched_instruction/can_prefetch)と
-    // 連動しており，直接代入すると先読み結果が反映されない)．
+    // 連動しており，直接代入すると先読み結果が反映されない)．どちらのタスクも，CPU_EXECUTEの
+    // 先頭で同じサイクルに取り込んだ先読みを，prefetched_instruction_validへの0の代入で打ち消す．
     //
     // 実行フェーズが3サイクル以上続き，先読みが成立し得る命令の完了時に呼ぶタスク．
     // 次の命令には，先読み済みの機械語(prefetched_instruction)のみを使う(ROMが同期読み出しのため，
@@ -295,8 +335,6 @@ module alu_sv (
         input machine_p::addr_t remainder_write_addr,
         input register_t        remainder_write_value
     );
-        advancing = 1'b1;
-
         // 次の番地へ進む
         register[PC_ADDR] <= sequential_pc;
 
@@ -343,7 +381,7 @@ module alu_sv (
             cpu_phase <= CPU_FETCH;
         end
 
-        // 先読み済みだった命令は消費し終えたので無効化する(今サイクルに新たに先読みが成立すれば，末尾のブロックで改めて1にする)
+        // 先読み済みだった命令は消費し終えたので無効化する(同じサイクルに取り込んだ先読みも打ち消す)
         prefetched_instruction_valid <= 1'b0;
     endtask
 
@@ -355,14 +393,12 @@ module alu_sv (
     // (rs1_val_r/rs2_val_r)へ回り込む組み合わせ経路自体が作られなくなる
     // (この経路は1クロックに収まらずタイミング違反になる)．
     task automatic advance_by_refetch();
-        advancing = 1'b1;
-
         // 分岐・ジャンプの結果を反映した番地へ進む
         register[PC_ADDR] <= next_pc;
 
         cpu_phase <= CPU_FETCH;
 
-        // 先読み済みの命令を無効化する
+        // 先読み済みの命令を無効化する(同じサイクルに取り込んだ先読みも打ち消す)
         prefetched_instruction_valid <= 1'b0;
     endtask
 
@@ -577,8 +613,25 @@ module alu_sv (
 
                 // 処理の実行
                 CPU_EXECUTE: begin
-                    // このサイクルではまだ次の命令へ進んでいない状態から判定を始めるため，advancingを一旦0に戻す(次命令への遷移タスクが呼ばれると1になる)
-                    advancing = 1'b0;
+                    // 次の命令を先読みしてよい状態(can_prefetch)であれば，次の命令をprefetched_instructionへ
+                    // 先読みする．実際に先読みが残るのは，割り算の完了待ちやメモリ・標準入出力の応答待ちなど，
+                    // 命令の実行が複数サイクルにまたがりまだ完了していないサイクルだけである．同じサイクルに
+                    // 下で次命令への遷移タスクが呼ばれた場合は，タスク内のprefetched_instruction_valid <= 1'b0が
+                    // 後から実行されてこの取り込みを打ち消す(ノンブロッキング代入は最後のものが有効になる)．
+                    // このため，この取り込みはunique caseより前(CPU_EXECUTEの先頭)に置く必要がある．
+                    // can_prefetch_d1も合わせて要求するのは，ROMの同期読み出しが番地を出した
+                    // 次のサイクルにならないと確定しないため(can_prefetch単独では1サイクル
+                    // 早すぎる値を掴んでしまう)．can_prefetchも同時に要求するのは，捕捉が
+                    // 完了しprefetched_instruction_valid <= 1'b1が反映された直後の1サイクルは
+                    // can_prefetch_d1がまだ1のまま残っており，その間に古い要求(番地'0)への
+                    // 応答で誤って再取り込みしてしまうのを防ぐため
+                    if (can_prefetch && can_prefetch_d1) begin
+                        // 番地がROMの実容量の範囲内(rom_read.valid)であり，
+                        // かつpc_bus_tの幅に収まっている(pc_fits_in_width)場合にのみ有効とする
+                        prefetched_instruction <= rom_read.machine;
+                        prefetched_instruction_valid <= 1'b1;
+                        prefetched_instruction_pc_valid <= rom_read.valid && pc_fits_in_width;
+                    end
 
                     // 関数タイプごとに実行
                     unique case (command.m_type)
@@ -592,18 +645,12 @@ module alu_sv (
 
                         // 演算系(P系)
                         P_TYPE: begin
-                            // 命令に応じて演算結果を求める(書き込みとフォワーディングの両方でこの値を使う)．
-                            // 有効なfuncであることも合わせて記録する(不正なfuncでは書き込み・
-                            // フォワーディングとも行わないため)．
-                            write_valid = 1'b1;
                             unique case (func_r)
-                                AND:  write_value = rs1_val_r & rs2_val_r;
-                                OR:   write_value = rs1_val_r | rs2_val_r;
-                                XOR:  write_value = rs1_val_r ^ rs2_val_r;
-                                NOT:  write_value = ~rs1_val_r;
-                                NAND: write_value = ~(rs1_val_r & rs2_val_r);
-                                ADD:  write_value = rs1_val_r + rs2_val_r;
-                                SUB:  write_value = rs1_val_r - rs2_val_r;
+                                // 1サイクルで完了する演算は，組み合わせ回路で求めた結果を書き込んで次の命令へ
+                                AND, OR, XOR, NOT, NAND, ADD, SUB: begin
+                                    register[rd_addr_r] <= write_value;
+                                    advance_by_refetch();
+                                end
 
                                 // 掛け算．結果が確定するまで1サイクル待ってから，書き込み・
                                 // 次命令への遷移を行う
@@ -625,9 +672,6 @@ module alu_sv (
                                         // その他
                                         default: is_halted <= 1'b1;
                                     endcase
-                                    // MULはこのcase内で書き込み・遷移まで完結させるため，
-                                    // 下の共通処理には委ねない
-                                    write_valid = 1'b0;
                                 end
 
                                 // 割り算．DIVは符号あり，DIVUは符号なしの除算IPで計算する
@@ -690,70 +734,32 @@ module alu_sv (
                                         end
                                         default: is_halted <= 1'b1;
                                     endcase
-                                    // 割り算はこのcase内で書き込み・遷移まで完結させるため，
-                                    // 下の共通処理には委ねない
-                                    write_valid = 1'b0;
                                 end
                                 default: begin
                                     is_halted <= 1'b1;
-                                    write_valid = 1'b0;
                                 end
                             endcase
-
-                            // 1サイクルで完了する演算はここでレジスタ書き込み・次命令への遷移を行う
-                            // (不正なfuncと，case内で書き込み・遷移まで完結させる演算では，write_validが0になっている)
-                            if (write_valid) begin
-                                register[rd_addr_r] <= write_value;
-                                advance_by_refetch();
-                            end
                         end
 
                         // シフト系
                         S_TYPE: begin
-                            // イミディエイトデータを使用する？命令に応じてシフト結果を求める
-                            // (書き込みとフォワーディングの両方でこの値を使う)．有効なfuncであることも
-                            // 合わせて記録する(不正なfuncでは以降の処理を一切行わないため)．
-                            write_valid = 1'b1;
-                            if (imm_r[32]) begin
-                                // シフト量は下位5bit(0〜31)のみを使用する
-                                unique case (func_r)
-                                    SLL: write_value = rs1_val_r << imm_r[4:0];
-                                    SRL: write_value = rs1_val_r >> imm_r[4:0];
-                                    SLA: write_value = rs1_val_r <<< imm_r[4:0];
-                                    SRA: write_value = $signed(rs1_val_r) >>> imm_r[4:0];
-                                    default: begin
-                                        is_halted <= 1'b1;
-                                        write_valid = 1'b0;
-                                    end
-                                endcase
-                            end else begin
-                                // シフト量は下位5bit(0〜31)のみを使用する
-                                unique case (func_r)
-                                    SLL: write_value = rs1_val_r << rs2_val_r[4:0];
-                                    SRL: write_value = rs1_val_r >> rs2_val_r[4:0];
-                                    SLA: write_value = rs1_val_r <<< rs2_val_r[4:0];
-                                    SRA: write_value = $signed(rs1_val_r) >>> rs2_val_r[4:0];
-                                    default: begin
-                                        is_halted <= 1'b1;
-                                        write_valid = 1'b0;
-                                    end
-                                endcase
-                            end
-
-                            // 有効なfuncのときだけレジスタ書き込み・次命令への遷移を行う
-                            if (write_valid) begin
-                                register[rd_addr_r] <= write_value;
-                                advance_by_refetch();
-                            end
+                            unique case (func_r)
+                                // 組み合わせ回路で求めたシフト結果を書き込んで次の命令へ
+                                SLL, SRL, SLA, SRA: begin
+                                    register[rd_addr_r] <= write_value;
+                                    advance_by_refetch();
+                                end
+                                default: begin
+                                    is_halted <= 1'b1;
+                                end
+                            endcase
                         end
 
                         // 代入系
                         A_TYPE: begin
                             // 命令がMOVの時だけ，書き込み・次命令への遷移を行う
                             if (func_r == MOV) begin
-                                // イミディエイトデータを使用する？
-                                // mask_rは未実装のため参照せず，常にrdの全バイトへ書き込む
-                                write_value = imm_r[32] ? imm_r[31:0] : rs1_val_r;
+                                // 組み合わせ回路で求めた代入値(イミディエイトデータまたはrs1)を書き込む
                                 register[rd_addr_r] <= write_value;
                                 advance_by_refetch();
                             end
@@ -1049,30 +1055,6 @@ module alu_sv (
                             is_halted <= 1'b1;
                         end
                     endcase
-
-                    // 次の命令を先読みしてよい状態(can_prefetch)で，かつ今サイクルにはまだ次の命令へ
-                    // 進んでいない(!advancing)場合に，次の命令をprefetched_instructionへ先読みする．
-                    // これに該当するのは，割り算の完了待ちやメモリ・標準入出力の応答待ちなど，命令の実行が
-                    // 複数サイクルにまたがりまだ完了(次命令への遷移タスクの呼び出し)に至って
-                    // いないサイクル．
-                    // このブロックはunique caseの後(CPU_EXECUTE末尾)に置き，かつ!advancingで
-                    // 排他制御する必要がある．今サイクルに次命令への遷移タスクが呼ばれて
-                    // いる(advancing==1)場合，そちらの中で既にprefetched_instruction_valid <= 1'b0が予約されており，
-                    // ここでもprefetched_instruction_valid <= 1'b1を予約すると同一サイクル内で同じ信号への代入が
-                    // 競合してしまうため．
-                    // can_prefetch_d1も合わせて要求するのは，ROMの同期読み出しが番地を出した
-                    // 次のサイクルにならないと確定しないため(can_prefetch単独では1サイクル
-                    // 早すぎる値を掴んでしまう)．can_prefetchも同時に要求するのは，捕捉が
-                    // 完了しprefetched_instruction_valid <= 1'b1が反映された直後の1サイクルは
-                    // can_prefetch_d1がまだ1のまま残っており，その間に古い要求(番地'0)への
-                    // 応答で誤って再取り込みしてしまうのを防ぐため
-                    if (can_prefetch && can_prefetch_d1 && !advancing) begin
-                        // 番地がROMの実容量の範囲内(rom_read.valid)であり，
-                        // かつpc_bus_tの幅に収まっている(pc_fits_in_width)場合にのみ有効とする
-                        prefetched_instruction <= rom_read.machine;
-                        prefetched_instruction_valid <= 1'b1;
-                        prefetched_instruction_pc_valid <= rom_read.valid && pc_fits_in_width;
-                    end
                 end
             endcase
         end
