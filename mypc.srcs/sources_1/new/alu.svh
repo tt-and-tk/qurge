@@ -45,6 +45,9 @@ package alu_p;
         // スタックポインタ
         else if (addr == 6'h10)
             is_readable = util_p::TRUE;
+        // 空き
+        else if (6'h11 <= addr && addr <= 6'h1b)
+            is_readable = util_p::FALSE;
         // フラグ
         else if (addr == 6'h1c)
             is_readable = util_p::TRUE;
@@ -121,6 +124,9 @@ package alu_p;
         // スタックポインタ
         else if (addr == 6'h10)
             is_writable = util_p::TRUE;
+        // 空き
+        else if (6'h11 <= addr && addr <= 6'h1b)
+            is_writable = util_p::FALSE;
         // フラグ
         else if (addr == 6'h1c)
             is_writable = util_p::FALSE;
