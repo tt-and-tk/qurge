@@ -286,10 +286,10 @@ package alu_p;
                         WM:      is_instruction_executable = is_readable(rs2) && (imm[32] || is_readable(rs1));
                         // レジスタ相対のメモリ読み込み: 書き込み先と番地の基準になる読み出し元が有効で，
                         // かつ番地に足すイミディエイトデータを指定しているか
-                        RMR:     is_instruction_executable = is_writable(rd) && is_readable(rs1) && imm[32];
+                        RMR:     is_instruction_executable = is_readable(rs1) && is_writable(rd) && imm[32];
                         // レジスタ相対のメモリ書き込み: 書き込むデータと番地の基準になる読み出し元が有効で，
                         // かつ番地に足すイミディエイトデータを指定しているか
-                        WMR:     is_instruction_executable = is_readable(rs2) && is_readable(rs1) && imm[32];
+                        WMR:     is_instruction_executable = is_readable(rs1) && is_readable(rs2) && imm[32];
                         // それ以外は不正な命令として無効扱い
                         default: is_instruction_executable = util_p::FALSE;
                     endcase
