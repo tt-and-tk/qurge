@@ -44,9 +44,9 @@ package alu_p;
             is_readable = util_p::TRUE;
         // スタックポインタ
         else if (addr == 6'h10)
-            is_readable = util_p::FALSE;
-        // 呼び出し関数の戻り先
-        else if (6'h11 <= addr && addr <= 6'h1a)
+            is_readable = util_p::TRUE;
+        // 空き
+        else if (6'h11 <= addr && addr <= 6'h1b)
             is_readable = util_p::FALSE;
         // フラグ
         else if (addr == 6'h1c)
@@ -123,9 +123,9 @@ package alu_p;
             is_writable = util_p::TRUE;
         // スタックポインタ
         else if (addr == 6'h10)
-            is_writable = util_p::FALSE;
-        // 呼び出し関数の戻り先
-        else if (6'h11 <= addr && addr <= 6'h1a)
+            is_writable = util_p::TRUE;
+        // 空き
+        else if (6'h11 <= addr && addr <= 6'h1b)
             is_writable = util_p::FALSE;
         // フラグ
         else if (addr == 6'h1c)
@@ -284,6 +284,12 @@ package alu_p;
                         // メモリ書き込み: 書き込むデータの読み出し元が有効で，かつ書き込みアドレスを
                         // イミディエイトデータで指定するか読み出し元が有効か
                         WM:      is_instruction_executable = is_readable(rs2) && (imm[32] || is_readable(rs1));
+                        // レジスタ相対のメモリ読み込み: 書き込み先と番地の基準になる読み出し元が有効で，
+                        // かつ番地に足すイミディエイトデータを指定しているか
+                        RMR:     is_instruction_executable = is_readable(rs1) && is_writable(rd) && imm[32];
+                        // レジスタ相対のメモリ書き込み: 書き込むデータと番地の基準になる読み出し元が有効で，
+                        // かつ番地に足すイミディエイトデータを指定しているか
+                        WMR:     is_instruction_executable = is_readable(rs1) && is_readable(rs2) && imm[32];
                         // それ以外は不正な命令として無効扱い
                         default: is_instruction_executable = util_p::FALSE;
                     endcase

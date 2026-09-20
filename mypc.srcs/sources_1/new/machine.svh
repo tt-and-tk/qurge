@@ -52,6 +52,8 @@ package machine_p;
     localparam func_t WM   = 6'h01;
     localparam func_t BRM  = 6'h02;
     localparam func_t BWM  = 6'h03;
+    localparam func_t RMR  = 6'h04;
+    localparam func_t WMR  = 6'h05;
     localparam func_t SCAN  = 6'h00;
     localparam func_t PRINT = 6'h01;
 
@@ -306,6 +308,22 @@ package machine_p;
         input imm_t imm
     );
         bwm = {3'h6, BWM, mask, rs1, rs2, rd, imm};
+    endfunction
+    function machine_t rmr(
+        input mask_t mask,
+        input addr_t rs1,
+        input addr_t rd,
+        input imm_t imm
+    );
+        rmr = {3'h6, RMR, mask, rs1, 6'h00, rd, imm};
+    endfunction
+    function machine_t wmr(
+        input mask_t mask,
+        input addr_t rs1,
+        input addr_t rs2,
+        input imm_t imm
+    );
+        wmr = {3'h6, WMR, mask, rs1, rs2, 6'h00, imm};
     endfunction
 
     // 標準入出力系(IO系)

@@ -35,13 +35,14 @@
 // フェーズでalu.svh::is_instruction_executable()により一括判定する．レジスタの値そのものに基づく
 // 判定は値が確定するまで行えないため，値が確定するEXECUTE中に個別に判定する．
 //
-// 実行に複数サイクルかかる命令(メモリ・標準入出力の応答待ちや割り算の完了待ちなど)の待機中は，次に実行する
-// 命令の番地が既に確定しているため，あらかじめROMから取得してデコードしておく．読み出し・
-// 書き込みに使うレジスタ番地の依存関係もこの時点で確認しておき，直前の命令がこのサイクルに
-// 書き込む値をレジスタの読み出し結果の代わりに使う(フォワーディング)ことで，命令完了時に
-// FETCH/FETCH_CAPTURE/CHECKを省略して直接次の命令のEXECUTEから始められる場合がある．
+// 実行に複数サイクルかかる命令のうち分岐・ジャンプを行わないもの(メモリ・標準入出力の応答待ちや割り算の
+// 完了待ちなど)の待機中は，次に実行する命令の番地が順番どおりの次の番地に確定しているため，あらかじめ
+// ROMから取得してデコードしておく．読み出し・書き込みに使うレジスタ番地の依存関係もこの時点で確認しておき，
+// 直前の命令がこのサイクルに書き込む値をレジスタの読み出し結果の代わりに使う(フォワーディング)ことで，
+// 命令完了時にFETCH/FETCH_CAPTURE/CHECKを省略して直接次の命令のEXECUTEから始められる場合がある．
 // 先読みが成立するには実行フェーズが3サイクル以上続く必要がある(ROMの読み出しに1サイクルかかり，
-// 取り込んだ結果を使えるのはさらに次のサイクルから)．これに届かない命令は毎回4フェーズすべてを経る．
+// 取り込んだ結果を使えるのはさらに次のサイクルから)．これに届かない命令と，分岐・ジャンプを行う命令
+// (メモリの応答を待つため複数サイクルかかるCALL・RETを含む)は毎回4フェーズすべてを経る．
 module alu_sv (
     input logic clk,
     input logic resetn,
@@ -148,6 +149,7 @@ module alu_sv (
     // 次命令を先読みしてよいかどうかを示すフラグ
     logic can_prefetch;
     assign can_prefetch = (cpu_phase == CPU_EXECUTE)    // 実行フェーズの間のみ先読みが可能
+        && (command.m_type != J_TYPE)                   // ジャンプ系の命令なら，飛び先が順番どおりの次の番地とは限らないため行わない
         && !prefetched_instruction_valid;               // 既に先読み済みの命令があれば行わない
 
     // can_prefetchが1サイクル前も立っていたか．ROMの同期読み出しは番地を出した次のサイクルに
@@ -177,8 +179,8 @@ module alu_sv (
     // ===== メモリ・標準入出力・割り算回路とのハンドシェイク状態 =====
     // それぞれの命令の実行が複数サイクルにまたがる間，どこまで進んだかを保持する
 
-    util_p::state_enum ram_read_state = IDLE;  // メモリ読み込み(RM)の実行状態
-    util_p::state_enum ram_write_state = IDLE; // メモリ書き込み(WM)の実行状態
+    util_p::state_enum ram_read_state = IDLE;  // メモリ読み込み(RM・RMR)とRETの実行状態
+    util_p::state_enum ram_write_state = IDLE; // メモリ書き込み(WM・WMR)とCALLの実行状態
     util_p::state_enum stdin_state = IDLE;     // 標準入力(SCAN)の実行状態
     util_p::state_enum stdout_state = IDLE;    // 標準出力(PRINT)の実行状態
     util_p::state_enum mul_state = IDLE;       // 掛け算(MUL)の実行状態
@@ -234,12 +236,21 @@ module alu_sv (
     assign is_jumping = (command.m_type == J_TYPE)
         && (func_r == JMP || func_r == CALL || func_r == RET);
 
-    // 移動する命令の飛び先．関数リターンはスタックポインタが指す戻り先，
-    // それ以外はイミディエイトデータまたはレジスタで指定された番地になる
+    // 移動する命令の飛び先．関数リターンはメモリ上のスタックから読み出した戻り先(読み出しが
+    // 完了したサイクルにのみ有効)，それ以外はイミディエイトデータまたはレジスタで指定された番地になる
     register_t jump_target;
-    assign jump_target = (func_r == RET) ? register[register[SP_ADDR]]
+    assign jump_target = (func_r == RET) ? ram_read.data
                        : imm_r[32]       ? imm_r[31:0]
                        : rs1_val_r;
+
+    // メモリ系の命令と，戻り先を積み下ろすCALL・RETがアクセスする番地(アドレスバス幅へ切り詰める前の値)．
+    // funcの値は命令タイプごとに割り当てられ，異なる命令タイプで同じ値が現れるため，命令タイプとあわせて判定する
+    register_t mem_address;
+    assign mem_address = (command.m_type == J_TYPE && func_r == CALL)                   ? register[SP_ADDR] - 4     // 戻り先を積むスタックポインタの1ワード下
+                       : (command.m_type == J_TYPE && func_r == RET)                    ? register[SP_ADDR]         // 戻り先を下ろすスタックポインタが指す番地
+                       : (command.m_type == M_TYPE && (func_r == RMR || func_r == WMR)) ? rs1_val_r + imm_r[31:0]   // rs1にイミディエイトデータを足した番地(32ビットで折り返す)
+                       : imm_r[32]                                                      ? imm_r[31:0]               // イミディエイトデータで指定された番地
+                       : rs1_val_r;                                                                                 // rs1で指定された番地
 
     // 分岐・ジャンプを行わない命令の次の番地(現在の番地の直後)．オペランドの値に依存せず
     // プログラムカウンタだけから求まる
@@ -272,7 +283,7 @@ module alu_sv (
     // 直接書かず必ずどちらかのタスクを呼ぶこと(先読み機構(prefetched_instruction/can_prefetch)と
     // 連動しており，直接代入すると先読み結果が反映されない)．
     //
-    // 実行フェーズが3サイクル以上続き，先読みが成立し得る命令の完了時に呼ぶタスク．
+    // 分岐・ジャンプを行わず実行フェーズが3サイクル以上続く，先読みが成立し得る命令の完了時に呼ぶタスク．
     // 次の命令には，先読み済みの機械語(prefetched_instruction)のみを使う(ROMが同期読み出しのため，
     // 先読みが間に合っていない場合は今サイクルのrom_read.machineを信用できない)．
     // 先読みが完了しかつ実行可能だと分かればCHECKを省略してEXECUTEへ直接進み，先読み済みだが
@@ -347,7 +358,8 @@ module alu_sv (
         prefetched_instruction_valid <= 1'b0;
     endtask
 
-    // 実行フェーズが3サイクルに届かず，先読みが成立し得ない命令の完了時に呼ぶタスク．
+    // 先読みが成立し得ない命令(分岐・ジャンプを行う命令と，実行フェーズが3サイクルに届かない命令)の
+    // 完了時に呼ぶタスク．
     // プログラムカウンタを分岐・ジャンプを反映した番地(next_pc)へ更新し，FETCHから次の命令を
     // 取得し直す．
     // これらの命令では先読み済みの命令を使う遷移は起こり得ない．先読み・フォワーディングの判定を
@@ -364,6 +376,47 @@ module alu_sv (
 
         // 先読み済みの命令を無効化する
         prefetched_instruction_valid <= 1'b0;
+    endtask
+
+    // メモリを読み書きする命令が，メモリへ要求を出す際に呼ぶタスク．番地はmem_addressを使い，
+    // アドレスバス幅を超える上位ビットが立っている場合は，折り返した番地へアクセスせず要求を出さずに停止する
+    // (停止した命令はメモリ・レジスタをいずれも書き換えない)
+    task automatic request_ram_read(
+        input machine_p::mask_t mask  // 読み込むバイトの指定
+    );
+        if (!util_p::is_within_bit_width(mem_address, $bits(ram_p::address_bus_t))) begin
+            is_halted <= 1'b1;
+        end
+        else begin
+            // 実行を指示
+            ram_read_state   <= EXECUTE;
+            // 実行状態であることを送る
+            ram_read.valid   <= 1'b1;
+            // マスク情報を送る
+            ram_read.mask    <= mask;
+            // アドレス情報を送る
+            ram_read.address <= mem_address;
+        end
+    endtask
+    task automatic request_ram_write(
+        input machine_p::mask_t mask,  // 書き込むバイトの指定
+        input register_t        data   // 書き込むデータ
+    );
+        if (!util_p::is_within_bit_width(mem_address, $bits(ram_p::address_bus_t))) begin
+            is_halted <= 1'b1;
+        end
+        else begin
+            // 実行を指示
+            ram_write_state   <= EXECUTE;
+            // 実行状態であることを送る
+            ram_write.valid   <= 1'b1;
+            // マスク情報を送る
+            ram_write.mask    <= mask;
+            // アドレス情報を送る
+            ram_write.address <= mem_address;
+            // データを送る
+            ram_write.data    <= data;
+        end
     endtask
 
     // 組み合わせ回路
@@ -492,8 +545,8 @@ module alu_sv (
             for (logic [5:0] i = 0; i <= REGISTER_MAX_ADDR; i++) begin
                 register[i] <= 0;
             end
-            // スタックポインタは空を表す自身の番地で初期化する
-            register[SP_ADDR] <= SP_ADDR;
+            // スタックポインタは，スタックが空であることを表すメモリの末尾の次の番地(容量と同じ値)で初期化する
+            register[SP_ADDR] <= 32'(RAM_SIZE);
 
             // Arduino SPIのSSはアクティブLowのため，非選択を表すHighで初期化する
             register[SPI_ADDR][0] <= 1'b1;
@@ -789,33 +842,44 @@ module alu_sv (
 
                                 // 関数呼び出し
                                 CALL: begin
-                                    // 戻り先レジスタを使い切っている場合は，次の番地以降のレジスタを壊さないよう保存せず停止する
-                                    // (範囲外の値でも必ず停止側に倒すため，==ではなく>=で判定する)
-                                    if (register[SP_ADDR] >= RETURN_LAST_ADDR) begin
-                                        is_halted <= 1'b1;
-                                    end else begin
-                                        // 戻り先(呼び出しの次の番地)を次の戻り先レジスタに保存する
-                                        register[register[SP_ADDR] + 1] <= sequential_pc;
-                                        // スタックポインタを進める
-                                        register[SP_ADDR] <= register[SP_ADDR] + 1;
+                                    unique case (ram_write_state)
+                                        // 戻り先(呼び出しの次の番地)を，スタックポインタの1ワード下へ書き込む
+                                        IDLE: request_ram_write(4'hf, sequential_pc);
 
-                                        // 指定された飛び先の命令へ
-                                        advance_by_refetch();
-                                    end
+                                        // 書き込みが完了したら，積んだ戻り先を指すようスタックポインタを下げて飛び先の命令へ
+                                        EXECUTE: begin
+                                            if (ram_write.ready) begin
+                                                ram_write_state <= IDLE;
+                                                ram_write.valid <= 1'b0;
+                                                register[SP_ADDR] <= register[SP_ADDR] - 4;
+                                                advance_by_refetch();
+                                            end
+                                        end
+
+                                        // その他
+                                        default: is_halted <= 1'b1;
+                                    endcase
                                 end
 
                                 // 関数リターン
                                 RET: begin
-                                    // 戻り先が1つも保存されていない場合は，戻る先が無いため停止する
-                                    if (register[SP_ADDR] < RETURN_FIRST_ADDR) begin
-                                        is_halted <= 1'b1;
-                                    end else begin
-                                        // スタックポインタを戻す
-                                        register[SP_ADDR] <= register[SP_ADDR] - 1;
+                                    unique case (ram_read_state)
+                                        // スタックポインタが指す番地から戻り先を読み出す
+                                        IDLE: request_ram_read(4'hf);
 
-                                        // スタックポインタが指す戻り先の命令へ
-                                        advance_by_refetch();
-                                    end
+                                        // 読み出しが完了したら，下ろした戻り先の分スタックポインタを上げて戻り先の命令へ
+                                        EXECUTE: begin
+                                            if (ram_read.ready) begin
+                                                ram_read_state <= IDLE;
+                                                ram_read.valid <= 1'b0;
+                                                register[SP_ADDR] <= register[SP_ADDR] + 4;
+                                                advance_by_refetch();
+                                            end
+                                        end
+
+                                        // その他
+                                        default: is_halted <= 1'b1;
+                                    endcase
                                 end
 
                                 // それ以外はオミット
@@ -828,38 +892,11 @@ module alu_sv (
                         // メモリ系
                         M_TYPE: begin
                             unique case (func_r)
-                                // メモリ読み込み
-                                RM: begin
+                                // メモリ読み込み(RMは番地をそのまま，RMRはレジスタ相対で指定する)
+                                RM, RMR: begin
                                     unique case (ram_read_state)
                                         // 待機
-                                        IDLE: begin
-                                            // 切り詰め前の読み込みアドレス(イミディエイトデータ使用時はimm_r，
-                                            // 未使用時はrs1_val_rが発生源)がaddress_bus_tの幅に収まっていない場合は
-                                            // 不正な番地として停止する
-                                            if (!util_p::is_within_bit_width(
-                                                (imm_r[32] ? imm_r[31:0] : rs1_val_r), $bits(ram_p::address_bus_t)
-                                            )) begin
-                                                is_halted <= 1'b1;
-                                            end
-                                            else begin
-                                                // 実行を指示
-                                                ram_read_state <= EXECUTE;
-                                                // 実行状態であることを送る
-                                                ram_read.valid <= 1'b1;
-
-                                                // マスク情報を送る
-                                                ram_read.mask <= mask_r;
-                                                // アドレス情報を送る
-                                                if (imm_r[32]) begin
-                                                    // イミディエイトデータを使用する指定なら，それを送る
-                                                    ram_read.address <= imm_r[31:0];
-                                                end
-                                                else begin
-                                                    // 読み込みアドレスを送る
-                                                    ram_read.address <= rs1_val_r;
-                                                end
-                                            end
-                                        end
+                                        IDLE: request_ram_read(mask_r);
 
                                         // メモリ読み込み実行
                                         EXECUTE: begin
@@ -885,40 +922,11 @@ module alu_sv (
                                     endcase
                                 end
 
-                                // メモリ書き込み
-                                WM: begin
+                                // メモリ書き込み(WMは番地をそのまま，WMRはレジスタ相対で指定する)
+                                WM, WMR: begin
                                     unique case(ram_write_state)
                                         // 待機
-                                        IDLE: begin
-                                            // 切り詰め前の書き込みアドレス(イミディエイトデータ使用時はimm_r，
-                                            // 未使用時はrs1_val_rが発生源)がaddress_bus_tの幅に収まっていない場合は
-                                            // 不正な番地として停止する
-                                            if (!util_p::is_within_bit_width(
-                                                (imm_r[32] ? imm_r[31:0] : rs1_val_r), $bits(ram_p::address_bus_t)
-                                            )) begin
-                                                is_halted <= 1'b1;
-                                            end
-                                            else begin
-                                                // 実行を指示
-                                                ram_write_state <= EXECUTE;
-                                                // 実行状態であることを送る
-                                                ram_write.valid <= 1'b1;
-
-                                                // マスク情報を送る
-                                                ram_write.mask <= mask_r;
-                                                // アドレス情報を送る
-                                                if (imm_r[32]) begin
-                                                    // イミディエイトデータを使用する指定なら，それを送る
-                                                    ram_write.address <= imm_r[31:0];
-                                                end
-                                                else begin
-                                                    // 書き込みアドレスを送る
-                                                    ram_write.address <= rs1_val_r;
-                                                end
-                                                // データを送る
-                                                ram_write.data <= rs2_val_r;
-                                            end
-                                        end
+                                        IDLE: request_ram_write(mask_r, rs2_val_r);
 
                                         // メモリ書き込み実行
                                         EXECUTE: begin
