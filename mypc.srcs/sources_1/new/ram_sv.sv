@@ -73,6 +73,23 @@ module ram_sv import ram_p::*, util_p::*; (
     assign read_word_addr  = ram_read.address[$bits(ram_read.address)-1:2];
     assign write_word_addr = ram_write.address[$bits(ram_write.address)-1:2];
 
+    // 各レーンから読み出したバイト．配列の同期読み出し結果を直接受けるレジスタで，Block RAMの読み出しデータレジスタとして
+    // 吸収される(読み出し結果をデータバス上の可変位置へ直接代入するとBlock RAMとして推論されないため，並べ替えは後段で行う)
+    logic [7:0] lane_data_0, lane_data_1, lane_data_2, lane_data_3;
+    // 各レーンの読み出しバイトが有効か(対応するマスクビットが立っており，かつ実容量内)．無効なバイトはデータバス上で0にする
+    logic lane_valid_0, lane_valid_1, lane_valid_2, lane_valid_3;
+    // 読み出した番地の下位2ビット．各レーンのバイトをデータバス上のどの位置へ並べるかを決める
+    logic [1:0] lane_addr_low;
+
+    // 各レーンの読み出しバイトを，読み出した番地に応じたデータバス上の位置へ並べる
+    always_comb begin
+        ram_read.data = 32'b0;
+        if (lane_valid_0) ram_read.data[lane_to_pos(2'd0, lane_addr_low)*8 +: 8] = lane_data_0;
+        if (lane_valid_1) ram_read.data[lane_to_pos(2'd1, lane_addr_low)*8 +: 8] = lane_data_1;
+        if (lane_valid_2) ram_read.data[lane_to_pos(2'd2, lane_addr_low)*8 +: 8] = lane_data_2;
+        if (lane_valid_3) ram_read.data[lane_to_pos(2'd3, lane_addr_low)*8 +: 8] = lane_data_3;
+    end
+
     // メモリ読み出し・書き込み状態
     state_enum ram_read_state = IDLE;
     state_enum ram_write_state = IDLE;
@@ -81,13 +98,18 @@ module ram_sv import ram_p::*, util_p::*; (
         // リセット
         if (!resetn) begin
             // IO
-            ram_read.data <= 32'b0;
             ram_read.ready <= 1'b0;
             ram_read.code <= NONE;
             ram_write.ready <= 1'b0;
             ram_write.code <= NONE;
 
             // 内部変数
+            // 有効フラグを下ろしてram_read.dataを0にする(lane_data_0〜3自体はリセットしない．リセット付きのレジスタは
+            // Block RAMの読み出しデータレジスタとして吸収されないため)
+            lane_valid_0 <= 1'b0;
+            lane_valid_1 <= 1'b0;
+            lane_valid_2 <= 1'b0;
+            lane_valid_3 <= 1'b0;
             ram_read_state <= IDLE;
             ram_write_state <= IDLE;
         end
@@ -108,24 +130,17 @@ module ram_sv import ram_p::*, util_p::*; (
                 EXECUTE: begin
                     if (ram_read.valid) begin
                         ram_read.ready <= 1'b1;
-                       // 既定値として0を書いたうえで，対応するマスクビットが立っていれば(かつ実容量内なら)配列の値で上書きする．
-                       // BRAM推論の標準テンプレート(有効時のみ配列を読み出すif文，elseを伴わない)に合わせるため，
-                       // 既定値の代入と配列読み出しの代入を分ける(elseへ定数を書くと配列読み出しと同居して推論の妨げになりうるため)
-                       ram_read.data[read_pos_0*8 +: 8] <= 8'h00;
-                       if (ram_read.mask[read_pos_0] && (read_word_addr < WORDS))
-                           ram_read.data[read_pos_0*8 +: 8] <= memory_lane_0[read_word_addr];
-
-                       ram_read.data[read_pos_1*8 +: 8] <= 8'h00;
-                       if (ram_read.mask[read_pos_1] && (read_word_addr < WORDS))
-                           ram_read.data[read_pos_1*8 +: 8] <= memory_lane_1[read_word_addr];
-
-                       ram_read.data[read_pos_2*8 +: 8] <= 8'h00;
-                       if (ram_read.mask[read_pos_2] && (read_word_addr < WORDS))
-                           ram_read.data[read_pos_2*8 +: 8] <= memory_lane_2[read_word_addr];
-
-                       ram_read.data[read_pos_3*8 +: 8] <= 8'h00;
-                       if (ram_read.mask[read_pos_3] && (read_word_addr < WORDS))
-                           ram_read.data[read_pos_3*8 +: 8] <= memory_lane_3[read_word_addr];
+                        // 各レーンの配列を無条件に読み出し，有効かどうかと番地の下位2ビットを添えて保持する．
+                        // 読み出し自体に条件を付けない(マスクや範囲の判定で読み出しを分岐させるとBlock RAMとして推論されないため)
+                        lane_data_0  <= memory_lane_0[read_word_addr];
+                        lane_data_1  <= memory_lane_1[read_word_addr];
+                        lane_data_2  <= memory_lane_2[read_word_addr];
+                        lane_data_3  <= memory_lane_3[read_word_addr];
+                        lane_valid_0 <= ram_read.mask[read_pos_0] && (read_word_addr < WORDS);
+                        lane_valid_1 <= ram_read.mask[read_pos_1] && (read_word_addr < WORDS);
+                        lane_valid_2 <= ram_read.mask[read_pos_2] && (read_word_addr < WORDS);
+                        lane_valid_3 <= ram_read.mask[read_pos_3] && (read_word_addr < WORDS);
+                        lane_addr_low <= ram_read.address[1:0];
                         // 読み込みラスト？
                         if (ram_read.last) begin
                             ram_read_state <= RESPONSE;
