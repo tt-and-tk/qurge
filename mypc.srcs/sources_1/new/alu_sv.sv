@@ -113,8 +113,18 @@ module alu_sv (
     import machine_p::*;
     import util_p::*;
 
+    // レジスタの初期値．FPGAのコンフィグ直後の値とリセット時の値を兼ねており，
+    // どちらの経路で初期化されても同じ状態から始まる
+    localparam register_t REGISTER_INIT[REGISTER_MAX_ADDR:0] = '{
+        // スタックポインタは，スタックが空であることを表すメモリの末尾の次の番地(容量と同じ値)
+        SP_ADDR:  register_t'(RAM_SIZE),
+        // Arduino SPIのSSはアクティブLowのため，非選択を表すHighにする
+        SPI_ADDR: 32'h1,
+        default:  '0
+    };
+
     // 内部レジスタ
-    register_t register[REGISTER_MAX_ADDR:0] = '{(REGISTER_MAX_ADDR + 1){32'h0}};
+    register_t register[REGISTER_MAX_ADDR:0] = REGISTER_INIT;
 
     // Arduino SPIのMISOの準安定状態を消す2段のシフトレジスタ
     (* ASYNC_REG = "TRUE" *) logic [1:0] miso_sync = 2'b00;
@@ -592,13 +602,8 @@ module alu_sv (
             // レジスタ(標準入出力の信号線を写し取るものも含む．リセット中・停止中は写し取りを
             // 行わないため，初期化しないと停止した時点の値がそのまま残る)
             for (logic [5:0] i = 0; i <= REGISTER_MAX_ADDR; i++) begin
-                register[i] <= 0;
+                register[i] <= REGISTER_INIT[i];
             end
-            // スタックポインタは，スタックが空であることを表すメモリの末尾の次の番地(容量と同じ値)で初期化する
-            register[SP_ADDR] <= 32'(RAM_SIZE);
-
-            // Arduino SPIのSSはアクティブLowのため，非選択を表すHighで初期化する
-            register[SPI_ADDR][0] <= 1'b1;
 
             // 実行できない命令を検出して停止した状態は，外部からのリセットが
             // 入っているときだけ解除する．自ら解除するとプログラムの先頭から
