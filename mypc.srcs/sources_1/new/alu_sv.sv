@@ -601,9 +601,7 @@ module alu_sv (
 
             // レジスタ(標準入出力の信号線を写し取るものも含む．リセット中・停止中は写し取りを
             // 行わないため，初期化しないと停止した時点の値がそのまま残る)
-            for (logic [5:0] i = 0; i <= REGISTER_MAX_ADDR; i++) begin
-                register[i] <= REGISTER_INIT[i];
-            end
+            register <= REGISTER_INIT;
 
             // 実行できない命令を検出して停止した状態は，外部からのリセットが
             // 入っているときだけ解除する．自ら解除するとプログラムの先頭から
