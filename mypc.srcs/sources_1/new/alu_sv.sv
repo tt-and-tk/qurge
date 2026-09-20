@@ -260,8 +260,9 @@ module alu_sv (
                    : sequential_pc;                                     // それ以外は次の番地へ進む
 
     // ===== 1サイクルで完了する命令の結果の算出(組み合わせ回路) =====
-    // 実行フェーズの間のみ意味を持つ．どの命令の結果をレジスタへ書き込むかと，不正なfuncでの
-    // 停止はメインの順序回路が判定する
+    // 実行フェーズの間のみ意味を持つ．ここでは結果を求めるだけで，レジスタへ書き込むかどうかと，
+    // 不正な命令での停止(is_halted)はメインの順序回路が判定する(is_haltedは順序回路が駆動する
+    // レジスタであり，ここから停止させることはできない)
 
     // 1サイクルでレジスタへの書き込みまで完了する命令の結果．それ以外の命令では0になり使われない
     register_t write_value;
@@ -274,7 +275,7 @@ module alu_sv (
         write_value = '0;
 
         unique case (command.m_type)
-            // 演算系．MUL・DIV/DIVUは結果の確定に複数サイクルかかるためここでは求めない
+            // 演算系
             P_TYPE: begin
                 unique case (func_r)
                     AND:  write_value = rs1_val_r & rs2_val_r;
@@ -284,6 +285,9 @@ module alu_sv (
                     NAND: write_value = ~(rs1_val_r & rs2_val_r);
                     ADD:  write_value = rs1_val_r + rs2_val_r;
                     SUB:  write_value = rs1_val_r - rs2_val_r;
+                    // 掛け算・割り算は結果の確定に複数サイクルかかるため，順序回路側で求める
+                    MUL, DIV, DIVU: ;
+                    // 不正なfunc．順序回路側が停止させる
                     default: ;
                 endcase
             end
@@ -295,13 +299,22 @@ module alu_sv (
                     SRL: write_value = rs1_val_r >> shift_amount;
                     SLA: write_value = rs1_val_r <<< shift_amount;
                     SRA: write_value = $signed(rs1_val_r) >>> shift_amount;
+                    // 不正なfunc．順序回路側が停止させる
                     default: ;
                 endcase
             end
 
             // 代入系．mask_rは未実装のため参照せず，常にrdの全バイトへ書き込む
-            A_TYPE: write_value = imm_r[32] ? imm_r[31:0] : rs1_val_r;
+            A_TYPE: begin
+                unique case (func_r)
+                    MOV: write_value = imm_r[32] ? imm_r[31:0] : rs1_val_r;
+                    // 不正なfunc．順序回路側が停止させる
+                    default: ;
+                endcase
+            end
 
+            // 残りの命令タイプは，1サイクルで確定する書き込み値を持たない(メモリ・標準入出力の
+            // 読み出し結果は，応答が返ったサイクルに順序回路側が直接書き込む)
             default: ;
         endcase
     end
