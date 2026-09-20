@@ -179,8 +179,8 @@ module alu_sv (
     // ===== メモリ・標準入出力・割り算回路とのハンドシェイク状態 =====
     // それぞれの命令の実行が複数サイクルにまたがる間，どこまで進んだかを保持する
 
-    util_p::state_enum ram_read_state = IDLE;  // メモリ読み込み(RM・RMR)，RETの実行状態
-    util_p::state_enum ram_write_state = IDLE; // メモリ書き込み(WM・WMR)，CALLの実行状態
+    util_p::state_enum ram_read_state = IDLE;  // メモリ読み込み(RM・RMR)とRETの実行状態
+    util_p::state_enum ram_write_state = IDLE; // メモリ書き込み(WM・WMR)とCALLの実行状態
     util_p::state_enum stdin_state = IDLE;     // 標準入力(SCAN)の実行状態
     util_p::state_enum stdout_state = IDLE;    // 標準出力(PRINT)の実行状態
     util_p::state_enum mul_state = IDLE;       // 掛け算(MUL)の実行状態
