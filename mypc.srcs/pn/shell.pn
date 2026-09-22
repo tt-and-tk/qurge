@@ -38,6 +38,24 @@ void print_fat_error(int status) {
     fat_print_error(status);
 }
 
+// ちょうど1つの引数を取るコマンドで，posより後ろの引数をargへ取り出す(argはINPUT_SIZE要素で確保すること)
+// 引数が無いか余分な引数があればエラーを出力して0を返し，取り出せれば1を返す
+int extract_only_arg(int pos, char *arg) {
+    // 直後の引数を取り出す
+    pos = extract_arg(input, pos, arg, INPUT_SIZE);
+    // 引数が指定されていなければ何もしない
+    if (arg[0] == '\0') {
+        print_error("missing argument\n");
+        return 0;
+    }
+    // 引数の後に余分な引数があれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return 0;
+    }
+    return 1;
+}
+
 // echoコマンド: コマンド名以降の引数部分をそのまま出力する
 void handle_echo(int pos) {
     char args[INPUT_SIZE];  // コマンド名を除いた引数部分
@@ -90,15 +108,7 @@ void handle_cat(int pos) {
     int last = '\n';        // 最後に出力した文字(内容が改行で終わらなければ改行を補うため．空のファイルでは補わないよう改行から始める)
 
     // コマンド名(cat)の直後の引数をファイル名として取り出す
-    pos = extract_arg(input, pos, name, INPUT_SIZE);
-    // ファイル名が指定されていなければ何もしない
-    if (name[0] == '\0') {
-        print_error("missing argument\n");
-        return;
-    }
-    // ファイル名の後に余分な引数があれば何もしない
-    if (has_extra_args(input, pos)) {
-        print_error("too many arguments\n");
+    if (extract_only_arg(pos, name) == 0) {
         return;
     }
 
@@ -142,6 +152,107 @@ void handle_cat(int pos) {
     }
 }
 
+// touchコマンド: 引数のファイル名で，内容が空のファイルを作成する
+void handle_touch(int pos) {
+    char name[INPUT_SIZE];  // 先頭の引数(作成するファイル名)
+    struct FatEntry entry;  // 作成したファイルのエントリ
+    int status;             // 作成の結果
+
+    // コマンド名(touch)の直後の引数をファイル名として取り出す
+    if (extract_only_arg(pos, name) == 0) {
+        return;
+    }
+    // ファイルを作成し，失敗すればその理由を出力する(同名のファイルが既にある場合も失敗になる)
+    status = fat_create(name, &entry);
+    if (status != FAT_OK) {
+        print_fat_error(status);
+    }
+}
+
+// writeコマンド: 引数の先頭をファイル名，残りを内容として，ファイルの内容を丸ごと置き換える(ファイルが無ければ作成する)
+void handle_write(int pos) {
+    char name[INPUT_SIZE];     // 先頭の引数(書き込むファイル名)
+    char content[INPUT_SIZE];  // ファイル名を除いた残り(書き込む内容)
+    struct FatEntry entry;     // 書き込むファイルのエントリ
+    int length = 0;            // 書き込む内容のバイト数
+    int status;                // 検索・作成・書き込みの結果
+
+    // コマンド名(write)の直後の引数をファイル名として取り出す
+    pos = extract_arg(input, pos, name, INPUT_SIZE);
+    // ファイル名が指定されていなければ何もしない
+    if (name[0] == '\0') {
+        print_error("missing argument\n");
+        return;
+    }
+    // ファイル名以降の引数部分を丸ごと書き込む内容として取り出し，その長さを数える
+    extract_text_arg(input, pos, content, INPUT_SIZE);
+    while (content[length] != '\0') {
+        length++;
+    }
+
+    // ファイル名から対象のエントリを探し，無ければ作成してから内容を書き込む
+    status = fat_find(name, &entry);
+    if (status == FAT_ERR_NOT_FOUND) {
+        status = fat_create(name, &entry);
+    }
+    if (status == FAT_OK) {
+        status = fat_write(&entry, content, length);
+    }
+    if (status != FAT_OK) {
+        print_fat_error(status);
+    }
+}
+
+// rmコマンド: 引数のファイル名に対応するファイルを削除する
+void handle_rm(int pos) {
+    char name[INPUT_SIZE];  // 先頭の引数(削除するファイル名)
+    struct FatEntry entry;  // 削除するファイルのエントリ
+    int status;             // 検索・削除の結果
+
+    // コマンド名(rm)の直後の引数をファイル名として取り出す
+    if (extract_only_arg(pos, name) == 0) {
+        return;
+    }
+    // ファイル名から対象のエントリを探して削除し，失敗すればその理由を出力する
+    status = fat_find(name, &entry);
+    if (status == FAT_OK) {
+        status = fat_remove(&entry);
+    }
+    if (status != FAT_OK) {
+        print_fat_error(status);
+    }
+}
+
+// mvコマンド: 引数の先頭を旧ファイル名，次を新ファイル名として名前を変更する
+void handle_mv(int pos) {
+    char old_name[INPUT_SIZE];  // 先頭の引数(旧ファイル名)
+    char new_name[INPUT_SIZE];  // 次の引数(新ファイル名)
+    struct FatEntry entry;      // 名前を変更するエントリ
+    int status;                 // 検索・名前の変更の結果
+
+    // コマンド名(mv)の直後の2つの引数を，旧ファイル名・新ファイル名として順に取り出す
+    pos = extract_arg(input, pos, old_name, INPUT_SIZE);
+    pos = extract_arg(input, pos, new_name, INPUT_SIZE);
+    // 新ファイル名が指定されていなければ何もしない(引数は前から順に取り出すため，旧ファイル名が無ければ新ファイル名も無い)
+    if (new_name[0] == '\0') {
+        print_error("missing argument\n");
+        return;
+    }
+    // 新ファイル名の後に余分な引数があれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return;
+    }
+    // 旧ファイル名から対象のエントリを探して名前を変更し，失敗すればその理由を出力する
+    status = fat_find(old_name, &entry);
+    if (status == FAT_OK) {
+        status = fat_rename(&entry, new_name);
+    }
+    if (status != FAT_OK) {
+        print_fat_error(status);
+    }
+}
+
 // sdinitコマンド: SDカードを初期化し，カード上のFAT32ファイルシステムをマウントし直す
 void handle_sdinit(int pos) {
     int status;  // マウントの結果
@@ -172,6 +283,10 @@ void handle_help(int pos) {
     print("help\n");
     print("ls\n");
     print("cat\n");
+    print("touch\n");
+    print("write\n");
+    print("rm\n");
+    print("mv\n");
     print("sdinit\n");
 }
 
@@ -193,6 +308,14 @@ void dispatch(int pos) {
         handle_ls(pos);
     } else if (streq(cmd, "cat")) {
         handle_cat(pos);
+    } else if (streq(cmd, "touch")) {
+        handle_touch(pos);
+    } else if (streq(cmd, "write")) {
+        handle_write(pos);
+    } else if (streq(cmd, "rm")) {
+        handle_rm(pos);
+    } else if (streq(cmd, "mv")) {
+        handle_mv(pos);
     } else if (streq(cmd, "sdinit")) {
         handle_sdinit(pos);
     } else {
