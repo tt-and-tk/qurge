@@ -36,7 +36,7 @@ void print_hex(char value) {
 unsigned char spi_transfer(char data) {
     // AR_SPIのビット割り当て(bit3:MISO(入力) / bit2:SCK / bit1:MOSI / bit0:SS(アクティブLow))
 
-    unsigned char received = 0;  // MISOから上位ビット順に組み立てる受信バイト(符号なしのため，0xffは呼び出し元でも0xffとして比較できる)
+    unsigned char received = 0;  // MISOから上位ビット順に組み立てる受信バイト
     int level;                   // SSとMOSIを反映したAR_SPIへの書き込み値(SCKはLow)
 
     for (int i = 7; i >= 0; i--) {
