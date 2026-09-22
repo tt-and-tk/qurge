@@ -9,7 +9,7 @@
 `include "machine.svh"
 
 package rom_p;
-    localparam int MAX_LINE_NUM = 4096;         // アセンブラが許容する最大命令数(asm2bin.cppのMAX_LINE_NUMと一致させる)
+    localparam int MAX_LINE_NUM = 16384;       // アセンブラが許容する最大命令数(asm2bin.cppのMAX_LINE_NUMと一致させる)
     typedef logic [$clog2(MAX_LINE_NUM)-1:0] pc_bus_t;  // プログラムカウンタ
 endpackage
 
