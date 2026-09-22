@@ -1021,14 +1021,16 @@ int fat_create(char *text, struct FatEntry *entry) {
 }
 
 // entryのファイルの内容を，dataの先頭lengthバイトで丸ごと置き換える
-// 途中で失敗した場合，ファイルは空になる
+// 新しい内容を空きクラスタへ書き終えてから差し替えるため，途中で失敗してもファイルは元の内容のまま残る(一時的に元の内容と新しい内容の両方の空きが要る)
 int fat_write(struct FatEntry *entry, char *data, int length) {
-    unsigned int old = entry->cluster;              // 置き換える前の内容の開始クラスタ
+    unsigned int old_cluster = entry->cluster;      // 置き換える前の内容の開始クラスタ
+    unsigned int old_size = entry->size;            // 置き換える前の内容のバイト数
+    unsigned char old_attr = entry->attr;           // 置き換える前の属性
     unsigned int first = 0;                         // 新しい内容の開始クラスタ(まだ確保していなければ0)
     unsigned int cluster = 0;                       // 書き込み中のクラスタ
     unsigned int next;                              // 新しく確保したクラスタ
     unsigned int sector = fat_sectors_per_cluster;  // クラスタ内で次に書くセクタの位置(最初のセクタを書く前にクラスタを確保させるため，クラスタの終わりから始める)
-    int status;                                     // 各処理の結果
+    int status = FAT_OK;                            // 各処理の結果
 
     // マウントしていなければ，クラスタの位置が分からない
     if (fat_mounted == 0) {
@@ -1038,15 +1040,7 @@ int fat_write(struct FatEntry *entry, char *data, int length) {
     if ((entry->attr & ATTR_DIRECTORY) != 0) {
         return FAT_ERR_IS_DIR;
     }
-    // 先にエントリを空のファイルにしてから古い内容を解放する(途中で失敗しても，エントリが空きクラスタを指さないようにするため)
-    entry->attr |= ATTR_ARCHIVE;
-    entry->cluster = 0;
-    entry->size = 0;
-    status = fat_store_entry(entry, 1);
-    if (status == FAT_OK && old != 0) {
-        status = fat_free_chain(old);
-    }
-    // 新しい内容を1セクタずつ書く
+    // 新しい内容を1セクタずつ，空きクラスタへ書く
     for (int written = 0; status == FAT_OK && written < length; written += SD_BLOCK_SIZE) {
         // クラスタを書き終えていれば，次のクラスタを確保して前のクラスタの次へつなぐ
         if (sector == fat_sectors_per_cluster) {
@@ -1073,21 +1067,28 @@ int fat_write(struct FatEntry *entry, char *data, int length) {
         }
         sector++;
     }
-    // 全て書けたら，エントリに新しい内容の位置と大きさを書く
+    // 全て書けたら，エントリを新しい内容の位置と大きさに差し替える
     if (status == FAT_OK) {
+        entry->attr |= ATTR_ARCHIVE;
         entry->cluster = first;
         entry->size = length;
         status = fat_store_entry(entry, 1);
     }
-    // 失敗した場合は書きかけの内容を解放し，エントリは空のファイルのまま残す
+    // 差し替えられなかった場合は書きかけの新しい内容を解放し，エントリを元の内容に戻す
     if (status != FAT_OK) {
-        entry->cluster = 0;
-        entry->size = 0;
+        entry->attr = old_attr;
+        entry->cluster = old_cluster;
+        entry->size = old_size;
         if (first != 0) {
             fat_free_chain(first);
         }
+        return status;
     }
-    return status;
+    // エントリを差し替えてから元の内容を解放する(途中で失敗しても，使用中のエントリが空きクラスタを指さないようにするため)
+    if (old_cluster != 0) {
+        return fat_free_chain(old_cluster);
+    }
+    return FAT_OK;
 }
 
 // entryのファイルを削除する(長いファイル名を持てば，そのエントリもあわせて削除する)
