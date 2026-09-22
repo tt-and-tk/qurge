@@ -105,7 +105,7 @@ struct FatFile {
 unsigned char fat_sector[SD_BLOCK_SIZE];
 
 // マウントしたファイルシステムの情報(fat_mountが設定する)
-int fat_mounted = 0;                  // ファイルシステムをマウントしているか(0:未マウント，1:マウント済み)
+int fat_mounted = 0;                  // ファイルシステムをマウントしているか(0:未マウント，1:マウント済み)．起動直後はまだマウントしていないため0から始める
 unsigned int fat_start;               // 1つ目のFATの先頭セクタ番号
 unsigned int fat_data_start;          // データ領域(クラスタ2)の先頭セクタ番号
 unsigned int fat_sectors_per_cluster; // 1クラスタのセクタ数
