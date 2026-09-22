@@ -12,7 +12,7 @@ const int FAT_ERR_READ = 4;         // カードから読み出せなかった
 const int FAT_ERR_NOT_FAT32 = 5;    // カード上にFAT32のボリュームが見つからない
 const int FAT_ERR_BROKEN = 6;       // クラスタチェーンやサイズの記録が壊れている
 const int FAT_ERR_NOT_MOUNTED = 7;  // ボリュームをマウントしていない
-const int FAT_ERR_BAD_NAME = 8;     // 名前が8.3形式に収まらない
+const int FAT_ERR_BAD_NAME = 8;     // 探すよう指定された名前が8.3形式に収まらない(カード上のエントリの名前は常に8.3形式のため，指定する側の名前だけで起きる)
 const int FAT_ERR_NOT_FOUND = 9;    // 指定した名前のエントリが無い
 const int FAT_ERR_IS_DIR = 10;      // ファイルではなくディレクトリを開こうとした
 
