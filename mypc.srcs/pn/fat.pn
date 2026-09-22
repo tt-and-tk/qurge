@@ -124,7 +124,7 @@ unsigned short fat_read_u16(int offset) {
     return fat_sector[offset] | (fat_sector[offset + 1] << 8);
 }
 
-// 読み込んだセクタの指定した位置から，4バイトの値を読む(位置は2バイトの値を読む場合と同じく，セクタ内に収まるものだけを渡すこと)
+// 読み込んだセクタの指定した位置から，4バイトの値を読む(位置はセクタ内に4バイトが収まるものだけを渡すこと)
 unsigned int fat_read_u32(int offset) {
     // 前半の2バイトを下位，後半の2バイトを上位として組み立てる
     return fat_read_u16(offset) | (fat_read_u16(offset + 2) << 16);
