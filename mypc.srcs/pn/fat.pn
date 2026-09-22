@@ -503,7 +503,7 @@ int fat_open(struct FatEntry *entry, struct FatFile *file) {
     if (entry->size != 0 && fat_is_valid_cluster(entry->cluster) == 0) {
         return FAT_ERR_BROKEN;
     }
-    // 開始クラスタの先頭セクタから，ファイル全体を読み残しとして始める
+    // 読み出す位置を開始クラスタの先頭セクタに置き，まだ読んでいないバイト数をファイル全体の大きさにする
     file->cluster = entry->cluster;
     file->sector = 0;
     file->remaining = entry->size;
