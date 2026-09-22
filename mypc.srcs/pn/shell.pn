@@ -167,7 +167,7 @@ void handle_help(int pos) {
         print_error("too many arguments\n");
         return;
     }
-    // dispatchが受け付けるコマンド名を1行ずつ出力する
+    // シェルが受け付けるコマンド名を1行ずつ出力する
     print("echo\n");
     print("help\n");
     print("ls\n");
