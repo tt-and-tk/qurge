@@ -190,10 +190,11 @@ void handle_write(int pos) {
         length++;
     }
 
-    // ファイル名から対象のエントリを探し，無ければ作成してから内容を書き込む
-    status = fat_find(name, &entry);
-    if (status == FAT_ERR_NOT_FOUND) {
-        status = fat_create(name, &entry);
+    // ファイルを作成してから内容を書き込む．既にあれば，作成の処理が見つけたそのファイルへ書き込む
+    // (名前での検索を別に行うと，作成の処理が同じ名前を探すためにルートディレクトリをもう一度走査することになるため)
+    status = fat_create(name, &entry);
+    if (status == FAT_ERR_EXISTS) {
+        status = FAT_OK;
     }
     if (status == FAT_OK) {
         status = fat_write(&entry, content, length);

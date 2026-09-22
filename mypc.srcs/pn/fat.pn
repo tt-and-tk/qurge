@@ -958,7 +958,7 @@ int fat_extend_root(void) {
 }
 
 // ルートディレクトリに"NAME.EXT"形式の名前textで空のファイルを作成し，そのエントリをentryへ書き込む
-// 同じ名前のエントリが既にあればFAT_ERR_EXISTSを返す(大文字・小文字は区別しない)
+// 同じ名前のエントリが既にあれば，作成せずにそのエントリをentryへ書き込み，FAT_ERR_EXISTSを返す(大文字・小文字は区別しない)
 int fat_create(char *text, struct FatEntry *entry) {
     int offset;  // 新しいエントリを置くセクタ内の位置
     int status;  // 検索・ディレクトリの拡張の結果
