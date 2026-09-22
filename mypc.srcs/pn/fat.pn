@@ -93,6 +93,7 @@ const int DIR_NAME_CASE = 0x0c;        // 小文字で表示する部分を示�
 const int DIR_CREATE_DATE = 0x10;      // 作成した日付(2バイト)
 const int DIR_ACCESS_DATE = 0x12;      // 最後に参照した日付(2バイト)
 const int DIR_CLUSTER_HIGH = 0x14;     // 開始クラスタの上位16ビット
+const int DIR_WRITE_TIME = 0x16;       // 最後に更新した時刻(2バイト)
 const int DIR_WRITE_DATE = 0x18;       // 最後に更新した日付(2バイト)
 const int DIR_CLUSTER_LOW = 0x1a;      // 開始クラスタの下位16ビット
 const int DIR_FILE_SIZE = 0x1c;        // ファイルのバイト数(4バイト)
@@ -879,13 +880,24 @@ void fat_put_entry(struct FatEntry *entry) {
     fat_write_u32(offset + DIR_FILE_SIZE, entry->size);
 }
 
-// entryの内容を，カード上のエントリの位置へ書き戻す(日時は書き換えない)
-int fat_store_entry(struct FatEntry *entry) {
+// fat_sectorに読み込んだディレクトリのセクタ上の，offsetの位置のエントリへ，最後に更新した日時を書く
+// 時計が無いため，FATで表せる最も古い1980年1月1日0時0分とする(時刻は0．日付は月・日を0にできないため値を書く)
+void fat_put_modified_time(int offset) {
+    fat_write_u16(offset + DIR_WRITE_TIME, 0);
+    fat_write_u16(offset + DIR_WRITE_DATE, DIR_DATE_1980_01_01);
+}
+
+// entryの内容を，カード上のエントリの位置へ書き戻す
+// ファイルの内容を変えた場合はmodifiedに1を渡し，最後に更新した日時も書き換える(名前の変更など，内容を変えない場合は0を渡す)
+int fat_store_entry(struct FatEntry *entry, int modified) {
     // エントリを含むセクタを読み込み，そのエントリの部分だけを書き換えて書き戻す
     if (sd_read_block(entry->sector, fat_sector) == 0) {
         return FAT_ERR_READ;
     }
     fat_put_entry(entry);
+    if (modified != 0) {
+        fat_put_modified_time(entry->offset);
+    }
     if (sd_write_block(entry->sector, fat_sector) == 0) {
         return FAT_ERR_WRITE;
     }
@@ -997,10 +1009,10 @@ int fat_create(char *text, struct FatEntry *entry) {
     for (int i = 0; i < DIR_ENTRY_SIZE; i++) {
         fat_sector[offset + i] = 0;
     }
-    // 時計が無いため，日時はFATで表せる最も古い1980年1月1日0時0分とする(時刻は0のまま．日付は月・日を0にできないため値を書く)
+    // 作成・参照の日時も，更新の日時と同じく1980年1月1日0時0分とする(時刻は0のまま)
     fat_write_u16(offset + DIR_CREATE_DATE, DIR_DATE_1980_01_01);
     fat_write_u16(offset + DIR_ACCESS_DATE, DIR_DATE_1980_01_01);
-    fat_write_u16(offset + DIR_WRITE_DATE, DIR_DATE_1980_01_01);
+    fat_put_modified_time(offset);
     fat_put_entry(entry);
     if (sd_write_block(entry->sector, fat_sector) == 0) {
         return FAT_ERR_WRITE;
@@ -1030,7 +1042,7 @@ int fat_write(struct FatEntry *entry, char *data, int length) {
     entry->attr |= ATTR_ARCHIVE;
     entry->cluster = 0;
     entry->size = 0;
-    status = fat_store_entry(entry);
+    status = fat_store_entry(entry, 1);
     if (status == FAT_OK && old != 0) {
         status = fat_free_chain(old);
     }
@@ -1065,7 +1077,7 @@ int fat_write(struct FatEntry *entry, char *data, int length) {
     if (status == FAT_OK) {
         entry->cluster = first;
         entry->size = length;
-        status = fat_store_entry(entry);
+        status = fat_store_entry(entry, 1);
     }
     // 失敗した場合は書きかけの内容を解放し，エントリは空のファイルのまま残す
     if (status != FAT_OK) {
@@ -1134,7 +1146,7 @@ int fat_rename(struct FatEntry *entry, char *text) {
         entry->name[i] = fat_find_name[i];
     }
     entry->name_case = fat_name_case(text);
-    return fat_store_entry(entry);
+    return fat_store_entry(entry, 0);
 }
 
 // 各関数が返した失敗の理由を，改行付きのメッセージとして出力する
