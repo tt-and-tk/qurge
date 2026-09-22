@@ -43,6 +43,7 @@ void handle_echo(int pos) {
 }
 
 // ルートディレクトリの走査で，エントリの名前を1行出力する(ディレクトリは末尾に'/'を付けて区別する)
+// fat_walk_rootへ渡す関数は走査を打ち切るかどうかを戻り値で伝える決まりのため，常に続ける場合もvoidにはしない
 int print_entry(struct FatEntry *entry) {
     char text[FAT_NAME_TEXT_SIZE];  // 表示用の名前
     fat_format_name(entry, text);
