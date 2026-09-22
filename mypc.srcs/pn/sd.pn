@@ -250,6 +250,7 @@ unsigned int sd_block_arg(unsigned int block) {
 }
 
 // 1ブロックを読み出し，bufの先頭からSD_BLOCK_SIZEバイトへ格納する
+// 失敗しても表示は行わない(他の出力の途中でも呼ばれるため，失敗の伝え方は呼び出し元が決める)
 // 戻り値: 1(読み出し成功) / 0(失敗．bufの内容は保証されない)
 int sd_read_block(unsigned int block, unsigned char *buf) {
     int response;   // CMD17のR1応答
@@ -264,9 +265,6 @@ int sd_read_block(unsigned int block, unsigned char *buf) {
     // CMD17(READ_SINGLE_BLOCK): 1ブロックの読み出し要求．CRCは無視されるためエンドビットのみを立てた値を渡す
     response = sd_command(17, sd_block_arg(block), 0x01);
     if (response != 0x00) {
-        print("CMD17: ");
-        print_hex(response);
-        print("\n");
         sd_release();
         return 0;
     }
@@ -281,13 +279,6 @@ int sd_read_block(unsigned int block, unsigned char *buf) {
     }
     // 0xff以外で0xfeでないものはエラートークンであり，待っても0xfeへは変わらない
     if (token != 0xfe) {
-        if (token == 0xff) {
-            print("read timeout\n");
-        } else {
-            print("read token: ");
-            print_hex(token);
-            print("\n");
-        }
         sd_release();
         return 0;
     }
