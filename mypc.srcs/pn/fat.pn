@@ -1009,7 +1009,7 @@ int fat_create(char *text, struct FatEntry *entry) {
     for (int i = 0; i < DIR_ENTRY_SIZE; i++) {
         fat_sector[offset + i] = 0;
     }
-    // 作成・参照の日時も，更新の日時と同じく1980年1月1日0時0分とする(時刻は0のまま)
+    // 作成・参照の日付も，更新の日時と同じ日付にする(時刻は0のまま)
     fat_write_u16(offset + DIR_CREATE_DATE, DIR_DATE_1980_01_01);
     fat_write_u16(offset + DIR_ACCESS_DATE, DIR_DATE_1980_01_01);
     fat_put_modified_time(offset);
