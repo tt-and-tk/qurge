@@ -31,11 +31,11 @@ void print_hex(char value) {
 
 // SPIモード0のビットバンギングで1バイトを送信し，同時に受信した1バイトを返す
 // SPIは全二重で送信と受信が常に対になるため，受信だけしたい場合は0xffを渡すこと
-int spi_transfer(char data) {
+unsigned char spi_transfer(char data) {
     // AR_SPIのビット割り当て(bit3:MISO(入力) / bit2:SCK / bit1:MOSI / bit0:SS(アクティブLow))
 
-    int received = 0;  // MISOから上位ビット順に組み立てる受信バイト(charにしないのは，符号付きのため0xffが-1として読み戻り，呼び出し元の0xffとの比較が成り立たなくなるため)
-    int level;         // SSとMOSIを反映したAR_SPIへの書き込み値(SCKはLow)
+    unsigned char received = 0;  // MISOから上位ビット順に組み立てる受信バイト(符号なしのため，0xffは呼び出し元でも0xffとして比較できる)
+    int level;                   // SSとMOSIを反映したAR_SPIへの書き込み値(SCKはLow)
 
     for (int i = 7; i >= 0; i--) {
         // SPI上の送信順は上位ビットからのため，iビット目を取り出してMOSI(bit1)へ置く
