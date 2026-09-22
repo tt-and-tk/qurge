@@ -130,13 +130,15 @@ unsigned int fat_read_u32(int offset) {
     return fat_read_u16(offset) | (fat_read_u16(offset + 2) << 16);
 }
 
-// clusterがデータ領域に実在するクラスタ番号かを返す(不良クラスタを表す0x0ffffff7も範囲外として弾かれる)
+// 指定したクラスタ番号がデータ領域に実在するかを返す(不良クラスタを表す0x0ffffff7も範囲外として弾かれる)
+// マウントで求めたクラスタ数を使うため，マウントした後にだけ呼ぶこと
 int fat_is_valid_cluster(unsigned int cluster) {
     // データ領域のクラスタは番号2から始まり，クラスタ数だけ続く
     return cluster >= FAT_FIRST_CLUSTER && cluster < fat_cluster_count + FAT_FIRST_CLUSTER;
 }
 
 // クラスタの先頭セクタ番号を返す
+// マウントで求めたデータ領域の位置とクラスタ長を使うため，マウントした後にだけ呼ぶこと
 unsigned int fat_cluster_sector(unsigned int cluster) {
     // データ領域の先頭から，前にあるクラスタの数だけクラスタ長ずつ進めた位置にある
     return fat_data_start + ((cluster - FAT_FIRST_CLUSTER) << fat_cluster_shift);
