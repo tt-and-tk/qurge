@@ -40,6 +40,7 @@ void print_fat_error(int status) {
 
 // ちょうど1つの引数を取るコマンドで，posより後ろの引数をargへ取り出す(argはINPUT_SIZE要素で確保すること)
 // 引数が無いか余分な引数があればエラーを出力して0を返し，取り出せれば1を返す
+// 入力行の解析を担うargs.pnに置かないのは，シェルの入力行inputとコマンド名を前置するエラー表示を使うため(args.pnはシェルに依存しない)
 int extract_only_arg(int pos, char *arg) {
     // 直後の引数を取り出す
     pos = extract_arg(input, pos, arg, INPUT_SIZE);
@@ -190,15 +191,18 @@ void handle_write(int pos) {
         length++;
     }
 
-    // ファイルを作成してから内容を書き込む．既にあれば，作成の処理が見つけたそのファイルへ書き込む
-    // (名前での検索を別に行うと，作成の処理が同じ名前を探すためにルートディレクトリをもう一度走査することになるため)
+    // 書き込み先のファイルを決める．無ければ空のファイルを作成し，同名のファイルが既にあればそれを使う
+    // 作成の処理は，同名のファイルがあれば作成せずにそのエントリを返してFAT_ERR_EXISTSを返すため，その場合も書き込み先が決まったものとして扱う
+    // (名前での検索を別に行うと，作成の処理が同じ名前を探すためにルートディレクトリをもう一度走査することになるため，作成の処理に任せる)
     status = fat_create(name, &entry);
     if (status == FAT_ERR_EXISTS) {
         status = FAT_OK;
     }
+    // 書き込み先が決まったときだけ，その内容を丸ごと置き換える
     if (status == FAT_OK) {
         status = fat_write(&entry, content, length);
     }
+    // どこかで失敗していれば，その理由を出力する
     if (status != FAT_OK) {
         print_fat_error(status);
     }
@@ -234,7 +238,7 @@ void handle_mv(int pos) {
     // コマンド名(mv)の直後の2つの引数を，旧ファイル名・新ファイル名として順に取り出す
     pos = extract_arg(input, pos, old_name, INPUT_SIZE);
     pos = extract_arg(input, pos, new_name, INPUT_SIZE);
-    // 新ファイル名が指定されていなければ何もしない(引数は前から順に取り出すため，旧ファイル名が無ければ新ファイル名も無い)
+    // 新ファイル名が無ければ引数が足りないため何もしない(旧ファイル名だけを指定した場合と，引数を1つも指定しない場合の両方が当てはまる)
     if (new_name[0] == '\0') {
         print_error("missing argument\n");
         return;
