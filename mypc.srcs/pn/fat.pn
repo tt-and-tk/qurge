@@ -117,13 +117,13 @@ unsigned int fat_root_cluster;        // ルートディレクトリの開始ク
 unsigned char fat_find_name[FAT_NAME_SIZE];  // 探している8.3形式の名前
 struct FatEntry *fat_find_result;            // 見つかったエントリの書き込み先
 
-// fat_sectorのoffsetバイト目からリトルエンディアンの2バイトを読む
+// 読み込んだセクタの指定した位置から，2バイトの値を読む
 unsigned int fat_read_u16(int offset) {
-    // 番地の小さい側が下位バイトのため，後ろのバイトを上位へ置いて組み立てる
+    // FATの値は下位のバイトから順に並ぶため，後ろのバイトを上位へ置いて組み立てる
     return fat_sector[offset] | (fat_sector[offset + 1] << 8);
 }
 
-// fat_sectorのoffsetバイト目からリトルエンディアンの4バイトを読む
+// 読み込んだセクタの指定した位置から，4バイトの値を読む
 unsigned int fat_read_u32(int offset) {
     // 前半の2バイトを下位，後半の2バイトを上位として組み立てる
     return fat_read_u16(offset) | (fat_read_u16(offset + 2) << 16);
