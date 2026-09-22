@@ -29,7 +29,7 @@ void print_error(char *msg) {
     print(msg_buf);
 }
 
-// FAT32の各関数やmount_cardが返した失敗の理由を，改行付きのメッセージとして出力する
+// カードとボリュームの操作が返した失敗の理由を，改行付きのメッセージとして出力する
 void print_fat_message(int status) {
     switch (status) {
     case MOUNT_ERR_INIT:
@@ -62,7 +62,7 @@ void print_fat_message(int status) {
     }
 }
 
-// FAT32の各関数やmount_cardが返した失敗を，実行中のコマンドのエラーとして出力する
+// カードとボリュームの操作が返した失敗を，実行中のコマンドのエラーとして出力する
 void print_fat_error(int status) {
     print_error_head();
     print_fat_message(status);
