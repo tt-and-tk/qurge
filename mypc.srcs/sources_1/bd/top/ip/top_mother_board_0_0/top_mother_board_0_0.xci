@@ -4,7 +4,7 @@
     "xci_name": "top_mother_board_0_0",
     "cell_name": "mother_board_0",
     "component_reference": "xilinx.com:module_ref:mother_board:1.0",
-    "ip_revision": "1789646894",
+    "ip_revision": "1790078713",
     "gen_directory": "../../../../../../mypc.gen/sources_1/bd/top/ip/top_mother_board_0_0",
     "parameters": {
       "component_parameters": {
@@ -25,7 +25,7 @@
       },
       "runtime_parameters": {
         "IPCONTEXT": [ { "value": "IP_Integrator" } ],
-        "IPREVISION": [ { "value": "1789646894" } ],
+        "IPREVISION": [ { "value": "1790078713" } ],
         "MANAGED": [ { "value": "TRUE" } ],
         "OUTPUTDIR": [ { "value": "../../../../../../mypc.gen/sources_1/bd/top/ip/top_mother_board_0_0" } ],
         "SELECTEDSIMMODEL": [ { "value": "" } ],

@@ -2071,7 +2071,7 @@
       },
       "mother_board_0": {
         "vlnv": "xilinx.com:module_ref:mother_board:1.0",
-        "ip_revision": "1789646894",
+        "ip_revision": "1790078713",
         "xci_name": "top_mother_board_0_0",
         "xci_path": "ip\\top_mother_board_0_0\\top_mother_board_0_0.xci",
         "inst_hier_path": "mother_board_0",
