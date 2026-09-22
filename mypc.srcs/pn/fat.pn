@@ -444,7 +444,8 @@ void fat_format_name(struct FatEntry *entry, char *text) {
     text[n] = '\0';
 }
 
-// fat_findの走査で，fat_find_nameと名前が一致するエントリをfat_find_resultへ写して打ち切る
+// 名前での検索のために走査へ渡す関数．カードから読んで構造体に取り出したエントリの名前を探している名前と比べ，
+// 一致すれば，そのエントリを検索の呼び出し元が用意した構造体へ写して走査を打ち切る
 int fat_match_entry(struct FatEntry *entry) {
     // 名前が1バイトでも異なれば，走査を続けて次のエントリを調べる
     for (int i = 0; i < FAT_NAME_SIZE; i++) {
