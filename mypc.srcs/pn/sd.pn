@@ -98,7 +98,7 @@ int sd_init_commands(void) {
     // R7: CMD8だけが返す形式で，R1に4バイトが続く
 
     int response;  // 各コマンドのR1応答
-    int received;  // R1に続く4バイトを1バイトずつ受け取る変数
+    int received;  // R1の後に届く4バイト(R1自体は含まない)を1バイトずつ受け取る変数
     int echoed;    // R7の末尾2バイト(受理された電圧範囲とチェックパターン)
     int ocr_high;  // R3のOCRの最上位バイト(CCSビットを含む)
     int ready;     // ACMD41が完了を返したか(0:未完了，1:完了)
@@ -131,7 +131,7 @@ int sd_init_commands(void) {
         print("\n");
         return 0;
     }
-    // 受理された場合の応答はR7で，R1に続く4バイトのうち末尾2バイトが受理された電圧範囲と送ったチェックパターンのエコーバックになる
+    // 受理された場合の応答はR7で，R1の後に届く4バイトのうち末尾2バイトが受理された電圧範囲と送ったチェックパターンのエコーバックになる
     echoed = 0;
     for (int i = 0; i < 4; i++) {
         received = spi_transfer(0xff);
