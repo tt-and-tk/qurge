@@ -448,7 +448,8 @@ void fat_format_name(struct FatEntry *entry, char *text) {
     text[n] = '\0';
 }
 
-// 名前での検索で走査へ渡す関数．探している名前のエントリが見つかった時点で走査を打ち切る
+// エントリの名前が探している名前と一致すれば，そのエントリを検索結果として控え，1を返す(一致しなければ0を返す)
+// 名前での検索でルートディレクトリの走査へ渡し，1を返した時点で走査を打ち切らせることを想定している
 int fat_match_entry(struct FatEntry *entry) {
     // 名前が1バイトでも異なれば，走査を続けて次のエントリを調べる
     for (int i = 0; i < FAT_NAME_SIZE; i++) {
