@@ -1,0 +1,593 @@
+// FAT32ファイルシステムの読み出し．SDカード上のファイルシステムをマウントし，ルートディレクトリの走査とファイルの読み出しを提供する
+// 各操作は画面への出力を行わず結果を戻り値で返し，失敗の理由の表示は専用の関数で行う(前置きなどの表示の仕方は呼び出し側が決める)
+//
+// SDカード上の情報の単位
+// - セクタ: カードを読み書きする最小の単位(512バイト)．カード全体は，先頭から番号の付いたセクタの並びである
+// - クラスタ: データ領域(下記)を，連続した数個のセクタずつに区切ったもの(1クラスタを何セクタにするかはBPBに記録されている)．
+//   ファイルに領域を割り当てる単位で，1つのファイルシステムに多数並び，2から順に番号が付く．予約領域とFATはクラスタに区切らない
+// - パーティション: カード全体のセクタの並びを，いくつかの連続した範囲に分けたときの1つの範囲．1つのパーティションに1つのファイルシステムを置く
+//
+// SDカード上の並び(先頭から順に)
+// 1. MBR(セクタ0): カードをいくつかのパーティションに分けた表．各パーティションの種別と開始セクタを持つ．
+//    パーティションを持たないカードにはMBRが無く，セクタ0からファイルシステムが始まる
+// 2. 予約領域(ファイルシステムの先頭): ファイルシステムの最初のセクタ(ブートセクタ)にBPBがあり，残りは読み出しでは使わない補助情報である．
+//    BPBはファイルシステムの設計図にあたり，セクタ長・クラスタ長・予約領域とFATの大きさ・ルートディレクトリの位置を持つ
+// 3. FAT: クラスタごとに，同じファイルの次のクラスタの番号を記録した表．ファイルの中身は，開始クラスタからこの表を辿って
+//    つながるクラスタの列(クラスタチェーン)に置かれる．壊れた場合に備え，同じ表の複製が続くことが多い
+// 4. データ領域: クラスタ2から始まるクラスタの並び．ファイルの中身とディレクトリの中身が置かれる．
+//    ディレクトリの中身は，そこに置かれたファイル・ディレクトリ1つごとの32バイトの記録(ディレクトリエントリ．ファイルの中身そのものは持たず，
+//    中身を置いたクラスタチェーンの開始クラスタを持つ)の並びで，
+//    1セクタに16件ずつ隙間なく並ぶ．1件の32バイトには，先頭からのバイト位置で次の項目が並ぶ(書いていない位置は作成・更新・参照の日時)
+//      0〜10: 名前(基本名8バイトの後に拡張子3バイト) / 11: 属性 / 12: 小文字で表示する部分の印 /
+//      20〜21: 開始クラスタの上位16ビット / 26〜27: 開始クラスタの下位16ビット / 28〜31: バイト数
+// MBRとブートセクタは，末尾の2バイトにブート署名と呼ぶ決まった値(0x55，0xaa)を持ち，そのセクタが管理情報であることを示す
+#pragma once
+#include "sd.pn"
+
+// 各関数の戻り値
+const int FAT_OK = 0;               // 成功
+const int FAT_END = 1;              // クラスタチェーン・ファイルの終わりに達した
+const int FAT_STOPPED = 2;          // 走査のコールバックが打ち切りを求めた
+const int FAT_ERR_INIT = 3;         // SDカードを初期化できなかった
+const int FAT_ERR_READ = 4;         // カードから読み出せなかった
+const int FAT_ERR_NOT_FAT32 = 5;    // カード上にFAT32のファイルシステムが見つからない
+const int FAT_ERR_BROKEN = 6;       // クラスタチェーンやサイズの記録が壊れている
+const int FAT_ERR_NOT_MOUNTED = 7;  // ファイルシステムをマウントしていない
+const int FAT_ERR_BAD_NAME = 8;     // 探すよう指定された名前が8.3形式に収まらない(カード上のエントリの名前は常に8.3形式のため，指定する側の名前だけで起きる)
+const int FAT_ERR_NOT_FOUND = 9;    // 指定した名前のエントリが無い
+const int FAT_ERR_IS_DIR = 10;      // ファイルではなくディレクトリを開こうとした
+
+// MBR(ブロック0)の形式
+const int MBR_PARTITION_OFFSET = 0x1be;  // 第1パーティションエントリの位置
+const int MBR_PARTITION_TYPE = 4;        // パーティションエントリ内の種別の位置
+const int MBR_PARTITION_START = 8;       // パーティションエントリ内の開始セクタ番号の位置
+const int PARTITION_TYPE_FAT32_CHS = 0x0b;  // FAT32を表す種別(CHS指定)
+const int PARTITION_TYPE_FAT32_LBA = 0x0c;  // FAT32を表す種別(LBA指定)
+const int BOOT_SIGNATURE_OFFSET = 0x1fe;    // MBR・ブートセクタの末尾にあるブート署名の位置
+const int BOOT_SIGNATURE = 0xaa55;          // ブート署名の値(0x55・0xaaの順に並ぶ)
+
+// ブートセクタ(BPB)の形式
+const int BPB_JUMP = 0x00;                 // ブートコードへのジャンプ命令(先頭バイトは0xebか0xe9)
+const int BPB_BYTES_PER_SECTOR = 0x0b;     // 1セクタのバイト数(2バイト)
+const int BPB_SECTORS_PER_CLUSTER = 0x0d;  // 1クラスタのセクタ数(1バイト，2のべき乗)
+const int BPB_RESERVED_SECTORS = 0x0e;     // ファイルシステムの先頭からFATまでのセクタ数(2バイト)
+const int BPB_NUM_FATS = 0x10;             // FATの複製の数(1バイト)
+const int BPB_ROOT_ENTRY_COUNT = 0x11;     // FAT12/16の固定長ルートディレクトリのエントリ数(2バイト，FAT32では0)
+const int BPB_FAT_SIZE_16 = 0x16;          // FAT12/16の1つのFATのセクタ数(2バイト，FAT32では0)
+const int BPB_TOTAL_SECTORS_32 = 0x20;     // ファイルシステム全体のセクタ数(4バイト)
+const int BPB_FAT_SIZE_32 = 0x24;          // FAT32の1つのFATのセクタ数(4バイト)
+const int BPB_ROOT_CLUSTER = 0x2c;         // ルートディレクトリの開始クラスタ(4バイト)
+const int MAX_CLUSTER_SHIFT = 7;           // 1クラスタのセクタ数の上限(128)の2の対数
+
+// FAT(クラスタチェーンの表)の形式
+const int FAT_ENTRY_SIZE = 4;                                   // 1クラスタ分のエントリのバイト数
+const int FAT_ENTRIES_PER_SECTOR = SD_BLOCK_SIZE / FAT_ENTRY_SIZE;  // 1セクタに収まるエントリ数
+const int FAT_ENTRIES_PER_SECTOR_SHIFT = 7;                     // FAT_ENTRIES_PER_SECTOR(128)の2の対数(実行時の除算を避けシフトで求めるため)
+const unsigned int FAT_CLUSTER_MASK = 0x0fffffff;               // エントリのうちクラスタ番号を表す下位28ビット
+const unsigned int FAT_CLUSTER_END = 0x0ffffff8;                // これ以上の値はチェーンの終わりを表す
+const int FAT_FIRST_CLUSTER = 2;                                // データ領域の先頭にあたるクラスタ番号(0と1は予約)
+
+// ディレクトリエントリの形式
+const int DIR_ENTRY_SIZE = 32;         // 1エントリのバイト数
+const int DIR_MAX_SECTORS = 65536 * DIR_ENTRY_SIZE / SD_BLOCK_SIZE;  // 1つのディレクトリが占めうるセクタ数の上限(FATの仕様上エントリは65536件まで)
+const int DIR_NAME = 0x00;             // 8.3形式の名前(11バイト)
+const int DIR_ATTR = 0x0b;             // 属性(1バイト)
+const int DIR_NAME_CASE = 0x0c;        // 小文字で表示する部分を示すフラグ(1バイト)
+const int DIR_CLUSTER_HIGH = 0x14;     // 開始クラスタの上位16ビット
+const int DIR_CLUSTER_LOW = 0x1a;      // 開始クラスタの下位16ビット
+const int DIR_FILE_SIZE = 0x1c;        // ファイルのバイト数(4バイト)
+const int DIR_END = 0x00;              // 名前の先頭がこの値のエントリ以降は未使用
+const int DIR_DELETED = 0xe5;          // 名前の先頭がこの値のエントリは削除済み
+const int DIR_KANJI_E5 = 0x05;         // 名前の先頭が0xe5の文字であることを削除済みと区別して表す値
+const int ATTR_VOLUME_ID = 0x08;       // カードの名前(ボリュームラベル)を記録するエントリ．長いファイル名のエントリ(属性0x0f)もこのビットを含む
+const int ATTR_DIRECTORY = 0x10;       // ディレクトリ
+const int NAME_CASE_LOWER_BASE = 0x08; // 基本名を小文字で表示する
+const int NAME_CASE_LOWER_EXT = 0x10;  // 拡張子を小文字で表示する
+
+// 8.3形式の名前の長さ
+const int FAT_BASE_SIZE = 8;                                     // 基本名の最大文字数
+const int FAT_EXT_SIZE = 3;                                      // 拡張子の最大文字数
+const int FAT_NAME_SIZE = FAT_BASE_SIZE + FAT_EXT_SIZE;          // ディレクトリエントリ上の名前のバイト数(ドットは記録しない)
+const int FAT_NAME_TEXT_SIZE = FAT_BASE_SIZE + FAT_EXT_SIZE + 2;  // 表示用の名前に要る配列の要素数(ドットとヌル終端を含む)
+
+// ディレクトリエントリ(ディレクトリの中身として，そこに置かれたファイルやディレクトリ1つごとに並ぶ32バイトの記録)1件分の内容
+struct FatEntry {
+    unsigned char name[FAT_NAME_SIZE];  // 8.3形式の名前(基本名8バイトの後に拡張子3バイトをドット無しで並べる．大文字，空白詰め)
+    unsigned char attr;                 // 属性(ディレクトリか，隠しファイルかなど，エントリの種類を1ビットずつ表すフラグの集まり)
+    unsigned char name_case;            // 小文字で表示する部分を示すフラグ
+    unsigned int cluster;               // 開始クラスタ(サイズ0のファイルでは0)
+    unsigned int size;                  // ファイルのバイト数(エントリはファイルとディレクトリで同じ形式のため項目を持つが，ディレクトリでは0)
+};
+
+// 読み出し中のファイルの位置
+struct FatFile {
+    unsigned int cluster;    // 読んでいるクラスタ
+    unsigned int sector;     // クラスタ内で次に読むセクタの位置
+    unsigned int remaining;  // まだ読んでいないバイト数
+};
+
+// セクタの読み出し先．全ての読み出しで共用するため，読み出しを行う関数を呼ぶと内容が置き換わる
+unsigned char fat_sector[SD_BLOCK_SIZE];
+
+// マウントしたファイルシステムの情報(fat_mountが設定する)
+int fat_mounted = 0;                  // ファイルシステムをマウントしているか(0:未マウント，1:マウント済み)．起動直後はまだマウントしていないため0から始める
+unsigned int fat_start;               // 1つ目のFATの先頭セクタ番号
+unsigned int fat_data_start;          // データ領域(クラスタ2)の先頭セクタ番号
+unsigned int fat_sectors_per_cluster; // 1クラスタのセクタ数
+unsigned int fat_cluster_shift;       // fat_sectors_per_clusterの2の対数
+unsigned int fat_cluster_count;       // データ領域のクラスタ数
+unsigned int fat_root_cluster;        // ルートディレクトリの開始クラスタ
+
+// fat_findが走査中に使う値(コールバックは引数を増やせないためグローバル変数で受け渡す)
+unsigned char fat_find_name[FAT_NAME_SIZE];  // 探している8.3形式の名前
+struct FatEntry *fat_find_result;            // 見つかったエントリの書き込み先
+
+// 読み込んだセクタの指定した位置から，2バイトの値を読む
+// 位置はセクタ内に収まるものだけを渡すこと(呼び出し元が渡すのは，カード上の形式で決まった項目の位置か，セクタの大きさの範囲で動かす位置だけのため，ここでは検査しない)
+unsigned short fat_read_u16(int offset) {
+    // FATの値は下位のバイトから順に並ぶため，後ろのバイトを上位へ置いて組み立てる
+    return fat_sector[offset] | (fat_sector[offset + 1] << 8);
+}
+
+// 読み込んだセクタの指定した位置から，4バイトの値を読む(位置はセクタ内に4バイトが収まるものだけを渡すこと)
+unsigned int fat_read_u32(int offset) {
+    // 前半の2バイトを下位，後半の2バイトを上位として組み立てる
+    return fat_read_u16(offset) | (fat_read_u16(offset + 2) << 16);
+}
+
+// 指定したクラスタ番号がデータ領域に実在するかを返す(不良クラスタを表す0x0ffffff7も範囲外として弾かれる)
+// マウントで求めたクラスタ数を使うため，マウントした後にだけ呼ぶこと
+int fat_is_valid_cluster(unsigned int cluster) {
+    // データ領域のクラスタは番号2から始まり，クラスタ数だけ続く
+    return cluster >= FAT_FIRST_CLUSTER && cluster < fat_cluster_count + FAT_FIRST_CLUSTER;
+}
+
+// クラスタの先頭セクタ番号を返す
+// マウントで求めたデータ領域の位置とクラスタ長を使うため，マウントした後にだけ呼ぶこと
+unsigned int fat_cluster_sector(unsigned int cluster) {
+    // データ領域の先頭から，前にあるクラスタの数だけクラスタ長ずつ進めた位置にある
+    return fat_data_start + ((cluster - FAT_FIRST_CLUSTER) << fat_cluster_shift);
+}
+
+// fat_sectorに読み込んだセクタがブート署名を持つかを返す
+int fat_has_signature(void) {
+    // セクタ末尾の2バイトが決まった値であることで，MBRかブートセクタであると判断する
+    return fat_read_u16(BOOT_SIGNATURE_OFFSET) == BOOT_SIGNATURE;
+}
+
+// マウントの途中で，読み込んだブートセクタのBPBを解析し，マウントしたファイルシステムの情報を設定する
+// 引数にはファイルシステムの先頭セクタ番号を渡す(BPBの値はファイルシステムの先頭からの相対位置のため)
+int fat_parse_bpb(unsigned int fs_start) {
+    unsigned int reserved;      // 予約セクタ数
+    unsigned int num_fats;      // FATの複製の数
+    unsigned int fat_size;      // 1つのFATのセクタ数
+    unsigned int total;         // ファイルシステム全体のセクタ数
+    unsigned int system_size;   // データ領域より前(予約領域とFAT)のセクタ数
+    int shift = -1;             // 1クラスタのセクタ数の2の対数(2のべき乗でなければ-1のまま)
+
+    // FAT12/16・exFAT・パーティションを持たないブートコード等と取り違えないよう，FAT32のBPBが必ず満たす条件を確かめる
+    if (fat_sector[BPB_JUMP] != 0xeb && fat_sector[BPB_JUMP] != 0xe9) {
+        return FAT_ERR_NOT_FAT32;
+    }
+    // セクタの読み出し単位はSDカードのブロック長で固定のため，セクタ長が異なるファイルシステムは扱えない
+    if (fat_read_u16(BPB_BYTES_PER_SECTOR) != SD_BLOCK_SIZE) {
+        return FAT_ERR_NOT_FAT32;
+    }
+    // クラスタ番号からセクタ番号への変換をシフトで行うため，2の対数を求めておく
+    for (int i = 0; i <= MAX_CLUSTER_SHIFT; i++) {
+        if ((1 << i) == fat_sector[BPB_SECTORS_PER_CLUSTER]) {
+            shift = i;
+        }
+    }
+    if (shift == -1) {
+        return FAT_ERR_NOT_FAT32;
+    }
+    // FATは1つか，壊れた場合に備えた複製を加えた2つのどちらかで作られる
+    num_fats = fat_sector[BPB_NUM_FATS];
+    if (num_fats != 1 && num_fats != 2) {
+        return FAT_ERR_NOT_FAT32;
+    }
+    // FAT12/16だけが使う2つの値が0であることがFAT32の目印になる
+    if (fat_read_u16(BPB_ROOT_ENTRY_COUNT) != 0 || fat_read_u16(BPB_FAT_SIZE_16) != 0) {
+        return FAT_ERR_NOT_FAT32;
+    }
+
+    // ファイルシステムは先頭から予約領域(BPBを含む)・FAT(複製の数だけ)・データ領域の順に並ぶため，データ領域より前の大きさを求める
+    reserved = fat_read_u16(BPB_RESERVED_SECTORS);
+    fat_size = fat_read_u32(BPB_FAT_SIZE_32);
+    total = fat_read_u32(BPB_TOTAL_SECTORS_32);
+    system_size = reserved + num_fats * fat_size;
+    // データ領域が残らない大きさの記録は壊れている
+    if (total <= system_size) {
+        return FAT_ERR_NOT_FAT32;
+    }
+    // FATとデータ領域の位置を，ファイルシステムの先頭からカード上のセクタ番号へ換算して控える
+    fat_start = fs_start + reserved;
+    fat_data_start = fs_start + system_size;
+    // データ領域をクラスタ長で区切った数が，使えるクラスタの数になる
+    fat_sectors_per_cluster = fat_sector[BPB_SECTORS_PER_CLUSTER];
+    fat_cluster_shift = shift;
+    fat_cluster_count = (total - system_size) >> shift;
+    // ルートディレクトリの開始クラスタがデータ領域の外を指す記録は壊れている
+    fat_root_cluster = fat_read_u32(BPB_ROOT_CLUSTER) & FAT_CLUSTER_MASK;
+    if (fat_is_valid_cluster(fat_root_cluster) == 0) {
+        return FAT_ERR_NOT_FAT32;
+    }
+    // 全ての検査を通ったときだけマウント済みにする
+    fat_mounted = 1;
+    return FAT_OK;
+}
+
+// SDカードを初期化し，カード上のFAT32ファイルシステムをマウントする(カードを差し替えた後に呼び直せば，新しいカードをマウントし直す)
+int fat_mount(void) {
+    unsigned int fs_start = 0;  // ファイルシステムの先頭セクタ番号(パーティションを持たないカードでは0)
+    int type;                   // 第1パーティションの種別
+
+    // 失敗したときに前のカードの情報で読まないよう，先に外しておく
+    fat_mounted = 0;
+
+    // カードをSPIで通信できる状態にし，セクタを読み出せるよう読み出しの番地の単位を確かめる(途中経過は初期化の処理が表示する)
+    if (sd_init() == 0) {
+        return FAT_ERR_INIT;
+    }
+
+    // ブロック0はMBRか，パーティションを持たないカードではファイルシステムのブートセクタそのものになる
+    if (sd_read_block(0, fat_sector) == 0) {
+        return FAT_ERR_READ;
+    }
+    // MBRもブートセクタも持つブート署名が無ければ，どちらでもない
+    if (fat_has_signature() == 0) {
+        return FAT_ERR_NOT_FAT32;
+    }
+    // 第1パーティションの種別がFAT32ならMBRとみなし，そのパーティションの先頭にあるブートセクタを読み直す
+    // (ブートコードの先頭がブートセクタと同じジャンプ命令で始まるMBRもあるため，ブートセクタかどうかより先にこちらを確かめる)
+    type = fat_sector[MBR_PARTITION_OFFSET + MBR_PARTITION_TYPE];
+    if (type == PARTITION_TYPE_FAT32_CHS || type == PARTITION_TYPE_FAT32_LBA) {
+        fs_start = fat_read_u32(MBR_PARTITION_OFFSET + MBR_PARTITION_START);
+        if (sd_read_block(fs_start, fat_sector) == 0) {
+            return FAT_ERR_READ;
+        }
+        // 読み直したセクタもブートセクタであればブート署名を持つ
+        if (fat_has_signature() == 0) {
+            return FAT_ERR_NOT_FAT32;
+        }
+    }
+    // 種別がFAT32でなければブロック0自体をブートセクタとみなす(そうでなければBPBの検査で弾かれる)
+    return fat_parse_bpb(fs_start);
+}
+
+// clusterの次のクラスタをnextへ返す．clusterがチェーンの最後であればFAT_ENDを返す
+int fat_next_cluster(unsigned int cluster, unsigned int *next) {
+    unsigned int value;  // clusterのFATエントリの値
+
+    // FATエントリはクラスタ番号順に並ぶため，番号からエントリを含むセクタとその中の位置が決まる
+    if (sd_read_block(fat_start + (cluster >> FAT_ENTRIES_PER_SECTOR_SHIFT), fat_sector) == 0) {
+        return FAT_ERR_READ;
+    }
+    // エントリの上位4ビットは予約のため，クラスタ番号を表す下位28ビットだけを取り出す
+    value = fat_read_u32((cluster & (FAT_ENTRIES_PER_SECTOR - 1)) * FAT_ENTRY_SIZE) & FAT_CLUSTER_MASK;
+    // チェーンの終わりを表す値であれば，次のクラスタは無い
+    if (value >= FAT_CLUSTER_END) {
+        return FAT_END;
+    }
+    // 空き(0)・予約・不良クラスタや範囲外を指すチェーンは壊れており，辿ると無関係なセクタを読む
+    if (fat_is_valid_cluster(value) == 0) {
+        return FAT_ERR_BROKEN;
+    }
+    // 実在するクラスタであれば次のクラスタとして返す
+    *next = value;
+    return FAT_OK;
+}
+
+// 読み込んだディレクトリのセクタから，指定位置のディレクトリエントリ1件を構造体へ取り出す
+// セクタには32バイトのエントリが隙間なく並び，1件の中の各項目の位置は「ディレクトリエントリの形式」の定数のとおりである
+void fat_load_entry(int offset, struct FatEntry *entry) {
+    // 名前の11バイトをそのまま写す
+    for (int i = 0; i < FAT_NAME_SIZE; i++) {
+        entry->name[i] = fat_sector[offset + DIR_NAME + i];
+    }
+    // 先頭の0x05は削除済みの印(0xe5)と区別するための置き換えであり，実際の文字は0xe5である
+    if (entry->name[0] == DIR_KANJI_E5) {
+        entry->name[0] = DIR_DELETED;
+    }
+    // 属性・表示の大文字小文字のフラグ・開始クラスタ・バイト数を読む(開始クラスタは上位と下位の16ビットが離れた位置にある)
+    entry->attr = fat_sector[offset + DIR_ATTR];
+    entry->name_case = fat_sector[offset + DIR_NAME_CASE];
+    entry->cluster = ((fat_read_u16(offset + DIR_CLUSTER_HIGH) << 16) | fat_read_u16(offset + DIR_CLUSTER_LOW)) & FAT_CLUSTER_MASK;
+    entry->size = fat_read_u32(offset + DIR_FILE_SIZE);
+}
+
+// ルートディレクトリのエントリを先頭から1件ずつ，引数で受け取った関数visitへ渡す
+// visitはエントリ1件を受け取って処理し，走査を続けるなら0，打ち切るなら0以外を返す関数である(ディレクトリを辿る処理を1つにまとめ，エントリごとの処理だけを呼び出し側が差し替えるため)
+// visitが打ち切りを求めた時点でFAT_STOPPEDを返し，最後まで走査すればFAT_OKを返す
+// 削除済みのエントリと，カードの名前・長いファイル名のエントリは渡さない
+// visitはエントリを走査中のセクタから写し取った後に呼ぶが，走査はfat_sectorを読み進めるため，visitの中で読み出しを行う関数を呼ばないこと
+int fat_walk_root(int (*visit)(struct FatEntry *)) {
+    struct FatEntry entry;                   // visitへ渡すエントリ
+    unsigned int cluster = fat_root_cluster; // 走査中のクラスタ
+    int status;                              // 次のクラスタを求めた結果
+    int first;                               // エントリの名前の先頭バイト
+    int read_sectors = 0;                    // 読んだセクタ数
+
+    // マウントしていなければ，ルートディレクトリの位置が分からない
+    if (fat_mounted == 0) {
+        return FAT_ERR_NOT_MOUNTED;
+    }
+    // ルートディレクトリもファイルと同じくクラスタチェーンに沿って並ぶため，クラスタ・セクタ・エントリの順に辿る
+    while (1) {
+        for (unsigned int sector = 0; sector < fat_sectors_per_cluster; sector++) {
+            // ディレクトリが占めうる大きさを超えて続くチェーンは壊れている(循環していると辿り続けても走査が終わらない)
+            if (read_sectors == DIR_MAX_SECTORS) {
+                return FAT_ERR_BROKEN;
+            }
+            read_sectors++;
+            // クラスタ内の1セクタを読み込む
+            if (sd_read_block(fat_cluster_sector(cluster) + sector, fat_sector) == 0) {
+                return FAT_ERR_READ;
+            }
+            // セクタに並ぶエントリを先頭から1件ずつ調べる
+            for (int offset = 0; offset < SD_BLOCK_SIZE; offset += DIR_ENTRY_SIZE) {
+                first = fat_sector[offset + DIR_NAME];
+                // 未使用のエントリ以降に使用中のエントリは置かれない
+                if (first == DIR_END) {
+                    return FAT_OK;
+                }
+                // 属性の判定はカードの名前を表すビットだけで足りる(長いファイル名のエントリも同じビットを持つため)
+                if (first == DIR_DELETED || (fat_sector[offset + DIR_ATTR] & ATTR_VOLUME_ID) != 0) {
+                    continue;
+                }
+                // 使用中のエントリを写し取ってvisitへ渡す
+                fat_load_entry(offset, &entry);
+                if (visit(&entry) != 0) {
+                    return FAT_STOPPED;
+                }
+            }
+        }
+        // クラスタを読み終えたら次のクラスタへ進む．チェーンが終わっていれば全エントリを走査し終えている
+        status = fat_next_cluster(cluster, &cluster);
+        if (status == FAT_END) {
+            return FAT_OK;
+        }
+        if (status != FAT_OK) {
+            return status;
+        }
+    }
+}
+
+// 英小文字を大文字へ変換する(それ以外の文字はそのまま返す)
+int fat_to_upper(int c) {
+    // ASCIIでは英小文字と英大文字がそれぞれ連続して並ぶため，同じ位置の大文字へずらす
+    if (c >= 'a' && c <= 'z') {
+        return c - 'a' + 'A';
+    }
+    return c;
+}
+
+// 英大文字を小文字へ変換する(それ以外の文字はそのまま返す)
+int fat_to_lower(int c) {
+    // fat_to_upperと逆向きに，同じ位置の小文字へずらす
+    if (c >= 'A' && c <= 'Z') {
+        return c - 'A' + 'a';
+    }
+    return c;
+}
+
+// 入力された"NAME.EXT"形式の名前を，カードに記録される形式の名前に変換して書き込む
+// FATは名前の大文字・小文字を区別せず大文字で記録するため，大文字へ揃える
+// 8.3形式に収まらない名前(基本名が空か8文字を超える，拡張子が3文字を超える，ドットが2つ以上ある)は，切り詰めると別のファイルの名前になりうるため失敗とする
+int fat_make_name(char *text, unsigned char *name) {
+    int pos = 0;  // textの読み出し位置
+    int n = 0;    // 基本名・拡張子それぞれに書き込んだ文字数
+
+    // 記録されない部分は空白で埋める決まりのため，先に全体を空白にしておく
+    for (int i = 0; i < FAT_NAME_SIZE; i++) {
+        name[i] = ' ';
+    }
+    // ドットかヌル終端の手前までを基本名とする
+    while (text[pos] != '\0' && text[pos] != '.') {
+        // 9文字目が現れた時点で基本名に収まらない
+        if (n == FAT_BASE_SIZE) {
+            return FAT_ERR_BAD_NAME;
+        }
+        name[n] = fat_to_upper(text[pos]);
+        n++;
+        pos++;
+    }
+    // 基本名の無い名前(".TXT"など)は8.3形式にならない
+    if (n == 0) {
+        return FAT_ERR_BAD_NAME;
+    }
+    // ドットがあれば，その後ろを拡張子とする
+    if (text[pos] == '.') {
+        pos++;
+        n = 0;
+        while (text[pos] != '\0') {
+            // 2つ目のドットか，4文字目が現れた時点で拡張子に収まらない
+            if (text[pos] == '.' || n == FAT_EXT_SIZE) {
+                return FAT_ERR_BAD_NAME;
+            }
+            name[FAT_BASE_SIZE + n] = fat_to_upper(text[pos]);
+            n++;
+            pos++;
+        }
+    }
+    return FAT_OK;
+}
+
+// カードに記録された名前を，表示用の"NAME.EXT"形式の名前に変換して書き込む(拡張子が無ければドットも付けない)
+// textはFAT_NAME_TEXT_SIZE要素以上で確保すること
+// Windowsが全て小文字の基本名・拡張子に付けるフラグに従い，該当する部分は小文字で書く
+void fat_format_name(struct FatEntry *entry, char *text) {
+    int n = 0;  // textに書き込んだ文字数
+
+    // 基本名は末尾の空白を除いて書く
+    for (int i = 0; i < FAT_BASE_SIZE && entry->name[i] != ' '; i++) {
+        // 小文字で表示するフラグがあれば，記録された大文字を小文字に戻して書く
+        if ((entry->name_case & NAME_CASE_LOWER_BASE) != 0) {
+            text[n] = fat_to_lower(entry->name[i]);
+        } else {
+            text[n] = entry->name[i];
+        }
+        n++;
+    }
+    // 拡張子があればドットに続けて書く
+    if (entry->name[FAT_BASE_SIZE] != ' ') {
+        text[n] = '.';
+        n++;
+        for (int i = FAT_BASE_SIZE; i < FAT_NAME_SIZE && entry->name[i] != ' '; i++) {
+            // 基本名と同じく，拡張子のフラグに従って小文字に戻す
+            if ((entry->name_case & NAME_CASE_LOWER_EXT) != 0) {
+                text[n] = fat_to_lower(entry->name[i]);
+            } else {
+                text[n] = entry->name[i];
+            }
+            n++;
+        }
+    }
+    // 書き込んだ名前をヌル終端する
+    text[n] = '\0';
+}
+
+// エントリの名前が探している名前と一致すれば，そのエントリを検索結果として控え，1を返す(一致しなければ0を返す)
+// 名前での検索でディレクトリの走査へ渡し，1を返した時点で走査を打ち切らせることを想定している
+int fat_match_entry(struct FatEntry *entry) {
+    // 名前が1バイトでも異なれば，走査を続けて次のエントリを調べる
+    for (int i = 0; i < FAT_NAME_SIZE; i++) {
+        if (entry->name[i] != fat_find_name[i]) {
+            return 0;
+        }
+    }
+    // 一致したエントリを呼び出し元の書き込み先へ写す(構造体は代入できないためメンバごとに写す)
+    for (int i = 0; i < FAT_NAME_SIZE; i++) {
+        fat_find_result->name[i] = entry->name[i];
+    }
+    fat_find_result->attr = entry->attr;
+    fat_find_result->name_case = entry->name_case;
+    fat_find_result->cluster = entry->cluster;
+    fat_find_result->size = entry->size;
+    // 見つかったため走査を打ち切る
+    return 1;
+}
+
+// ルートディレクトリから"NAME.EXT"形式の名前textのエントリを探し，foundへ書き込む(大文字・小文字は区別しない)
+int fat_find(char *text, struct FatEntry *found) {
+    int status;  // 名前の変換・走査の結果
+
+    // エントリ上の名前と比べられるよう，探す名前を8.3形式へ変換する
+    status = fat_make_name(text, fat_find_name);
+    if (status != FAT_OK) {
+        return status;
+    }
+    // 一致したエントリの書き込み先を渡してから，ルートディレクトリを走査する
+    fat_find_result = found;
+    status = fat_walk_root(fat_match_entry);
+    // 最後まで走査して打ち切られなかったのは，一致するエントリが無かったとき
+    if (status == FAT_OK) {
+        return FAT_ERR_NOT_FOUND;
+    }
+    // 打ち切られたのは，一致するエントリが見つかったとき
+    if (status == FAT_STOPPED) {
+        return FAT_OK;
+    }
+    // それ以外は走査自体の失敗をそのまま返す
+    return status;
+}
+
+// entryのファイルを先頭から読み出せるようfileを設定する
+int fat_open(struct FatEntry *entry, struct FatFile *file) {
+    // マウントしていなければ，クラスタの位置が分からない
+    if (fat_mounted == 0) {
+        return FAT_ERR_NOT_MOUNTED;
+    }
+    // ディレクトリの中身はエントリの並びであり，ファイルの内容として読むものではない
+    if ((entry->attr & ATTR_DIRECTORY) != 0) {
+        return FAT_ERR_IS_DIR;
+    }
+    // サイズ0のファイルはクラスタを持たず，開始クラスタが0になる
+    if (entry->size != 0 && fat_is_valid_cluster(entry->cluster) == 0) {
+        return FAT_ERR_BROKEN;
+    }
+    // 読み出す位置を開始クラスタの先頭セクタに置き，まだ読んでいないバイト数をファイル全体の大きさにする
+    file->cluster = entry->cluster;
+    file->sector = 0;
+    file->remaining = entry->size;
+    return FAT_OK;
+}
+
+// fileの次の1セクタをfat_sectorへ読み込み，そのうちファイルの内容にあたるバイト数をlengthへ返す．全て読み終えていればFAT_ENDを返す
+// 読み終わりはクラスタチェーンの終わりではなく残りのバイト数で判定する(最後のクラスタの残りのセクタには内容が無いため)
+int fat_read(struct FatFile *file, int *length) {
+    unsigned int next;  // 次のクラスタ
+    int status;         // 次のクラスタを求めた結果
+
+    // マウントしていなければ，クラスタの位置が分からない
+    if (fat_mounted == 0) {
+        return FAT_ERR_NOT_MOUNTED;
+    }
+    // 読み残しが無ければ読み終えている
+    if (file->remaining == 0) {
+        return FAT_END;
+    }
+    // クラスタの全セクタを読み終えていれば次のクラスタへ進む
+    if (file->sector == fat_sectors_per_cluster) {
+        status = fat_next_cluster(file->cluster, &next);
+        // 残りがあるのにチェーンが終わっているのは，サイズの記録とチェーンが食い違っている
+        if (status == FAT_END) {
+            return FAT_ERR_BROKEN;
+        }
+        if (status != FAT_OK) {
+            return status;
+        }
+        // 次のクラスタの先頭セクタから読み進める
+        file->cluster = next;
+        file->sector = 0;
+    }
+    // 現在の位置のセクタを読み込み，位置を次のセクタへ進める
+    if (sd_read_block(fat_cluster_sector(file->cluster) + file->sector, fat_sector) == 0) {
+        return FAT_ERR_READ;
+    }
+    file->sector++;
+    // 最後のセクタは残りのバイト数だけが内容にあたる
+    if (file->remaining < SD_BLOCK_SIZE) {
+        *length = file->remaining;
+    } else {
+        *length = SD_BLOCK_SIZE;
+    }
+    // 読んだ分を読み残しから差し引く
+    file->remaining -= *length;
+    return FAT_OK;
+}
+
+// 各関数が返した失敗の理由を，改行付きのメッセージとして出力する
+void fat_print_error(int status) {
+    // 戻り値ごとに決めたメッセージを出力する(想定外の値もメッセージ無しにはしない)
+    switch (status) {
+    case FAT_ERR_INIT:
+        print("initialization failed\n");
+        break;
+    case FAT_ERR_READ:
+        print("cannot read card\n");
+        break;
+    case FAT_ERR_NOT_FAT32:
+        print("no FAT32 file system\n");
+        break;
+    case FAT_ERR_BROKEN:
+        print("broken file system\n");
+        break;
+    case FAT_ERR_NOT_MOUNTED:
+        print("not mounted\n");
+        break;
+    case FAT_ERR_BAD_NAME:
+        print("invalid file name\n");
+        break;
+    case FAT_ERR_NOT_FOUND:
+        print("no such file\n");
+        break;
+    case FAT_ERR_IS_DIR:
+        print("is a directory\n");
+        break;
+    default:
+        print("unexpected error\n");
+        break;
+    }
+}
