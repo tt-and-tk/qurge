@@ -506,8 +506,8 @@ module alu_sv (
         ck_sck  = register[SPI_ADDR][2];
         ck_ss   = register[SPI_ADDR][0];
 
-        // ラズパイヘッダー．GPIOn(n=6〜24)はgpio[n+2]に対応する
-        gpio = {register[GPIO3_ADDR][0], register[GPIO2_ADDR][7:0], register[GPIO1_ADDR][7:0], register[GPIO0_ADDR][7:6]};
+        // ラズパイヘッダー．GPIOn(n=8〜26)はgpio[n]に対応する．GPIO0〜7はヘッダーへ出力しない
+        gpio = {register[GPIO3_ADDR][2:0], register[GPIO2_ADDR][7:0], register[GPIO1_ADDR][7:0]};
 
         // ROMへ番地を出力する
         if (cpu_phase == CPU_FETCH || cpu_phase == CPU_FETCH_CAPTURE) begin
