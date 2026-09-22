@@ -13,7 +13,7 @@ int skip_spaces(char *buf, int pos) {
 // bufのpos文字目以降から引数を1つargへ取り出し，その直後の位置を返す
 // argへはarg_size-1文字まで書き込んで打ち切る．入力行と同じ幅でargを確保すれば打ち切りは起きない
 int extract_arg(char *buf, int pos, char *arg, int arg_size) {
-    int i = 0;
+    int i = 0;  // argへ写した文字数
     // 引数の手前に連続する空白を読み飛ばす
     pos = skip_spaces(buf, pos);
     // 次の空白かヌル終端の直前までを1つの引数としてコピーする(引数が無ければ空文字列になる)
@@ -29,7 +29,7 @@ int extract_arg(char *buf, int pos, char *arg, int arg_size) {
 // bufのpos文字目以降を丸ごと1つの引数としてargへ取り出す
 // extract_argと同じく，argへはarg_size-1文字まで書き込んで打ち切る
 void extract_text_arg(char *buf, int pos, char *arg, int arg_size) {
-    int i = 0;
+    int i = 0;  // argへ写した文字数
     // 引数の手前に連続する空白を読み飛ばす
     pos = skip_spaces(buf, pos);
     // 残りは原文のままコピーする(空白を区切りとせず引数の一部として扱う)
