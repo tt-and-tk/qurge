@@ -71,7 +71,7 @@ const int FAT_NAME_TEXT_SIZE = FAT_BASE_SIZE + FAT_EXT_SIZE + 2;  // 表示用�
 
 // ディレクトリエントリ(ディレクトリの中身として，そこに置かれたファイルやディレクトリ1つごとに並ぶ32バイトの記録)1件分の内容
 struct FatEntry {
-    unsigned char name[FAT_NAME_SIZE];  // 8.3形式の名前(大文字，空白詰め)
+    unsigned char name[FAT_NAME_SIZE];  // 8.3形式の名前(基本名8バイトの後に拡張子3バイトをドット無しで並べる．大文字，空白詰め)
     unsigned char attr;                 // 属性(ディレクトリか，隠しファイルかなど，エントリの種類を1ビットずつ表すフラグの集まり)
     unsigned char name_case;            // 小文字で表示する部分を示すフラグ
     unsigned int cluster;               // 開始クラスタ(サイズ0のファイルでは0)
