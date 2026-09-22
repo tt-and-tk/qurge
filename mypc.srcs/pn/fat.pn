@@ -118,7 +118,7 @@ unsigned char fat_find_name[FAT_NAME_SIZE];  // 探している8.3形式の名�
 struct FatEntry *fat_find_result;            // 見つかったエントリの書き込み先
 
 // 読み込んだセクタの指定した位置から，2バイトの値を読む
-unsigned int fat_read_u16(int offset) {
+unsigned short fat_read_u16(int offset) {
     // FATの値は下位のバイトから順に並ぶため，後ろのバイトを上位へ置いて組み立てる
     return fat_sector[offset] | (fat_sector[offset + 1] << 8);
 }
