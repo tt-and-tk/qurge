@@ -5,6 +5,7 @@
 
 const int INPUT_SIZE = 64;          // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
 const int ERROR_MESSAGE_SIZE = 32;  // エラーメッセージを出力する一時バッファの要素数
+const int MOUNT_ERR_INIT = -1;      // mount_cardの戻り値: カードを初期化できなかった(FAT32の各関数の戻り値と重ならない値)
 
 char input[INPUT_SIZE];  // 1行分の入力バッファ
 char cmd[INPUT_SIZE];    // 入力の先頭トークン(コマンド名)
@@ -28,9 +29,12 @@ void print_error(char *msg) {
     print(msg_buf);
 }
 
-// FAT32の各関数が返した失敗の理由を，改行付きのメッセージとして出力する
+// FAT32の各関数やmount_cardが返した失敗の理由を，改行付きのメッセージとして出力する
 void print_fat_message(int status) {
     switch (status) {
+    case MOUNT_ERR_INIT:
+        print("initialization failed\n");
+        break;
     case FAT_ERR_READ:
         print("cannot read card\n");
         break;
@@ -58,7 +62,7 @@ void print_fat_message(int status) {
     }
 }
 
-// FAT32の各関数が返した失敗を，実行中のコマンドのエラーとして出力する
+// FAT32の各関数やmount_cardが返した失敗を，実行中のコマンドのエラーとして出力する
 void print_fat_error(int status) {
     print_error_head();
     print_fat_message(status);
@@ -160,13 +164,13 @@ void handle_cat(int pos) {
 
 // SDカードを初期化し，カード上のFAT32ボリュームをマウントする
 // 失敗した場合の表示は，起動時と実行中のコマンドとで前置きが異なるため呼び出し元に任せる
-// 戻り値: FAT_OK / FAT_ERR_READ(カードを初期化できなかった) / fat_mountの失敗
+// 戻り値: FAT_OK / MOUNT_ERR_INIT / fat_mountの失敗
 int mount_card(void) {
     // 初期化に失敗したときに前のカードのボリュームを読まないよう，先に外しておく
     fat_unmount();
     // 途中経過はsd_initが表示する
     if (sd_init() == 0) {
-        return FAT_ERR_READ;
+        return MOUNT_ERR_INIT;
     }
     return fat_mount();
 }
