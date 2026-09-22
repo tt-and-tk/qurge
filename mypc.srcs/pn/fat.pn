@@ -47,6 +47,7 @@ const int FAT_FIRST_CLUSTER = 2;                                // データ領�
 
 // ディレクトリエントリの形式
 const int DIR_ENTRY_SIZE = 32;         // 1エントリのバイト数
+const int DIR_MAX_SECTORS = 65536 * DIR_ENTRY_SIZE / SD_BLOCK_SIZE;  // 1つのディレクトリが占めうるセクタ数の上限(FATの仕様上エントリは65536件まで)
 const int DIR_NAME = 0x00;             // 8.3形式の名前(11バイト)
 const int DIR_ATTR = 0x0b;             // 属性(1バイト)
 const int DIR_NAME_CASE = 0x0c;        // 小文字で表示する部分を示すフラグ(1バイト)
@@ -265,6 +266,7 @@ int fat_walk_root(int (*visit)(struct FatEntry *)) {
     unsigned int cluster = fat_root_cluster; // 走査中のクラスタ
     int status;                              // 次のクラスタを求めた結果
     int first;                               // エントリの名前の先頭バイト
+    int read_sectors = 0;                    // 読んだセクタ数
 
     if (fat_mounted == 0) {
         return FAT_ERR_NOT_MOUNTED;
@@ -272,6 +274,11 @@ int fat_walk_root(int (*visit)(struct FatEntry *)) {
     // ルートディレクトリもファイルと同じくクラスタチェーンに沿って並ぶため，クラスタ・セクタ・エントリの順に辿る
     while (1) {
         for (unsigned int sector = 0; sector < fat_sectors_per_cluster; sector++) {
+            // ディレクトリが占めうる大きさを超えて続くチェーンは壊れている(循環していると辿り続けても走査が終わらない)
+            if (read_sectors == DIR_MAX_SECTORS) {
+                return FAT_ERR_BROKEN;
+            }
+            read_sectors++;
             if (sd_read_block(fat_cluster_sector(cluster) + sector, fat_sector) == 0) {
                 return FAT_ERR_READ;
             }
