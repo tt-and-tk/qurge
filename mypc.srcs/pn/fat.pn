@@ -1,5 +1,5 @@
 // FAT32ファイルシステムの読み出し．SDカード上のボリュームをマウントし，ルートディレクトリの走査とファイルの読み出しを提供する
-// 画面への出力は行わず，結果を戻り値で返す(表示の仕方は呼び出し側が決める)
+// 各操作は画面への出力を行わず結果を戻り値で返し，失敗の理由の表示は専用の関数で行う(前置きなどの表示の仕方は呼び出し側が決める)
 #pragma once
 #include "sd.pn"
 
@@ -7,13 +7,14 @@
 const int FAT_OK = 0;               // 成功
 const int FAT_END = 1;              // クラスタチェーン・ファイルの終わりに達した
 const int FAT_STOPPED = 2;          // 走査のコールバックが打ち切りを求めた
-const int FAT_ERR_READ = 3;         // カードから読み出せなかった
-const int FAT_ERR_NOT_FAT32 = 4;    // カード上にFAT32のボリュームが見つからない
-const int FAT_ERR_BROKEN = 5;       // クラスタチェーンやサイズの記録が壊れている
-const int FAT_ERR_NOT_MOUNTED = 6;  // ボリュームをマウントしていない
-const int FAT_ERR_BAD_NAME = 7;     // 名前が8.3形式に収まらない
-const int FAT_ERR_NOT_FOUND = 8;    // 指定した名前のエントリが無い
-const int FAT_ERR_IS_DIR = 9;       // ファイルではなくディレクトリを開こうとした
+const int FAT_ERR_INIT = 3;         // SDカードを初期化できなかった
+const int FAT_ERR_READ = 4;         // カードから読み出せなかった
+const int FAT_ERR_NOT_FAT32 = 5;    // カード上にFAT32のボリュームが見つからない
+const int FAT_ERR_BROKEN = 6;       // クラスタチェーンやサイズの記録が壊れている
+const int FAT_ERR_NOT_MOUNTED = 7;  // ボリュームをマウントしていない
+const int FAT_ERR_BAD_NAME = 8;     // 名前が8.3形式に収まらない
+const int FAT_ERR_NOT_FOUND = 9;    // 指定した名前のエントリが無い
+const int FAT_ERR_IS_DIR = 10;      // ファイルではなくディレクトリを開こうとした
 
 // MBR(ブロック0)の形式
 const int MBR_PARTITION_OFFSET = 0x1be;  // 第1パーティションエントリの位置
@@ -183,15 +184,19 @@ int fat_parse_bpb(unsigned int volume_start) {
     return FAT_OK;
 }
 
-// SDカード上のFAT32ボリュームをマウントする
-// 呼び出す前にsd_initを成功させておくこと
-// 戻り値: FAT_OK / FAT_ERR_READ / FAT_ERR_NOT_FAT32
+// SDカードを初期化し，カード上のFAT32ボリュームをマウントする(カードを差し替えた後に呼び直せば，新しいカードをマウントし直す)
+// 戻り値: FAT_OK / FAT_ERR_INIT / FAT_ERR_READ / FAT_ERR_NOT_FAT32
 int fat_mount(void) {
     unsigned int volume_start = 0;  // ボリュームの先頭セクタ番号(パーティションを持たないカードでは0)
     int type;                       // 第1パーティションの種別
 
     // 失敗したときに前のボリュームの情報で読まないよう，先に外しておく
     fat_mounted = 0;
+
+    // 途中経過はsd_initが表示する
+    if (sd_init() == 0) {
+        return FAT_ERR_INIT;
+    }
 
     // ブロック0はMBRか，パーティションを持たないカードではボリュームのブートセクタそのものになる
     if (sd_read_block(0, fat_sector) == 0) {
@@ -214,11 +219,6 @@ int fat_mount(void) {
     }
     // 種別がFAT32でなければブロック0自体をブートセクタとみなす(そうでなければBPBの検査で弾かれる)
     return fat_parse_bpb(volume_start);
-}
-
-// マウントを解除する(カードを差し替える前などに，古いボリュームの情報で読まないようにする)
-void fat_unmount(void) {
-    fat_mounted = 0;
 }
 
 // clusterの次のクラスタをnextへ返す
@@ -490,4 +490,37 @@ int fat_read(struct FatFile *file, int *length) {
     }
     file->remaining -= *length;
     return FAT_OK;
+}
+
+// 各関数が返した失敗の理由を，改行付きのメッセージとして出力する
+void fat_print_error(int status) {
+    switch (status) {
+    case FAT_ERR_INIT:
+        print("initialization failed\n");
+        break;
+    case FAT_ERR_READ:
+        print("cannot read card\n");
+        break;
+    case FAT_ERR_NOT_FAT32:
+        print("no FAT32 volume\n");
+        break;
+    case FAT_ERR_BROKEN:
+        print("broken file system\n");
+        break;
+    case FAT_ERR_NOT_MOUNTED:
+        print("no volume mounted\n");
+        break;
+    case FAT_ERR_BAD_NAME:
+        print("invalid file name\n");
+        break;
+    case FAT_ERR_NOT_FOUND:
+        print("no such file\n");
+        break;
+    case FAT_ERR_IS_DIR:
+        print("is a directory\n");
+        break;
+    default:
+        print("unexpected error\n");
+        break;
+    }
 }
