@@ -150,8 +150,8 @@ int fat_has_signature(void) {
     return fat_read_u16(BOOT_SIGNATURE_OFFSET) == BOOT_SIGNATURE;
 }
 
-// fat_sectorに読み込んだブートセクタ(BPB)を解析し，マウントしたファイルシステムの情報を設定する
-// fs_startはファイルシステムの先頭セクタ番号(BPBの値はファイルシステムの先頭からの相対位置のため)
+// マウントの途中で，読み込んだブートセクタのBPBを解析し，マウントしたファイルシステムの情報を設定する
+// 引数にはファイルシステムの先頭セクタ番号を渡す(BPBの値はファイルシステムの先頭からの相対位置のため)
 int fat_parse_bpb(unsigned int fs_start) {
     unsigned int reserved;      // 予約セクタ数
     unsigned int num_fats;      // FATの複製の数
