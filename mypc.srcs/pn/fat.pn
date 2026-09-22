@@ -450,8 +450,7 @@ int fat_walk_root(int (*visit)(struct FatEntry *)) {
                     fat_slot_sector = sector;
                     fat_slot_offset = offset;
                 }
-                // 長いファイル名のエントリは，このループで属性を調べる分岐が走査しながら数えている．有効なのは直後に短い名前のエントリが続くものだけで，
-                // 未使用・削除済みのエントリを挟んだ場合，それまでに数えたものはどのファイルのものでもないため0から数え直す
+                // 未使用・削除済みのエントリを挟んだため，それまでに数えた長いファイル名のエントリはどのファイルのものでもない．0から数え直す
                 lfn_count = 0;
                 // 未使用のエントリ以降に使用中のエントリは置かれない
                 if (first == DIR_END) {
@@ -461,6 +460,7 @@ int fat_walk_root(int (*visit)(struct FatEntry *)) {
             }
             attr = fat_sector[offset + DIR_ATTR];
             // 長いファイル名のエントリは，後に続く短い名前のエントリに属するものとして，並びの先頭の位置と数を控える
+            // (有効なのは直後に短い名前のエントリが続く並びだけで，途中で他の種類のエントリを挟んだ場合は数え直す)
             if ((attr & ATTR_LONG_NAME_MASK) == ATTR_LONG_NAME) {
                 if (lfn_count == 0) {
                     lfn_sector = sector;
