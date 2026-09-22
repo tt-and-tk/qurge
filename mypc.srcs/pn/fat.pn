@@ -271,7 +271,8 @@ int fat_next_cluster(unsigned int cluster, unsigned int *next) {
     return FAT_OK;
 }
 
-// fat_sectorのoffsetバイト目にあるディレクトリエントリをentryへ取り出す
+// 読み込んだディレクトリのセクタから，指定位置のディレクトリエントリ1件を構造体へ取り出す
+// セクタには32バイトのエントリが隙間なく並び，1件の中の各項目の位置は「ディレクトリエントリの形式」の定数のとおりである
 void fat_load_entry(int offset, struct FatEntry *entry) {
     // 名前の11バイトをそのまま写す
     for (int i = 0; i < FAT_NAME_SIZE; i++) {
@@ -284,7 +285,7 @@ void fat_load_entry(int offset, struct FatEntry *entry) {
     // 属性・表示の大文字小文字のフラグ・開始クラスタ・バイト数を読む(開始クラスタは上位と下位の16ビットが離れた位置にある)
     entry->attr = fat_sector[offset + DIR_ATTR];
     entry->name_case = fat_sector[offset + DIR_NAME_CASE];
-    entry->cluster =((fat_read_u16(offset + DIR_CLUSTER_HIGH) << 16) | fat_read_u16(offset + DIR_CLUSTER_LOW)) & FAT_CLUSTER_MASK;
+    entry->cluster = ((fat_read_u16(offset + DIR_CLUSTER_HIGH) << 16) | fat_read_u16(offset + DIR_CLUSTER_LOW)) & FAT_CLUSTER_MASK;
     entry->size = fat_read_u32(offset + DIR_FILE_SIZE);
 }
 
