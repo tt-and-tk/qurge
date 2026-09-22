@@ -1,26 +1,42 @@
-// FAT32ファイルシステムの読み出し．SDカード上のファイルシステムをマウントし，ルートディレクトリの走査とファイルの読み出しを提供する
+// FAT32ファイルシステムの読み書き．SDカード上のファイルシステムをマウントし，ルートディレクトリにあるファイルを扱う操作を提供する
 // 各操作は画面への出力を行わず結果を戻り値で返し，失敗の理由の表示は専用の関数で行う(前置きなどの表示の仕方は呼び出し側が決める)
+// 以下，Windowsなどが動く一般のパソコンを単にパソコンと書く(このPynthesisと区別するため)
 //
-// SDカード上の情報の単位
+// SDカード上の情報の単位(小さいものから順に)
+// - エントリ(ディレクトリエントリ): ディレクトリの中身を32バイトずつ区切った1件．1セクタ(下記)に16件ずつ隙間なく並ぶ
 // - セクタ: カードを読み書きする最小の単位(512バイト)．カード全体は，先頭から番号の付いたセクタの並びである
 // - クラスタ: データ領域(下記)を，連続した数個のセクタずつに区切ったもの(1クラスタを何セクタにするかはBPBに記録されている)．
-//   ファイルに領域を割り当てる単位で，1つのファイルシステムに多数並び，2から順に番号が付く．予約領域とFATはクラスタに区切らない
+//   ファイル・ディレクトリに領域を割り当てる単位で，1つのファイルシステムに多数並び，2から順に番号が付く．予約領域とFATはクラスタに区切らない
+// - クラスタチェーン: 1つのファイル・ディレクトリの中身を置いたクラスタの列．ファイル・ディレクトリ1つにつき1本ある．
+//   クラスタは連続して並ぶとは限らず，各クラスタの次のクラスタの番号をFAT(下記)に記録してつなぐ(線形リストのように先頭から順に辿る)
 // - パーティション: カード全体のセクタの並びを，いくつかの連続した範囲に分けたときの1つの範囲．1つのパーティションに1つのファイルシステムを置く
 //
 // SDカード上の並び(先頭から順に)
 // 1. MBR(セクタ0): カードをいくつかのパーティションに分けた表．各パーティションの種別と開始セクタを持つ．
 //    パーティションを持たないカードにはMBRが無く，セクタ0からファイルシステムが始まる
-// 2. 予約領域(ファイルシステムの先頭): ファイルシステムの最初のセクタ(ブートセクタ)にBPBがあり，残りは読み出しでは使わない補助情報である．
-//    BPBはファイルシステムの設計図にあたり，セクタ長・クラスタ長・予約領域とFATの大きさ・ルートディレクトリの位置を持つ
-// 3. FAT: クラスタごとに，同じファイルの次のクラスタの番号を記録した表．ファイルの中身は，開始クラスタからこの表を辿って
-//    つながるクラスタの列(クラスタチェーン)に置かれる．壊れた場合に備え，同じ表の複製が続くことが多い
-// 4. データ領域: クラスタ2から始まるクラスタの並び．ファイルの中身とディレクトリの中身が置かれる．
-//    ディレクトリの中身は，そこに置かれたファイル・ディレクトリ1つごとの32バイトの記録(ディレクトリエントリ．ファイルの中身そのものは持たず，
-//    中身を置いたクラスタチェーンの開始クラスタを持つ)の並びで，
-//    1セクタに16件ずつ隙間なく並ぶ．1件の32バイトには，先頭からのバイト位置で次の項目が並ぶ(書いていない位置は作成・更新・参照の日時)
-//      0〜10: 名前(基本名8バイトの後に拡張子3バイト) / 11: 属性 / 12: 小文字で表示する部分の印 /
-//      20〜21: 開始クラスタの上位16ビット / 26〜27: 開始クラスタの下位16ビット / 28〜31: バイト数
-// MBRとブートセクタは，末尾の2バイトにブート署名と呼ぶ決まった値(0x55，0xaa)を持ち，そのセクタが管理情報であることを示す
+// 2. 予約領域(ファイルシステムの先頭): ファイルシステムの最初のセクタ(ブートセクタ)にBPBがあり，その後にFSInfoセクタなどの補助情報が続く．
+//    BPBはファイルシステムの設計図にあたり，セクタ長・クラスタ長・予約領域とFATの大きさ・ルートディレクトリとFSInfoセクタの位置を持つ．
+//    FSInfoセクタは空きクラスタの数を記録しており，パソコンはFATを全て数え直す手間を省くための参考値として使う．
+//    この数を「不明」を表す値にしておくと，パソコンは次にカードを差したときに数え直す
+// 3. FAT: クラスタチェーンのつながりを記録した表．1クラスタにつき4バイトの値が，クラスタの番号順に並ぶ．
+//    各クラスタの値は，同じクラスタチェーンの次のクラスタの番号で，最後のクラスタには終わりを表す値を記録する．
+//    チェーンの最初のクラスタ(開始クラスタ)の番号は，ファイル・ディレクトリの短い名前のエントリ(下記)が持つ(ルートディレクトリのものはBPBが持つ)．
+//    どのファイル・ディレクトリにも使われていないクラスタ(空きクラスタ)は値0で表す．ファイル・ディレクトリに中身を書き込む際は，空きクラスタを探して割り当てる．
+//    壊れた場合に備え，同じ表の複製が続くことが多い(書き換える際は全ての複製を同じ内容にそろえる)
+// 4. データ領域: クラスタ2から始まるクラスタの並び．各ファイル・ディレクトリのクラスタチェーンが置かれる．
+//    ファイルのクラスタチェーンにはファイルの内容のバイト列が，ディレクトリのクラスタチェーンにはエントリの並びが入る．
+//    エントリには次の種類がある
+//    - 短い名前のエントリ: そのディレクトリに置かれたファイル・ディレクトリ1つを表す．ファイルの中身そのものは持たず，
+//      中身を置いたクラスタチェーンの開始クラスタを持つ．32バイトには，先頭からのバイト位置で次の項目が並ぶ(書いていない位置は作成・更新・参照の日時)
+//        0〜10: 名前(基本名8バイトの後に拡張子3バイト) / 11: 属性 / 12: 小文字で表示する部分の印 /
+//        20〜21: 開始クラスタの上位16ビット / 26〜27: 開始クラスタの下位16ビット / 28〜31: バイト数
+//    - 長いファイル名(LFN)のエントリ: パソコンは8.3形式に収まらない名前を付けると，8.3形式の短い名前を別に作って短い名前のエントリに記録し，
+//      元の長い名前は，そのエントリの直前に並べた長いファイル名のエントリ(属性0x0f．1件に13文字ずつ)に分けて記録する．
+//      ファイルの中身の位置や大きさは短い名前のエントリだけが持ち，長いファイル名のエントリは名前だけを持つ
+//    - ボリュームラベルのエントリ: カードの名前(パソコンでドライブ名として表示される)を記録する．ルートディレクトリにだけ置かれる
+//    FATに並ぶクラスタごとの値はエントリと呼ばず，FATの値と書く
+// MBR・ブートセクタ・FSInfoセクタは，決まった位置に決まった値(署名)を持つ．署名は，読んだセクタが目的の管理情報であることを確かめるために使う．
+// MBRとブートセクタの末尾の2バイトにある署名(0x55，0xaa)をブート署名と呼ぶ
 #pragma once
 #include "sd.pn"
 
@@ -33,9 +49,12 @@ const int FAT_ERR_READ = 4;         // カードから読み出せなかった
 const int FAT_ERR_NOT_FAT32 = 5;    // カード上にFAT32のファイルシステムが見つからない
 const int FAT_ERR_BROKEN = 6;       // クラスタチェーンやサイズの記録が壊れている
 const int FAT_ERR_NOT_MOUNTED = 7;  // ファイルシステムをマウントしていない
-const int FAT_ERR_BAD_NAME = 8;     // 探すよう指定された名前が8.3形式に収まらない(カード上のエントリの名前は常に8.3形式のため，指定する側の名前だけで起きる)
+const int FAT_ERR_BAD_NAME = 8;     // 指定された名前が8.3形式に収まらないか，名前に使えない文字を含む(カード上のエントリの名前は常に8.3形式のため，指定する側の名前だけで起きる)
 const int FAT_ERR_NOT_FOUND = 9;    // 指定した名前のエントリが無い
-const int FAT_ERR_IS_DIR = 10;      // ファイルではなくディレクトリを開こうとした
+const int FAT_ERR_IS_DIR = 10;      // ファイルに対する操作(読み出し・書き込み・削除)を，ディレクトリに行おうとした
+const int FAT_ERR_WRITE = 11;       // カードへ書き込めなかった
+const int FAT_ERR_FULL = 12;        // 空きクラスタが無い
+const int FAT_ERR_EXISTS = 13;      // 指定した名前のエントリが既にある
 
 // MBR(ブロック0)の形式
 const int MBR_PARTITION_OFFSET = 0x1be;  // 第1パーティションエントリの位置
@@ -57,14 +76,25 @@ const int BPB_FAT_SIZE_16 = 0x16;          // FAT12/16の1つのFATのセクタ�
 const int BPB_TOTAL_SECTORS_32 = 0x20;     // ファイルシステム全体のセクタ数(4バイト)
 const int BPB_FAT_SIZE_32 = 0x24;          // FAT32の1つのFATのセクタ数(4バイト)
 const int BPB_ROOT_CLUSTER = 0x2c;         // ルートディレクトリの開始クラスタ(4バイト)
+const int BPB_FS_INFO = 0x30;              // ファイルシステムの先頭から数えたFSInfoセクタの位置(2バイト，0か0xffffならFSInfoセクタは無い)
 const int MAX_CLUSTER_SHIFT = 7;           // 1クラスタのセクタ数の上限(128)の2の対数
 
+// FSInfoセクタの形式
+const int FSINFO_LEAD_SIGNATURE_OFFSET = 0x000;             // セクタの先頭にある署名の位置
+const unsigned int FSINFO_LEAD_SIGNATURE = 0x41615252;      // セクタの先頭にある署名の値
+const int FSINFO_STRUCT_SIGNATURE_OFFSET = 0x1e4;           // 空きクラスタ数の直前にある署名の位置
+const unsigned int FSINFO_STRUCT_SIGNATURE = 0x61417272;    // 空きクラスタ数の直前にある署名の値
+const int FSINFO_FREE_COUNT = 0x1e8;                        // 空きクラスタ数(4バイト)
+const unsigned int FSINFO_FREE_COUNT_UNKNOWN = 0xffffffff;  // 空きクラスタ数に書くと「不明」を表す値(この値を見たパソコンは，空きクラスタ数を数え直す)
+
 // FAT(クラスタチェーンの表)の形式
-const int FAT_ENTRY_SIZE = 4;                                   // 1クラスタ分のエントリのバイト数
-const int FAT_ENTRIES_PER_SECTOR = SD_BLOCK_SIZE / FAT_ENTRY_SIZE;  // 1セクタに収まるエントリ数
+const int FAT_ENTRY_SIZE = 4;                                   // 1クラスタ分の値のバイト数
+const int FAT_ENTRIES_PER_SECTOR = SD_BLOCK_SIZE / FAT_ENTRY_SIZE;  // 1セクタに収まるクラスタの数
 const int FAT_ENTRIES_PER_SECTOR_SHIFT = 7;                     // FAT_ENTRIES_PER_SECTOR(128)の2の対数(実行時の除算を避けシフトで求めるため)
-const unsigned int FAT_CLUSTER_MASK = 0x0fffffff;               // エントリのうちクラスタ番号を表す下位28ビット
-const unsigned int FAT_CLUSTER_END = 0x0ffffff8;                // これ以上の値はチェーンの終わりを表す
+const unsigned int FAT_CLUSTER_MASK = 0x0fffffff;               // FATの値のうちクラスタ番号を表す下位28ビット
+const unsigned int FAT_CLUSTER_END = 0x0ffffff8;                // これ以上の値はクラスタチェーンの終わりを表す
+const unsigned int FAT_CLUSTER_LAST = 0x0fffffff;               // クラスタチェーンの最後のクラスタのFATに書く，終わりを表す値
+const unsigned int FAT_CLUSTER_FREE = 0;                        // 空きクラスタのFATの値
 const int FAT_FIRST_CLUSTER = 2;                                // データ領域の先頭にあたるクラスタ番号(0と1は予約)
 
 // ディレクトリエントリの形式
@@ -73,30 +103,44 @@ const int DIR_MAX_SECTORS = 65536 * DIR_ENTRY_SIZE / SD_BLOCK_SIZE;  // 1つの�
 const int DIR_NAME = 0x00;             // 8.3形式の名前(11バイト)
 const int DIR_ATTR = 0x0b;             // 属性(1バイト)
 const int DIR_NAME_CASE = 0x0c;        // 小文字で表示する部分を示すフラグ(1バイト)
+const int DIR_CREATE_TIME = 0x0e;      // 作成した時刻(2バイト)
+const int DIR_CREATE_DATE = 0x10;      // 作成した日付(2バイト)
+const int DIR_ACCESS_DATE = 0x12;      // 最後に参照した日付(2バイト．作成・更新と異なり，参照した時刻の項目は無い)
 const int DIR_CLUSTER_HIGH = 0x14;     // 開始クラスタの上位16ビット
+const int DIR_WRITE_TIME = 0x16;       // 最後に更新した時刻(2バイト)
+const int DIR_WRITE_DATE = 0x18;       // 最後に更新した日付(2バイト)
 const int DIR_CLUSTER_LOW = 0x1a;      // 開始クラスタの下位16ビット
 const int DIR_FILE_SIZE = 0x1c;        // ファイルのバイト数(4バイト)
 const int DIR_END = 0x00;              // 名前の先頭がこの値のエントリ以降は未使用
 const int DIR_DELETED = 0xe5;          // 名前の先頭がこの値のエントリは削除済み
 const int DIR_KANJI_E5 = 0x05;         // 名前の先頭が0xe5の文字であることを削除済みと区別して表す値
-const int ATTR_VOLUME_ID = 0x08;       // カードの名前(ボリュームラベル)を記録するエントリ．長いファイル名のエントリ(属性0x0f)もこのビットを含む
+const int DIR_DATE_OLDEST = 0x0021;    // 1980年1月1日を表す日付の値(上位から年-1980を7ビット・月を4ビット・日を5ビット．FATで表せる最も古い日付)
+const int ATTR_VOLUME_ID = 0x08;       // ボリュームラベルのエントリ．長いファイル名のエントリ(属性0x0f)もこのビットを含む
 const int ATTR_DIRECTORY = 0x10;       // ディレクトリ
+const int ATTR_ARCHIVE = 0x20;         // 前回のバックアップ以降に作成・変更された(パソコンが作成・変更したファイルに付けるため，それに倣う)
+const int ATTR_LONG_NAME = 0x0f;       // 長いファイル名のエントリの属性
+const int ATTR_LONG_NAME_MASK = 0x3f;  // 長いファイル名のエントリかを判定する際に見る属性のビット
 const int NAME_CASE_LOWER_BASE = 0x08; // 基本名を小文字で表示する
 const int NAME_CASE_LOWER_EXT = 0x10;  // 拡張子を小文字で表示する
 
 // 8.3形式の名前の長さ
 const int FAT_BASE_SIZE = 8;                                     // 基本名の最大文字数
 const int FAT_EXT_SIZE = 3;                                      // 拡張子の最大文字数
-const int FAT_NAME_SIZE = FAT_BASE_SIZE + FAT_EXT_SIZE;          // ディレクトリエントリ上の名前のバイト数(ドットは記録しない)
+const int FAT_NAME_SIZE = FAT_BASE_SIZE + FAT_EXT_SIZE;          // 短い名前のエントリ上の名前のバイト数(ドットは記録しない)
 const int FAT_NAME_TEXT_SIZE = FAT_BASE_SIZE + FAT_EXT_SIZE + 2;  // 表示用の名前に要る配列の要素数(ドットとヌル終端を含む)
 
-// ディレクトリエントリ(ディレクトリの中身として，そこに置かれたファイルやディレクトリ1つごとに並ぶ32バイトの記録)1件分の内容
+// 短い名前のエントリ(ファイル・ディレクトリ1つを表すエントリ)1件分の内容
 struct FatEntry {
     unsigned char name[FAT_NAME_SIZE];  // 8.3形式の名前(基本名8バイトの後に拡張子3バイトをドット無しで並べる．大文字，空白詰め)
     unsigned char attr;                 // 属性(ディレクトリか，隠しファイルかなど，エントリの種類を1ビットずつ表すフラグの集まり)
     unsigned char name_case;            // 小文字で表示する部分を示すフラグ
     unsigned int cluster;               // 開始クラスタ(サイズ0のファイルでは0)
     unsigned int size;                  // ファイルのバイト数(エントリはファイルとディレクトリで同じ形式のため項目を持つが，ディレクトリでは0)
+    unsigned int sector;                // このエントリ自体が記録されているセクタの番号．内容を変えたときにエントリを書き込む先になる
+    int offset;                         // そのセクタの中で，このエントリが始まるバイト位置
+    unsigned int lfn_sector;            // このエントリの直前に並ぶ長いファイル名のエントリのうち，先頭のものが記録されているセクタの番号
+    int lfn_offset;                     // そのセクタの中で，長いファイル名の先頭のエントリが始まるバイト位置(offsetは短い名前のエントリの位置)
+    int lfn_count;                      // 長いファイル名のエントリの数(1件に13文字ずつ記録するため，名前が長いほど多い．長いファイル名を持たなければ0)
 };
 
 // 読み出し中のファイルの位置
@@ -106,21 +150,34 @@ struct FatFile {
     unsigned int remaining;  // まだ読んでいないバイト数
 };
 
-// セクタの読み出し先．全ての読み出しで共用するため，読み出しを行う関数を呼ぶと内容が置き換わる
+// セクタの読み書きに使う領域．全ての読み書きで共用するため，カードを読み書きする関数を呼ぶと内容が置き換わる
 unsigned char fat_sector[SD_BLOCK_SIZE];
 
 // マウントしたファイルシステムの情報(fat_mountが設定する)
 int fat_mounted = 0;                  // ファイルシステムをマウントしているか(0:未マウント，1:マウント済み)．起動直後はまだマウントしていないため0から始める
 unsigned int fat_start;               // 1つ目のFATの先頭セクタ番号
+unsigned int fat_num_fats;            // FATの個数(本体と複製を合わせた数．1か2)
+unsigned int fat_sectors_per_fat;     // FAT1つあたりの大きさ(セクタ数)
 unsigned int fat_data_start;          // データ領域(クラスタ2)の先頭セクタ番号
-unsigned int fat_sectors_per_cluster; // 1クラスタのセクタ数
+unsigned int fat_sectors_per_cluster; // 1クラスタあたりの大きさ(セクタ数)
 unsigned int fat_cluster_shift;       // fat_sectors_per_clusterの2の対数
 unsigned int fat_cluster_count;       // データ領域のクラスタ数
 unsigned int fat_root_cluster;        // ルートディレクトリの開始クラスタ
+unsigned int fat_fsinfo_sector;       // FSInfoセクタの番号．マウントした後，空きクラスタ数を「不明」を表す値へ書き換えたら0にする(FSInfoセクタが無い場合も0)
+unsigned int fat_next_free;           // 空きクラスタを探すときに調べ始めるクラスタ(前回確保したクラスタ．毎回データ領域の先頭から調べ直さないため)
 
 // fat_findが走査中に使う値(コールバックは引数を増やせないためグローバル変数で受け渡す)
 unsigned char fat_find_name[FAT_NAME_SIZE];  // 探している8.3形式の名前
 struct FatEntry *fat_find_result;            // 見つかったエントリの書き込み先
+
+// ファイルの作成で新しいエントリを置く場所．fat_walk_rootが走査の途中で控える(走査を最後まで終えたときだけ，ディレクトリ全体を調べた結果になる)
+int fat_slot_found;                // 未使用か削除済みのエントリが見つかったか(0:見つからない，1:見つかった)
+unsigned int fat_slot_sector;      // 最初に見つかった，未使用か削除済みのエントリがあるセクタの番号
+int fat_slot_offset;               // そのセクタの中で，そのエントリが始まるバイト位置
+unsigned int fat_last_dir_sector;  // ディレクトリの最後のセクタの番号(置ける場所が無く，ディレクトリを広げる際につなぐ先)
+
+// 8.3形式の短い名前に使えない記号(FATの仕様で定められている．パソコンの長いファイル名には使える+ , ; = [ ]も，短い名前には使えない)
+char fat_invalid_chars[] = "\"*+,/:;<=>?[\\]|";
 
 // 読み込んだセクタの指定した位置から，2バイトの値を読む
 // 位置はセクタ内に収まるものだけを渡すこと(呼び出し元が渡すのは，カード上の形式で決まった項目の位置か，セクタの大きさの範囲で動かす位置だけのため，ここでは検査しない)
@@ -133,6 +190,20 @@ unsigned short fat_read_u16(int offset) {
 unsigned int fat_read_u32(int offset) {
     // 前半の2バイトを下位，後半の2バイトを上位として組み立てる
     return fat_read_u16(offset) | (fat_read_u16(offset + 2) << 16);
+}
+
+// 読み込んだセクタの指定した位置へ，valueの下位2バイトを書く(位置はセクタ内に2バイトが収まるものだけを渡すこと)
+void fat_write_u16(int offset, unsigned int value) {
+    // 読み出しと同じく下位のバイトから順に並べる(1バイトの要素へは下位8ビットだけが格納される)
+    fat_sector[offset] = value;
+    fat_sector[offset + 1] = value >> 8;
+}
+
+// 読み込んだセクタの指定した位置へ，4バイトの値を書く(位置はセクタ内に4バイトが収まるものだけを渡すこと)
+void fat_write_u32(int offset, unsigned int value) {
+    // 下位の2バイトを前半，上位の2バイトを後半に書く
+    fat_write_u16(offset, value);
+    fat_write_u16(offset + 2, value >> 16);
 }
 
 // 指定したクラスタ番号がデータ領域に実在するかを返す(不良クラスタを表す0x0ffffff7も範囲外として弾かれる)
@@ -149,6 +220,12 @@ unsigned int fat_cluster_sector(unsigned int cluster) {
     return fat_data_start + ((cluster - FAT_FIRST_CLUSTER) << fat_cluster_shift);
 }
 
+// データ領域のセクタ番号から，そのセクタを含むクラスタの番号を返す(マウントした後にだけ呼ぶこと)
+unsigned int fat_sector_to_cluster(unsigned int sector) {
+    // fat_cluster_sectorの逆に，データ領域の先頭からのセクタ数をクラスタ長で割った位置にある
+    return ((sector - fat_data_start) >> fat_cluster_shift) + FAT_FIRST_CLUSTER;
+}
+
 // fat_sectorに読み込んだセクタがブート署名を持つかを返す
 int fat_has_signature(void) {
     // セクタ末尾の2バイトが決まった値であることで，MBRかブートセクタであると判断する
@@ -159,10 +236,9 @@ int fat_has_signature(void) {
 // 引数にはファイルシステムの先頭セクタ番号を渡す(BPBの値はファイルシステムの先頭からの相対位置のため)
 int fat_parse_bpb(unsigned int fs_start) {
     unsigned int reserved;      // 予約セクタ数
-    unsigned int num_fats;      // FATの複製の数
-    unsigned int fat_size;      // 1つのFATのセクタ数
     unsigned int total;         // ファイルシステム全体のセクタ数
     unsigned int system_size;   // データ領域より前(予約領域とFAT)のセクタ数
+    unsigned int fsinfo;        // ファイルシステムの先頭から数えたFSInfoセクタの位置
     int shift = -1;             // 1クラスタのセクタ数の2の対数(2のべき乗でなければ-1のまま)
 
     // FAT12/16・exFAT・パーティションを持たないブートコード等と取り違えないよう，FAT32のBPBが必ず満たす条件を確かめる
@@ -183,8 +259,8 @@ int fat_parse_bpb(unsigned int fs_start) {
         return FAT_ERR_NOT_FAT32;
     }
     // FATは1つか，壊れた場合に備えた複製を加えた2つのどちらかで作られる
-    num_fats = fat_sector[BPB_NUM_FATS];
-    if (num_fats != 1 && num_fats != 2) {
+    fat_num_fats = fat_sector[BPB_NUM_FATS];
+    if (fat_num_fats != 1 && fat_num_fats != 2) {
         return FAT_ERR_NOT_FAT32;
     }
     // FAT12/16だけが使う2つの値が0であることがFAT32の目印になる
@@ -194,9 +270,9 @@ int fat_parse_bpb(unsigned int fs_start) {
 
     // ファイルシステムは先頭から予約領域(BPBを含む)・FAT(複製の数だけ)・データ領域の順に並ぶため，データ領域より前の大きさを求める
     reserved = fat_read_u16(BPB_RESERVED_SECTORS);
-    fat_size = fat_read_u32(BPB_FAT_SIZE_32);
+    fat_sectors_per_fat = fat_read_u32(BPB_FAT_SIZE_32);
     total = fat_read_u32(BPB_TOTAL_SECTORS_32);
-    system_size = reserved + num_fats * fat_size;
+    system_size = reserved + fat_num_fats * fat_sectors_per_fat;
     // データ領域が残らない大きさの記録は壊れている
     if (total <= system_size) {
         return FAT_ERR_NOT_FAT32;
@@ -213,6 +289,15 @@ int fat_parse_bpb(unsigned int fs_start) {
     if (fat_is_valid_cluster(fat_root_cluster) == 0) {
         return FAT_ERR_NOT_FAT32;
     }
+    // FSInfoセクタの位置を，カード上のセクタ番号へ換算して控える(無ければ書き換え済みと同じく0にする)
+    fsinfo = fat_read_u16(BPB_FS_INFO);
+    if (fsinfo == 0 || fsinfo == 0xffff) {
+        fat_fsinfo_sector = 0;
+    } else {
+        fat_fsinfo_sector = fs_start + fsinfo;
+    }
+    // 空きクラスタはデータ領域の先頭から探し始める
+    fat_next_free = FAT_FIRST_CLUSTER;
     // 全ての検査を通ったときだけマウント済みにする
     fat_mounted = 1;
     return FAT_OK;
@@ -258,13 +343,13 @@ int fat_mount(void) {
 
 // clusterの次のクラスタをnextへ返す．clusterがチェーンの最後であればFAT_ENDを返す
 int fat_next_cluster(unsigned int cluster, unsigned int *next) {
-    unsigned int value;  // clusterのFATエントリの値
+    unsigned int value;  // clusterのFATの値
 
-    // FATエントリはクラスタ番号順に並ぶため，番号からエントリを含むセクタとその中の位置が決まる
+    // FATの値はクラスタ番号順に並ぶため，番号から値を含むセクタとその中の位置が決まる
     if (sd_read_block(fat_start + (cluster >> FAT_ENTRIES_PER_SECTOR_SHIFT), fat_sector) == 0) {
         return FAT_ERR_READ;
     }
-    // エントリの上位4ビットは予約のため，クラスタ番号を表す下位28ビットだけを取り出す
+    // 値の上位4ビットは予約のため，クラスタ番号を表す下位28ビットだけを取り出す
     value = fat_read_u32((cluster & (FAT_ENTRIES_PER_SECTOR - 1)) * FAT_ENTRY_SIZE) & FAT_CLUSTER_MASK;
     // チェーンの終わりを表す値であれば，次のクラスタは無い
     if (value >= FAT_CLUSTER_END) {
@@ -279,8 +364,30 @@ int fat_next_cluster(unsigned int cluster, unsigned int *next) {
     return FAT_OK;
 }
 
+// クラスタチェーン上のセクタ番号sectorを，同じチェーンの次のセクタへ進める．sectorがチェーンの最後のセクタであればFAT_ENDを返す
+// クラスタの最後のセクタから進む場合はFATを読むため，fat_sectorの内容が置き換わる
+int fat_next_chain_sector(unsigned int *sector) {
+    unsigned int next;  // 次のクラスタ
+    int status;         // 次のクラスタを求めた結果
+
+    // クラスタの途中であれば，同じクラスタの次のセクタへ進む(クラスタ長は2のべき乗のため，次の位置の下位ビットが0になるのはクラスタの境目だけ)
+    if (((*sector - fat_data_start + 1) & (fat_sectors_per_cluster - 1)) != 0) {
+        *sector += 1;
+        return FAT_OK;
+    }
+    // クラスタの最後のセクタであれば，FATを辿って同じチェーンの次のクラスタを求める
+    status = fat_next_cluster(fat_sector_to_cluster(*sector), &next);
+    if (status != FAT_OK) {
+        return status;
+    }
+    // 次のクラスタの先頭セクタを，次のセクタとする
+    *sector = fat_cluster_sector(next);
+    return FAT_OK;
+}
+
 // 読み込んだディレクトリのセクタから，指定位置のディレクトリエントリ1件を構造体へ取り出す
 // セクタには32バイトのエントリが隙間なく並び，1件の中の各項目の位置は「ディレクトリエントリの形式」の定数のとおりである
+// カード上の位置はセクタの番号を知る呼び出し元が設定する
 void fat_load_entry(int offset, struct FatEntry *entry) {
     // 名前の11バイトをそのまま写す
     for (int i = 0; i < FAT_NAME_SIZE; i++) {
@@ -300,52 +407,89 @@ void fat_load_entry(int offset, struct FatEntry *entry) {
 // ルートディレクトリのエントリを先頭から1件ずつ，引数で受け取った関数visitへ渡す
 // visitはエントリ1件を受け取って処理し，走査を続けるなら0，打ち切るなら0以外を返す関数である(ディレクトリを辿る処理を1つにまとめ，エントリごとの処理だけを呼び出し側が差し替えるため)
 // visitが打ち切りを求めた時点でFAT_STOPPEDを返し，最後まで走査すればFAT_OKを返す
-// 削除済みのエントリと，カードの名前・長いファイル名のエントリは渡さない
-// visitはエントリを走査中のセクタから写し取った後に呼ぶが，走査はfat_sectorを読み進めるため，visitの中で読み出しを行う関数を呼ばないこと
+// 渡すのはファイル・ディレクトリを表す短い名前のエントリだけで，削除済み・ボリュームラベル・長いファイル名のエントリは渡さない
+// (長いファイル名のエントリは直後の短い名前のエントリと合わせて1つのファイルを表すため，単独では渡さず，その位置を短い名前のエントリに含めて渡す)
+// 走査の途中で，ファイルの作成で新しいエントリを置ける場所と，ディレクトリの最後のセクタを控える
+// visitはエントリを走査中のセクタから写し取った後に呼ぶが，走査はfat_sectorを読み進めるため，visitの中でカードを読み書きする関数を呼ばないこと
 int fat_walk_root(int (*visit)(struct FatEntry *)) {
-    struct FatEntry entry;                   // visitへ渡すエントリ
-    unsigned int cluster = fat_root_cluster; // 走査中のクラスタ
-    int status;                              // 次のクラスタを求めた結果
-    int first;                               // エントリの名前の先頭バイト
-    int read_sectors = 0;                    // 読んだセクタ数
+    struct FatEntry entry;    // visitへ渡すエントリ
+    unsigned int sector;      // 走査中のセクタの番号
+    int status;               // 次のセクタを求めた結果
+    int first;                // エントリの名前の先頭バイト
+    int attr;                 // エントリの属性
+    int read_sectors = 0;     // 読んだセクタ数
+    unsigned int lfn_sector;  // 並んでいる長いファイル名のエントリのうち，先頭のものを含むセクタの番号
+    int lfn_offset;           // そのセクタ内での先頭のエントリの位置
+    int lfn_count = 0;        // 並んでいる長いファイル名のエントリの数
 
     // マウントしていなければ，ルートディレクトリの位置が分からない
     if (fat_mounted == 0) {
         return FAT_ERR_NOT_MOUNTED;
     }
-    // ルートディレクトリもファイルと同じくクラスタチェーンに沿って並ぶため，クラスタ・セクタ・エントリの順に辿る
+    // 新しいエントリを置ける場所は，走査しながら探す
+    fat_slot_found = 0;
+    // ルートディレクトリもファイルと同じくクラスタチェーンに沿って並ぶため，開始クラスタの先頭セクタから1セクタずつ辿る
+    sector = fat_cluster_sector(fat_root_cluster);
     while (1) {
-        for (unsigned int sector = 0; sector < fat_sectors_per_cluster; sector++) {
-            // ディレクトリが占めうる大きさを超えて続くチェーンは壊れている(循環していると辿り続けても走査が終わらない)
-            if (read_sectors == DIR_MAX_SECTORS) {
-                return FAT_ERR_BROKEN;
-            }
-            read_sectors++;
-            // クラスタ内の1セクタを読み込む
-            if (sd_read_block(fat_cluster_sector(cluster) + sector, fat_sector) == 0) {
-                return FAT_ERR_READ;
-            }
-            // セクタに並ぶエントリを先頭から1件ずつ調べる
-            for (int offset = 0; offset < SD_BLOCK_SIZE; offset += DIR_ENTRY_SIZE) {
-                first = fat_sector[offset + DIR_NAME];
+        // ディレクトリが占めうる大きさを超えて続くチェーンは壊れている(循環していると辿り続けても走査が終わらない)
+        if (read_sectors == DIR_MAX_SECTORS) {
+            return FAT_ERR_BROKEN;
+        }
+        read_sectors++;
+        // ディレクトリの1セクタを読み込む
+        if (sd_read_block(sector, fat_sector) == 0) {
+            return FAT_ERR_READ;
+        }
+        // セクタに並ぶエントリを先頭から1件ずつ調べる
+        for (int offset = 0; offset < SD_BLOCK_SIZE; offset += DIR_ENTRY_SIZE) {
+            first = fat_sector[offset + DIR_NAME];
+            // 未使用・削除済みのエントリは，ファイルの作成で新しいエントリを置ける場所になるため，最初に見つかった位置を控える
+            if (first == DIR_END || first == DIR_DELETED) {
+                if (fat_slot_found == 0) {
+                    fat_slot_found = 1;
+                    fat_slot_sector = sector;
+                    fat_slot_offset = offset;
+                }
+                // 未使用・削除済みのエントリを挟んだため，それまでに数えた長いファイル名のエントリはどのファイルのものでもない．0から数え直す
+                lfn_count = 0;
                 // 未使用のエントリ以降に使用中のエントリは置かれない
                 if (first == DIR_END) {
                     return FAT_OK;
                 }
-                // 属性の判定はカードの名前を表すビットだけで足りる(長いファイル名のエントリも同じビットを持つため)
-                if (first == DIR_DELETED || (fat_sector[offset + DIR_ATTR] & ATTR_VOLUME_ID) != 0) {
-                    continue;
+                continue;
+            }
+            attr = fat_sector[offset + DIR_ATTR];
+            // 長いファイル名のエントリは，後に続く短い名前のエントリに属するものとして，並びの先頭の位置と数を控える
+            // (有効なのは直後に短い名前のエントリが続く並びだけで，途中で他の種類のエントリを挟んだ場合は数え直す)
+            if ((attr & ATTR_LONG_NAME_MASK) == ATTR_LONG_NAME) {
+                if (lfn_count == 0) {
+                    lfn_sector = sector;
+                    lfn_offset = offset;
                 }
-                // 使用中のエントリを写し取ってvisitへ渡す
-                fat_load_entry(offset, &entry);
-                if (visit(&entry) != 0) {
-                    return FAT_STOPPED;
-                }
+                lfn_count++;
+                continue;
+            }
+            // ボリュームラベルのエントリは，ファイルでもディレクトリでもない(ここまでに並んだ長いファイル名のエントリも，どのファイルのものでもない)
+            if ((attr & ATTR_VOLUME_ID) != 0) {
+                lfn_count = 0;
+                continue;
+            }
+            // 残るのは使用中の短い名前のエントリで，カード上の位置と共に写し取ってvisitへ渡す
+            fat_load_entry(offset, &entry);
+            entry.sector = sector;
+            entry.offset = offset;
+            entry.lfn_sector = lfn_sector;
+            entry.lfn_offset = lfn_offset;
+            entry.lfn_count = lfn_count;
+            lfn_count = 0;
+            if (visit(&entry) != 0) {
+                return FAT_STOPPED;
             }
         }
-        // クラスタを読み終えたら次のクラスタへ進む．チェーンが終わっていれば全エントリを走査し終えている
-        status = fat_next_cluster(cluster, &cluster);
+        // セクタを読み終えたら次のセクタへ進む．チェーンが終わっていれば全エントリを走査し終えている
+        status = fat_next_chain_sector(&sector);
         if (status == FAT_END) {
+            fat_last_dir_sector = sector;
             return FAT_OK;
         }
         if (status != FAT_OK) {
@@ -372,9 +516,29 @@ int fat_to_lower(int c) {
     return c;
 }
 
+// 8.3形式の名前(基本名・拡張子のどちらも同じ規則)に使える文字かを返す(0:使えない，1:使える)
+// ASCIIの範囲外の文字は，パソコンが付けた名前を指定できるよう受け付ける
+int fat_is_valid_char(int c) {
+    // 制御文字(0x00〜0x1fと0x7f)と空白は使えない(空白は，カード上で名前の余りを埋める文字と区別できなくなる)
+    if ((c >= 0 && c <= ' ') || c == 0x7f) {
+        return 0;
+    }
+    // FATの仕様で短い名前に使えないと定められた記号と1つずつ比べる
+    for (int i = 0; fat_invalid_chars[i] != '\0'; i++) {
+        if (c == fat_invalid_chars[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 // 入力された"NAME.EXT"形式の名前を，カードに記録される形式の名前に変換して書き込む
 // FATは名前の大文字・小文字を区別せず大文字で記録するため，大文字へ揃える
-// 8.3形式に収まらない名前(基本名が空か8文字を超える，拡張子が3文字を超える，ドットが2つ以上ある)は，切り詰めると別のファイルの名前になりうるため失敗とする
+// ドットの後ろが空の名前("NAME.")は，拡張子の無い名前("NAME")として扱う
+// 次の名前は失敗とする
+// - 基本名が8文字を超えるか，拡張子が3文字を超える名前．切り詰めると別のファイルの名前になりうるため
+// - 基本名が空か，ドットが2つ以上ある名前．8.3形式で表せないため
+// - 名前に使えない文字を含む名前．そのまま記録すると，パソコンがそのファイルを扱えなくなるため
 int fat_make_name(char *text, unsigned char *name) {
     int pos = 0;  // textの読み出し位置
     int n = 0;    // 基本名・拡張子それぞれに書き込んだ文字数
@@ -385,8 +549,8 @@ int fat_make_name(char *text, unsigned char *name) {
     }
     // ドットかヌル終端の手前までを基本名とする
     while (text[pos] != '\0' && text[pos] != '.') {
-        // 9文字目が現れた時点で基本名に収まらない
-        if (n == FAT_BASE_SIZE) {
+        // 9文字目が現れれば基本名に収まらず，使えない文字が現れれば名前として記録できない
+        if (n == FAT_BASE_SIZE || fat_is_valid_char(text[pos]) == 0) {
             return FAT_ERR_BAD_NAME;
         }
         name[n] = fat_to_upper(text[pos]);
@@ -402,8 +566,8 @@ int fat_make_name(char *text, unsigned char *name) {
         pos++;
         n = 0;
         while (text[pos] != '\0') {
-            // 2つ目のドットか，4文字目が現れた時点で拡張子に収まらない
-            if (text[pos] == '.' || n == FAT_EXT_SIZE) {
+            // 2つ目のドットか4文字目が現れれば拡張子に収まらず，使えない文字が現れれば名前として記録できない
+            if (text[pos] == '.' || n == FAT_EXT_SIZE || fat_is_valid_char(text[pos]) == 0) {
                 return FAT_ERR_BAD_NAME;
             }
             name[FAT_BASE_SIZE + n] = fat_to_upper(text[pos]);
@@ -412,6 +576,40 @@ int fat_make_name(char *text, unsigned char *name) {
         }
     }
     return FAT_OK;
+}
+
+// 入力された"NAME.EXT"形式の名前から，カードに記録する小文字で表示する部分を示すフラグを求める(名前はfat_make_nameで変換できたものを渡すこと)
+// Windowsと同じく，英小文字だけで書かれた基本名・拡張子に小文字で表示する印を付ける(英大文字と混ざった部分は，大文字の名前だけが記録される)
+int fat_name_case(char *text) {
+    int flags = 0;                    // 求めたフラグ
+    int part = NAME_CASE_LOWER_BASE;  // 調べている部分(基本名か拡張子)を小文字で表示する印
+    int has_lower = 0;                // 調べている部分に英小文字があるか
+    int has_upper = 0;                // 調べている部分に英大文字があるか
+    int pos = 0;                      // textの読み出し位置
+
+    // 基本名・拡張子の順に，英小文字と英大文字を含むかを調べる
+    while (1) {
+        // 部分の区切り(ドットかヌル終端)に来たら，その部分に印を付けるかを決める
+        if (text[pos] == '.' || text[pos] == '\0') {
+            // 英小文字を含み英大文字を含まない部分にだけ印を付ける(数字や記号だけの部分は，大文字・小文字の区別が無いため付けない)
+            if (has_lower && !has_upper) {
+                flags |= part;
+            }
+            // 名前の終わりであれば，全ての部分を調べ終えている
+            if (text[pos] == '\0') {
+                return flags;
+            }
+            // ドットの後ろは拡張子として調べ直す
+            part = NAME_CASE_LOWER_EXT;
+            has_lower = 0;
+            has_upper = 0;
+        } else if (text[pos] >= 'a' && text[pos] <= 'z') {
+            has_lower = 1;
+        } else if (text[pos] >= 'A' && text[pos] <= 'Z') {
+            has_upper = 1;
+        }
+        pos++;
+    }
 }
 
 // カードに記録された名前を，表示用の"NAME.EXT"形式の名前に変換して書き込む(拡張子が無ければドットも付けない)
@@ -465,11 +663,17 @@ int fat_match_entry(struct FatEntry *entry) {
     fat_find_result->name_case = entry->name_case;
     fat_find_result->cluster = entry->cluster;
     fat_find_result->size = entry->size;
+    fat_find_result->sector = entry->sector;
+    fat_find_result->offset = entry->offset;
+    fat_find_result->lfn_sector = entry->lfn_sector;
+    fat_find_result->lfn_offset = entry->lfn_offset;
+    fat_find_result->lfn_count = entry->lfn_count;
     // 見つかったため走査を打ち切る
     return 1;
 }
 
 // ルートディレクトリから"NAME.EXT"形式の名前textのエントリを探し，foundへ書き込む(大文字・小文字は区別しない)
+// 見つからなかった場合は，ルートディレクトリを最後まで走査した結果として，新しいエントリを置く場所が控えられている
 int fat_find(char *text, struct FatEntry *found) {
     int status;  // 名前の変換・走査の結果
 
@@ -558,6 +762,434 @@ int fat_read(struct FatFile *file, int *length) {
     return FAT_OK;
 }
 
+// FSInfoセクタの空きクラスタ数を，「不明」を表す値に書き換える．FATを書き換える前に呼ぶ
+// FATを変えるたびに正しい数へ更新する代わりに，次にパソコンへ差したときに数え直させる．書き換えはマウントしてから最初の1回だけ行う
+int fat_forget_free_count(void) {
+    // 書き換え済みか，FSInfoセクタが無ければ何もしない
+    if (fat_fsinfo_sector == 0) {
+        return FAT_OK;
+    }
+    // FSInfoセクタを読み込む
+    if (sd_read_block(fat_fsinfo_sector, fat_sector) == 0) {
+        return FAT_ERR_READ;
+    }
+    // 署名が合わないセクタはFSInfoセクタとみなさず，書き換えない
+    if (fat_read_u32(FSINFO_LEAD_SIGNATURE_OFFSET) == FSINFO_LEAD_SIGNATURE && fat_read_u32(FSINFO_STRUCT_SIGNATURE_OFFSET) == FSINFO_STRUCT_SIGNATURE) {
+        // 空きクラスタ数を「不明」を表す値にして書き戻す
+        fat_write_u32(FSINFO_FREE_COUNT, FSINFO_FREE_COUNT_UNKNOWN);
+        if (sd_write_block(fat_fsinfo_sector, fat_sector) == 0) {
+            return FAT_ERR_WRITE;
+        }
+    }
+    // 以降は書き換え済みとして何もしない
+    fat_fsinfo_sector = 0;
+    return FAT_OK;
+}
+
+// clusterのFATの値をvalueに書き換える．複製を含む全てのFATへ同じ内容を書く
+int fat_set_cluster(unsigned int cluster, unsigned int value) {
+    unsigned int index = cluster >> FAT_ENTRIES_PER_SECTOR_SHIFT;            // clusterの値を含むセクタの，FATの先頭から数えた位置
+    int offset = (cluster & (FAT_ENTRIES_PER_SECTOR - 1)) * FAT_ENTRY_SIZE;  // そのセクタの中で，clusterの値が始まるバイト位置
+    int status;                                                              // 空きクラスタ数の書き換えの結果
+
+    // FATを変えると空きクラスタ数の記録が合わなくなるため，先に「不明」を表す値にしておく
+    status = fat_forget_free_count();
+    if (status != FAT_OK) {
+        return status;
+    }
+    // 1つ目のFATから，clusterの値を含むセクタを読み込む
+    if (sd_read_block(fat_start + index, fat_sector) == 0) {
+        return FAT_ERR_READ;
+    }
+    // 値の上位4ビットは予約のため，元の値を残して下位28ビットだけを書き換える
+    fat_write_u32(offset, (fat_read_u32(offset) & ~FAT_CLUSTER_MASK) | (value & FAT_CLUSTER_MASK));
+    // 複製は1つ目のFATの後ろにFATの大きさずつ並ぶため，同じ位置のセクタへ順に書く
+    for (unsigned int i = 0; i < fat_num_fats; i++) {
+        if (sd_write_block(fat_start + i * fat_sectors_per_fat + index, fat_sector) == 0) {
+            return FAT_ERR_WRITE;
+        }
+    }
+    return FAT_OK;
+}
+
+// ファイル・ディレクトリの中身を書き込む先として，空きクラスタを1つ探して確保し，clusterへ返す．空きクラスタが無ければFAT_ERR_FULLを返す
+// prevが0でなければ，確保したクラスタをprevの次へつなぎ，prevが属するクラスタチェーン(同じファイル・ディレクトリ)を1クラスタ伸ばす．
+// prevが0であれば，確保したクラスタだけから成る新しいクラスタチェーンを作る(つなぐ先は呼び出し元が決める)
+int fat_alloc_cluster(unsigned int prev, unsigned int *cluster) {
+    unsigned int candidate = fat_next_free;  // 空きかどうかを調べる対象のクラスタの番号
+    unsigned int index;                      // candidateの値を含むFATのセクタの，FATの先頭から数えた位置
+    unsigned int loaded = 0xffffffff;        // fat_sectorに読み込んであるFATのセクタの位置(まだ読んでいなければ，どのセクタの位置とも一致しない値)
+    int status;                              // FATの書き換えの結果
+
+    // 前回確保したクラスタから，全クラスタを1周するまで調べる(毎回先頭から調べると，使用中のクラスタの値を何度も読み直すため)
+    for (unsigned int n = 0; n < fat_cluster_count; n++) {
+        // 1セクタに並ぶ値はまとめて調べられるため，セクタが変わるときだけ読み込む
+        index = candidate >> FAT_ENTRIES_PER_SECTOR_SHIFT;
+        if (index != loaded) {
+            if (sd_read_block(fat_start + index, fat_sector) == 0) {
+                return FAT_ERR_READ;
+            }
+            loaded = index;
+        }
+        // 値の上位4ビットは予約のため，下位28ビットで空きかどうかを判定する
+        if ((fat_read_u32((candidate & (FAT_ENTRIES_PER_SECTOR - 1)) * FAT_ENTRY_SIZE) & FAT_CLUSTER_MASK) == FAT_CLUSTER_FREE) {
+            // 途中で失敗しても使用中のクラスタが空きクラスタを指さないよう，終わりを表す値を書いてからつなぐ
+            status = fat_set_cluster(candidate, FAT_CLUSTER_LAST);
+            if (status == FAT_OK && prev != 0) {
+                status = fat_set_cluster(prev, candidate);
+            }
+            if (status != FAT_OK) {
+                return status;
+            }
+            // 次の確保はこのクラスタから調べ始める
+            fat_next_free = candidate;
+            *cluster = candidate;
+            return FAT_OK;
+        }
+        // データ領域の最後のクラスタの次は，先頭のクラスタへ戻る
+        candidate++;
+        if (candidate == fat_cluster_count + FAT_FIRST_CLUSTER) {
+            candidate = FAT_FIRST_CLUSTER;
+        }
+    }
+    return FAT_ERR_FULL;
+}
+
+// clusterから始まるクラスタチェーンのクラスタを，全て空きに戻す
+int fat_free_chain(unsigned int cluster) {
+    unsigned int next;  // 次のクラスタ
+    int status;         // 次のクラスタを求めた結果
+    int result;         // FATの書き換えの結果
+
+    // チェーンはクラスタの数より長くならない(循環していると辿り続けても終わらない)
+    for (unsigned int n = 0; n < fat_cluster_count; n++) {
+        // 範囲外を指すチェーンは壊れており，辿ると無関係なFATの値を書き換える
+        if (fat_is_valid_cluster(cluster) == 0) {
+            return FAT_ERR_BROKEN;
+        }
+        // 空きに戻すと次のクラスタが分からなくなるため，先に次のクラスタを求める
+        status = fat_next_cluster(cluster, &next);
+        if (status != FAT_OK && status != FAT_END) {
+            return status;
+        }
+        // このクラスタのFATの値を，空きクラスタを表す値にする
+        result = fat_set_cluster(cluster, FAT_CLUSTER_FREE);
+        if (result != FAT_OK) {
+            return result;
+        }
+        // チェーンの最後まで空きに戻せば終わる
+        if (status == FAT_END) {
+            return FAT_OK;
+        }
+        cluster = next;
+    }
+    return FAT_ERR_BROKEN;
+}
+
+// fat_sectorへ読み込んだディレクトリのセクタの中で，entryのエントリの名前・属性・表示のフラグ・開始クラスタ・バイト数を書き換える
+// カードへ書き込むのは呼び出し元が行う(日時など，同じセクタの他の項目もあわせて書き換えてから1回で書き込めるようにするため)
+void fat_put_entry(struct FatEntry *entry) {
+    int offset = entry->offset;  // セクタ内でのエントリの位置
+
+    // 名前の11バイトをそのまま書く
+    for (int i = 0; i < FAT_NAME_SIZE; i++) {
+        fat_sector[offset + DIR_NAME + i] = entry->name[i];
+    }
+    // 先頭が0xe5の文字は，削除済みの印と取り違えないよう決まった値に置き換えて記録する
+    if (entry->name[0] == DIR_DELETED) {
+        fat_sector[offset + DIR_NAME] = DIR_KANJI_E5;
+    }
+    // 属性・表示の大文字小文字のフラグ・開始クラスタ・バイト数を書く(開始クラスタは上位と下位の16ビットを離れた位置に分けて書く)
+    fat_sector[offset + DIR_ATTR] = entry->attr;
+    fat_sector[offset + DIR_NAME_CASE] = entry->name_case;
+    fat_write_u16(offset + DIR_CLUSTER_HIGH, entry->cluster >> 16);
+    fat_write_u16(offset + DIR_CLUSTER_LOW, entry->cluster);
+    fat_write_u32(offset + DIR_FILE_SIZE, entry->size);
+}
+
+// fat_sectorへ読み込んだディレクトリのセクタの中で，offsetの位置のエントリの最後に更新した日時を書き換える
+// 時計が無いため，FATで表せる最も古い1980年1月1日0時0分とする(時刻は0．日付は月・日を0にできないため値を書く)
+void fat_put_modified_time(int offset) {
+    fat_write_u16(offset + DIR_WRITE_TIME, 0);
+    fat_write_u16(offset + DIR_WRITE_DATE, DIR_DATE_OLDEST);
+}
+
+// entryの内容を，カード上でそのエントリが記録されている位置へ書き込む
+// ファイルの内容を変えた場合はmodifiedに1を渡し，最後に更新した日時も書き換える(名前の変更など，内容を変えない場合は0を渡す)
+int fat_store_entry(struct FatEntry *entry, int modified) {
+    // エントリを含むセクタを読み込む(同じセクタに並ぶ他のエントリを残したまま，このエントリだけを書き換えるため)
+    if (sd_read_block(entry->sector, fat_sector) == 0) {
+        return FAT_ERR_READ;
+    }
+    // 読み込んだセクタの中で，このエントリの項目を書き換える
+    fat_put_entry(entry);
+    // 内容を変えた場合は，最後に更新した日時も書き換える
+    if (modified != 0) {
+        fat_put_modified_time(entry->offset);
+    }
+    // 書き換えたセクタをカードへ書き込む
+    if (sd_write_block(entry->sector, fat_sector) == 0) {
+        return FAT_ERR_WRITE;
+    }
+    return FAT_OK;
+}
+
+// sectorのoffsetの位置から並ぶcount件のエントリを，削除済みにする(並びはセクタ・クラスタの境目をまたいでもよい)
+// ファイルの削除と，名前の変更で古い長いファイル名のエントリを消す際に使う
+int fat_mark_deleted(unsigned int sector, int offset, int count) {
+    unsigned int current = sector;  // 印を付けているセクタの番号
+    int position = offset;          // そのセクタ内で次に印を付けるエントリの位置
+    int remaining = count;          // まだ印を付けていないエントリの数
+    int status;                     // 次のセクタを求めた結果
+
+    while (1) {
+        // セクタを読み込み，そこに含まれる分のエントリに削除済みの印を付けて書き戻す
+        if (sd_read_block(current, fat_sector) == 0) {
+            return FAT_ERR_READ;
+        }
+        while (remaining > 0 && position < SD_BLOCK_SIZE) {
+            fat_sector[position + DIR_NAME] = DIR_DELETED;
+            position += DIR_ENTRY_SIZE;
+            remaining--;
+        }
+        if (sd_write_block(current, fat_sector) == 0) {
+            return FAT_ERR_WRITE;
+        }
+        // 全て印を付け終えれば終わる
+        if (remaining == 0) {
+            return FAT_OK;
+        }
+        // 残りは次のセクタの先頭から続く．並びの途中でディレクトリが終わるのは，記録が壊れている
+        status = fat_next_chain_sector(&current);
+        if (status == FAT_END) {
+            return FAT_ERR_BROKEN;
+        }
+        if (status != FAT_OK) {
+            return status;
+        }
+        position = 0;
+    }
+}
+
+// ルートディレクトリの最後に空のクラスタを1つつなぎ，その先頭を新しいエントリを置く場所として控える
+// ディレクトリの最後のセクタは，直前にルートディレクトリを最後まで走査した結果を使う
+int fat_extend_root(void) {
+    unsigned int cluster;  // つなぐクラスタ
+    int status;            // クラスタの確保・つなぎの結果
+
+    // 空きクラスタを1つ確保する．まだディレクトリにはつながず，どのファイルにも使われていないクラスタのため，既存の内容は壊れない
+    status = fat_alloc_cluster(0, &cluster);
+    if (status != FAT_OK) {
+        return status;
+    }
+    // ディレクトリへつなぐ前に，確保したクラスタの全セクタを0で埋めて全エントリを未使用にしておく
+    // (途中で失敗しても，ディレクトリが以前の中身の残ったクラスタを含まないようにするため)
+    for (int i = 0; i < SD_BLOCK_SIZE; i++) {
+        fat_sector[i] = 0;
+    }
+    for (unsigned int i = 0; i < fat_sectors_per_cluster; i++) {
+        if (sd_write_block(fat_cluster_sector(cluster) + i, fat_sector) == 0) {
+            return FAT_ERR_WRITE;
+        }
+    }
+    // ディレクトリの最後のクラスタの次へつなぐ
+    status = fat_set_cluster(fat_sector_to_cluster(fat_last_dir_sector), cluster);
+    if (status != FAT_OK) {
+        return status;
+    }
+    // つないだクラスタの先頭のエントリを，新しいエントリを置く場所とする
+    fat_slot_sector = fat_cluster_sector(cluster);
+    fat_slot_offset = 0;
+    return FAT_OK;
+}
+
+// ルートディレクトリに"NAME.EXT"形式の名前textで空のファイルを作成し，そのエントリをentryへ書き込む
+// 同じ名前のエントリが既にあれば，作成せずにそのエントリをentryへ書き込み，FAT_ERR_EXISTSを返す(大文字・小文字は区別しない)
+int fat_create(char *text, struct FatEntry *entry) {
+    int offset;  // 新しいエントリを置くセクタ内の位置
+    int status;  // 検索・ディレクトリの拡張の結果
+
+    // 同じ名前が無いことを確かめる．見つからなければ走査が最後まで進み，新しいエントリを置く場所が控えられている
+    status = fat_find(text, entry);
+    if (status == FAT_OK) {
+        return FAT_ERR_EXISTS;
+    }
+    if (status != FAT_ERR_NOT_FOUND) {
+        return status;
+    }
+    // 置ける場所が無ければ，ルートディレクトリを1クラスタ広げてその先頭に置く
+    if (fat_slot_found == 0) {
+        status = fat_extend_root();
+        if (status != FAT_OK) {
+            return status;
+        }
+    }
+    // 名前は検索のために8.3形式へ変換したものを使い，中身の無いファイルとして設定する
+    for (int i = 0; i < FAT_NAME_SIZE; i++) {
+        entry->name[i] = fat_find_name[i];
+    }
+    entry->attr = ATTR_ARCHIVE;
+    entry->name_case = fat_name_case(text);
+    entry->cluster = 0;
+    entry->size = 0;
+    entry->sector = fat_slot_sector;
+    entry->offset = fat_slot_offset;
+    entry->lfn_count = 0;
+    // 新しいエントリを置く場所を含むセクタを読み込む(同じセクタに並ぶ他のエントリを残したまま書き込むため)
+    if (sd_read_block(entry->sector, fat_sector) == 0) {
+        return FAT_ERR_READ;
+    }
+    // 置く場所が削除済みのエントリであれば古い値が残っているため，32バイト全体を0にしてから書き直す
+    offset = entry->offset;
+    for (int i = 0; i < DIR_ENTRY_SIZE; i++) {
+        fat_sector[offset + i] = 0;
+    }
+    // 作成した日時と参照した日付も，更新した日時と同じ値にする
+    fat_write_u16(offset + DIR_CREATE_TIME, 0);
+    fat_write_u16(offset + DIR_CREATE_DATE, DIR_DATE_OLDEST);
+    fat_write_u16(offset + DIR_ACCESS_DATE, DIR_DATE_OLDEST);
+    // 最後に更新した日時と，名前・属性などの項目を書く
+    fat_put_modified_time(offset);
+    fat_put_entry(entry);
+    // 書き換えたセクタをカードへ書き込む
+    if (sd_write_block(entry->sector, fat_sector) == 0) {
+        return FAT_ERR_WRITE;
+    }
+    return FAT_OK;
+}
+
+// entryのファイルの内容を，dataの先頭lengthバイトで丸ごと置き換える
+// 新しい内容を空きクラスタへ書き終えてから差し替えるため，途中で失敗してもファイルは元の内容のまま残る(一時的に元の内容と新しい内容の両方の空きが要る)
+int fat_write(struct FatEntry *entry, char *data, int length) {
+    unsigned int old_cluster = entry->cluster;      // 置き換える前の内容の開始クラスタ
+    unsigned int old_size = entry->size;            // 置き換える前の内容のバイト数
+    unsigned char old_attr = entry->attr;           // 置き換える前の属性
+    unsigned int first = 0;                         // 新しい内容の開始クラスタ(まだ確保していなければ0)
+    unsigned int cluster = 0;                       // 書き込み中のクラスタ
+    unsigned int next;                              // 新しく確保したクラスタ
+    unsigned int sector = fat_sectors_per_cluster;  // クラスタ内で次に書くセクタの位置(最初のセクタを書く前にクラスタを確保させるため，クラスタの終わりから始める)
+    int status = FAT_OK;                            // 各処理の結果
+
+    // マウントしていなければ，クラスタの位置が分からない
+    if (fat_mounted == 0) {
+        return FAT_ERR_NOT_MOUNTED;
+    }
+    // ディレクトリの中身はエントリの並びであり，ファイルの内容として書き換えるものではない
+    if ((entry->attr & ATTR_DIRECTORY) != 0) {
+        return FAT_ERR_IS_DIR;
+    }
+    // 新しい内容を1セクタずつ，空きクラスタへ書く
+    for (int written = 0; status == FAT_OK && written < length; written += SD_BLOCK_SIZE) {
+        // クラスタを書き終えていれば，次のクラスタを確保して前のクラスタの次へつなぐ
+        if (sector == fat_sectors_per_cluster) {
+            status = fat_alloc_cluster(cluster, &next);
+            if (status != FAT_OK) {
+                break;
+            }
+            cluster = next;
+            if (first == 0) {
+                first = cluster;
+            }
+            sector = 0;
+        }
+        // クラスタの確保はfat_sectorを使うため，その後でセクタに書く内容を用意する(内容の後ろの余りは0で埋める)
+        for (int i = 0; i < SD_BLOCK_SIZE; i++) {
+            if (written + i < length) {
+                fat_sector[i] = data[written + i];
+            } else {
+                fat_sector[i] = 0;
+            }
+        }
+        // 用意した内容を，確保したクラスタの中の次のセクタへ書き込む
+        if (sd_write_block(fat_cluster_sector(cluster) + sector, fat_sector) == 0) {
+            status = FAT_ERR_WRITE;
+        }
+        sector++;
+    }
+    // 全て書けたら，エントリを新しい内容の位置と大きさに差し替える
+    if (status == FAT_OK) {
+        entry->attr |= ATTR_ARCHIVE;
+        entry->cluster = first;
+        entry->size = length;
+        status = fat_store_entry(entry, 1);
+    }
+    // 差し替えられなかった場合は書きかけの新しい内容を解放し，エントリを元の内容に戻す
+    if (status != FAT_OK) {
+        entry->attr = old_attr;
+        entry->cluster = old_cluster;
+        entry->size = old_size;
+        if (first != 0) {
+            fat_free_chain(first);
+        }
+        return status;
+    }
+    // 元の内容の解放は，エントリを差し替えた後に行う(先に解放すると，差し替えに失敗したときに使用中のエントリが空きクラスタを指すため)
+    if (old_cluster != 0) {
+        return fat_free_chain(old_cluster);
+    }
+    return FAT_OK;
+}
+
+// entryのファイルを削除する(長いファイル名を持てば，そのエントリもあわせて削除する)
+int fat_remove(struct FatEntry *entry) {
+    int status;  // エントリの削除の結果
+
+    // マウントしていなければ，エントリの位置が分からない
+    if (fat_mounted == 0) {
+        return FAT_ERR_NOT_MOUNTED;
+    }
+    // ディレクトリは中身を持つため，ファイルと同じ方法では削除しない
+    if ((entry->attr & ATTR_DIRECTORY) != 0) {
+        return FAT_ERR_IS_DIR;
+    }
+    // 長いファイル名のエントリの先頭から，短い名前のエントリまでを削除済みにする
+    if (entry->lfn_count != 0) {
+        status = fat_mark_deleted(entry->lfn_sector, entry->lfn_offset, entry->lfn_count + 1);
+    } else {
+        status = fat_mark_deleted(entry->sector, entry->offset, 1);
+    }
+    if (status != FAT_OK) {
+        return status;
+    }
+    // 中身の解放は，エントリを削除した後に行う(先に解放すると，エントリの削除に失敗したときに使用中のエントリが空きクラスタを指すため)
+    if (entry->cluster != 0) {
+        return fat_free_chain(entry->cluster);
+    }
+    return FAT_OK;
+}
+
+// entryのファイル・ディレクトリの名前を，"NAME.EXT"形式の名前textに変更する
+// 他のエントリが既にその名前であればFAT_ERR_EXISTSを返す(大文字・小文字だけを変える場合は自分自身が見つかるため，変更を続ける)
+int fat_rename(struct FatEntry *entry, char *text) {
+    struct FatEntry other;  // 新しい名前で見つかったエントリ
+    int status;             // 検索・エントリの削除の結果
+
+    // 新しい名前のエントリを探し，自分以外が見つかれば変更しない
+    status = fat_find(text, &other);
+    if (status == FAT_OK) {
+        if (other.sector != entry->sector || other.offset != entry->offset) {
+            return FAT_ERR_EXISTS;
+        }
+    } else if (status != FAT_ERR_NOT_FOUND) {
+        return status;
+    }
+    // 長いファイル名は古い名前のものであり，新しい短い名前と対応しなくなるため削除する
+    if (entry->lfn_count != 0) {
+        status = fat_mark_deleted(entry->lfn_sector, entry->lfn_offset, entry->lfn_count);
+        if (status != FAT_OK) {
+            return status;
+        }
+        entry->lfn_count = 0;
+    }
+    // 名前は検索のために8.3形式へ変換したものを使う
+    for (int i = 0; i < FAT_NAME_SIZE; i++) {
+        entry->name[i] = fat_find_name[i];
+    }
+    entry->name_case = fat_name_case(text);
+    // 新しい名前をカード上のエントリへ書き込む(中身は変えないため，更新日時は書き換えない)
+    return fat_store_entry(entry, 0);
+}
+
 // 各関数が返した失敗の理由を，改行付きのメッセージとして出力する
 void fat_print_error(int status) {
     // 戻り値ごとに決めたメッセージを出力する(想定外の値もメッセージ無しにはしない)
@@ -585,6 +1217,15 @@ void fat_print_error(int status) {
         break;
     case FAT_ERR_IS_DIR:
         print("is a directory\n");
+        break;
+    case FAT_ERR_WRITE:
+        print("cannot write card\n");
+        break;
+    case FAT_ERR_FULL:
+        print("no space left\n");
+        break;
+    case FAT_ERR_EXISTS:
+        print("file exists\n");
         break;
     default:
         print("unexpected error\n");

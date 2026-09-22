@@ -1,7 +1,7 @@
-// SDカードのドライバ．Arduino互換ヘッダのSPIピン(AR_SPI)をソフトウェアで駆動してカードを初期化し，ブロックを読み出す
+// SDカードのドライバ．Arduino互換ヘッダのSPIピン(AR_SPI)をソフトウェアで駆動してカードを初期化し，ブロックを読み書きする
 #pragma once
 
-const int SD_BLOCK_SIZE = 512;  // 1ブロックのバイト数(どのカードもこの長さで読み出す)
+const int SD_BLOCK_SIZE = 512;  // 1ブロックのバイト数(どのカードもこの長さで読み書きする)
 
 // SS(チップセレクト)の出力レベル(0:カードを選択中，1:非選択)
 // AR_SPIへの書き込みは常に全ビットを同時に置き換えるため，SSだけを別に保ち回す
@@ -214,8 +214,8 @@ int sd_init_commands(void) {
     return response == 0x00;
 }
 
-// SDカードをSPIモードへ入れ，ブロックを読み出せる状態まで初期化する
-// アドレスの単位の判定までを含むため，完了後はブロックの読み出しをそのまま行える
+// SDカードをSPIモードへ入れ，ブロックを読み書きできる状態まで初期化する
+// アドレスの単位の判定までを含むため，完了後はブロックの読み書きをそのまま行える
 // 戻り値: 1(初期化完了) / 0(失敗)
 int sd_init(void) {
     int ready;  // 初期化コマンド列の結果
@@ -299,4 +299,60 @@ int sd_read_block(unsigned int block, unsigned char *buf) {
     // 読み出しを終えたカードを解放する
     sd_release();
     return 1;
+}
+
+// bufの先頭からSD_BLOCK_SIZEバイトを，1ブロックへ書き込む
+// 失敗しても表示は行わない(他の出力の途中でも呼ばれるため，失敗の伝え方は呼び出し元が決める)
+// 戻り値: 1(書き込み成功) / 0(失敗．ブロックの内容は保証されない)
+int sd_write_block(unsigned int block, unsigned char *buf) {
+    int response;  // CMD24のR1応答と，書き込んだデータへの応答
+
+    // アドレスの単位が確定していないと誤った番地へ書くため，初期化が完了していなければ書かない
+    if (sd_ready == 0) {
+        return 0;
+    }
+
+    // カードを選択して書き込みを要求する
+    spi_ss = 0;
+    // CMD24(WRITE_BLOCK): 1ブロックの書き込み要求．CRCは無視されるためエンドビットのみを立てた値を渡す
+    response = sd_command(24, sd_block_arg(block), 0x01);
+    // 要求が受理されなければ，カードを解放して失敗とする
+    if (response != 0x00) {
+        sd_release();
+        return 0;
+    }
+
+    // 応答とデータ開始トークンの間には1バイト以上の間隔が必要なため，ダミーを1バイト挟む
+    spi_transfer(0xff);
+    // データ開始トークン(0xfe)に続けて1ブロック分を送る
+    spi_transfer(0xfe);
+    for (int i = 0; i < SD_BLOCK_SIZE; i++) {
+        spi_transfer(buf[i]);
+    }
+    // データの後にCRCを2バイト送る．SPIモードでは検査されないためダミーでよい
+    spi_transfer(0xff);
+    spi_transfer(0xff);
+
+    // カードはデータを受け取ると，下位5ビットで受理(0x05)・CRCエラー・書き込みエラーを表す応答を返す
+    // 応答はMISOのアイドル値(0xff)と違ってbit4が0になるため，それが現れるまで読む(規格上は直後に返るが，余裕を見て16回まで読む)
+    response = 0xff;
+    for (int i = 0; i < 16 && (response & 0x10) != 0; i++) {
+        response = spi_transfer(0xff);
+    }
+    if ((response & 0x1f) != 0x05) {
+        sd_release();
+        return 0;
+    }
+
+    // カードは受理したデータを書き終えるまでMISOをLowに保ち(ビジー)，書き終えるとアイドル値(0xff)へ戻す
+    // 規格上の書き込み時間の上限(SDXCで500ms)を上回るだけの回数を見る(読み出しの待ちの回数が100msを上回る値であり，その5倍)
+    for (int i = 0; i < 1000000; i++) {
+        if (spi_transfer(0xff) == 0xff) {
+            sd_release();
+            return 1;
+        }
+    }
+    // 上限まで待っても書き終わらなければ失敗とする
+    sd_release();
+    return 0;
 }
