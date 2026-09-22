@@ -410,7 +410,7 @@ int fat_make_name(char *text, unsigned char *name) {
 }
 
 // エントリの名前を表示用の"NAME.EXT"形式で書き込む(拡張子が無ければドットも付けない)
-// 入力された名前をエントリ上の形式へ変換するfat_make_nameとは向きが逆で，共通する大文字・小文字の変換だけを別の関数に切り出している
+// 入力された名前をエントリ上の形式へ変換する処理とは向きが逆の変換で，両者に共通する大文字・小文字の変換は別の関数に切り出している
 // textはFAT_NAME_TEXT_SIZE要素以上で確保すること
 // Windowsが全て小文字の基本名・拡張子に付けるフラグに従い，該当する部分は小文字で書く
 void fat_format_name(struct FatEntry *entry, char *text) {
