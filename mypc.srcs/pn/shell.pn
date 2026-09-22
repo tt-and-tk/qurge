@@ -142,7 +142,7 @@ void handle_cat(int pos) {
     }
 }
 
-// sdinitコマンド: SDカードを初期化し，カード上のFAT32ボリュームをマウントし直す
+// sdinitコマンド: SDカードを初期化し，カード上のFAT32ファイルシステムをマウントし直す
 void handle_sdinit(int pos) {
     int status;  // マウントの結果
 
@@ -157,7 +157,7 @@ void handle_sdinit(int pos) {
         print_fat_error(status);
         return;
     }
-    print("volume mounted\n");
+    print("mounted\n");
 }
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
@@ -204,11 +204,11 @@ void main(void) {
     int pos;     // コマンド名の直後の位置(引数の取り出し開始位置)
     int status;  // 起動時のマウントの結果
 
-    // カードがあればボリュームをマウントする．失敗してもsdinitでやり直せるよう，シェルはそのまま起動する
+    // カードがあればファイルシステムをマウントする．失敗してもsdinitでやり直せるよう，シェルはそのまま起動する
     // 表示にprint_errorを使わないのは，この時点ではコマンド名が入っていないため
     status = fat_mount();
     if (status == FAT_OK) {
-        print("fat: volume mounted\n");
+        print("fat: mounted\n");
     } else {
         print("fat: ");
         fat_print_error(status);
