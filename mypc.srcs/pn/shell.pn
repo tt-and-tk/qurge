@@ -1,800 +1,116 @@
 // シェルのメインループ．標準入力から1行受け取り，先頭のトークンをコマンド名として解析し，対応する処理を呼び出す
-char input[64];  // 1行分の入力バッファ
-char cmd[64];    // 入力の先頭トークン(コマンド名)
+#include "args.pn"
+#include "sd.pn"
+#include "fat.pn"
 
-// ファイル1件分のエントリ(名前は7文字+ヌル終端，内容は31文字+ヌル終端)
-struct FileEntry {
-    char name[8];
-    char content[32];
-};
+const int INPUT_SIZE = 64;          // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
+const int ERROR_MESSAGE_SIZE = 32;  // エラーメッセージを出力する一時バッファの要素数
 
-struct FileEntry entries[4];  // ファイルテーブル本体(最大4件)
-char file_used[4];            // 各エントリの使用中フラグ(0:未使用，1:使用中)
+char input[INPUT_SIZE];  // 1行分の入力バッファ
+char cmd[INPUT_SIZE];    // 入力の先頭トークン(コマンド名)
 
-// SS(チップセレクト)の出力レベル(0:カードを選択中，1:非選択)
-// AR_SPIへの書き込みは常に全ビットを同時に置き換えるため，SSだけを別に保ち回す
-int spi_ss = 1;  // 初期値はハードウェアのリセット値(非選択)と揃える
-
-int sd_ready = 0;             // カードの初期化が完了しているか(0:未完了，1:完了)
-int sd_block_addressing = 0;  // コマンド引数のアドレスの単位(1:ブロック単位(SDHC/SDXC)，0:バイト単位(SDSC))
-
-// ファイルテーブルを読み書きするための値(いずれも実行中は書き換えない)
-int fs_block = 0;                // ファイルテーブルを保存するブロックの番号
-int fs_format_name = 0x514653;   // そのブロックがファイルテーブルであることを示すファイルテーブルフォーマット名('Q' 'F' 'S'．Qurge File Systemの略)
-int fs_format_version = 1;       // ファイルテーブルフォーマットのバージョン番号．ファイルテーブルフォーマットを変えたときは上げる(上げないと古いカードを誤った長さで復元してしまう)
-int fs_used_bytes = 8 + 4 * 40;  // ファイルテーブルがブロックの先頭から使うバイト数．ファイルテーブルフォーマット名3バイト + バージョン番号1バイト + 使用中フラグ4バイト + エントリ4件×40バイト
-
-// bufのpos文字目以降に連続する空白を読み飛ばした位置を返す
-int skip_spaces(char buf[], int pos) {
-    // 区切りとして扱うのは半角空白だけで，タブ等の他の空白文字は引数の一部になる
-    while (buf[pos] == ' ') {
-        pos = pos + 1;
-    }
-    return pos;
-}
-
-// bufのpos文字目以降から引数を1つargへ取り出し，その直後の位置を返す
-// 引数1つが行全体になり得るため，argはbufと同じ幅で確保すること(コピー先の幅を知る手段が無く打ち切れない)
-int extract_arg(char buf[], int pos, char arg[]) {
-    int i = 0;
-    // 引数の手前に連続する空白を読み飛ばす
-    pos = skip_spaces(buf, pos);
-    // 次の空白かヌル終端の直前までを1つの引数としてコピーする(引数が無ければ空文字列になる)
-    while (buf[pos + i] != ' ' && buf[pos + i] != '\0') {
-        arg[i] = buf[pos + i];
-        i = i + 1;
-    }
-    arg[i] = '\0';
-    // 取り出した引数の直後の位置を返す(次の引数を取り出す際の開始位置になる)
-    return pos + i;
-}
-
-// bufのpos文字目以降を丸ごと1つの引数としてargへ取り出す
-// extract_argと同じく，argはbufと同じ幅で確保すること
-void extract_text_arg(char buf[], int pos, char arg[]) {
-    int i = 0;
-    // 引数の手前に連続する空白を読み飛ばす
-    pos = skip_spaces(buf, pos);
-    // 残りは原文のままコピーする(空白を区切りとせず引数の一部として扱う)
-    while (buf[pos + i] != '\0') {
-        arg[i] = buf[pos + i];
-        i = i + 1;
-    }
-    arg[i] = '\0';
-}
-
-// bufのpos文字目以降に引数が残っていれば1，残っていなければ0を返す
-int has_extra_args(char buf[], int pos) {
-    // 先頭の空白を読み飛ばす
-    pos = skip_spaces(buf, pos);
-    // 読み飛ばした先がヌル終端なら引数は残っていない
-    return buf[pos] != '\0';
+// エラーメッセージの前置き"<コマンド名>: "を出力する(どのコマンドが出したエラーかが分かるようにするため)
+void print_error_head(void) {
+    print(cmd);
+    print(": ");
 }
 
 // エラーを"<コマンド名>: <msg>"の形式で出力する(msgは末尾の改行まで含めて渡す)
-void print_error(char msg[]) {
-    char msg_buf[32];  // 出力用の一時バッファ(printは直接配列のみ受け付けるため)
+void print_error(char *msg) {
+    char msg_buf[ERROR_MESSAGE_SIZE];  // 出力用の一時バッファ(printは配列変数のみ受け付けるため)
     int i = 0;
-    while (msg[i] != '\0' && i < 31) {
+    while (msg[i] != '\0' && i < ERROR_MESSAGE_SIZE - 1) {
         msg_buf[i] = msg[i];
         i = i + 1;
     }
     msg_buf[i] = '\0';
-    // どのコマンドが出したエラーかが分かるよう，実行中のコマンド名を前置する
-    print(cmd);
-    print(": ");
+    print_error_head();
     print(msg_buf);
 }
 
-// 0〜15の値を16進数1桁の文字へ変換する
-char hex(int value) {
-    if (value < 10) {
-        return '0' + value;
-    }
-    return 'a' + value - 10;
-}
-
-// valueを"0x??"の形式で出力する(改行は付けない)
-void print_hex(char value) {
-    char hex_buf[5];  // 出力用の一時バッファ
-    hex_buf[0] = '0';
-    hex_buf[1] = 'x';
-    hex_buf[2] = hex((value >> 4) & 0x0f);  // 上位4ビット
-    hex_buf[3] = hex(value & 0x0f);         // 下位4ビット
-    hex_buf[4] = '\0';
-    print(hex_buf);
-}
-
-// SPIモード0のビットバンギングで1バイトを送信し，同時に受信した1バイトを返す
-// SPIは全二重で送信と受信が常に対になるため，受信だけしたい場合は0xffを渡すこと
-int spi_transfer(char data) {
-    // AR_SPIのビット割り当て(bit3:MISO(入力) / bit2:SCK / bit1:MOSI / bit0:SS(アクティブLow))
-
-    int received = 0;  // MISOから上位ビット順に組み立てる受信バイト(charにしないのは，符号付きのため0xffが-1として読み戻り，呼び出し元の0xffとの比較が成り立たなくなるため)
-    int level;         // SSとMOSIを反映したAR_SPIへの書き込み値(SCKはLow)
-
-    for (int i = 7; i >= 0; i--) {
-        // SPI上の送信順は上位ビットからのため，iビット目を取り出してMOSI(bit1)へ置く
-        level = spi_ss | (((data >> i) & 1) << 1);
-        // SCKをLowに保ったままMOSIを確定させる．カードはこの立ち下がりでMISOへ次のビットを載せる
-        AR_SPI = level;
-        // SCK(bit2)をHighへ上げる．カードはこの立ち上がりでMOSIを取り込む
-        AR_SPI = level | 4;
-        // MISO(bit3)を読み，受信バイトの下位へ積む
-        // AR_SPIのMISOは同期化を挟むためピンより3サイクル遅れるが，値を載せた立ち下がりから
-        // ここまでに複数の命令を挟んでおり，読む時点では確定した値が現れている
-        received = (received << 1) | ((AR_SPI >> 3) & 1);
-    }
-    // 8ビット送り終えたらSCKをLowへ戻し，MOSIはアイドルのHighにして次の転送に備える
-    AR_SPI = spi_ss | 2;
-    return received;
-}
-
-// SDカードへコマンドを送り，R1応答を返す(応答が得られなければ0xffを返す)
-int sd_command(int cmd_index, int arg, int crc) {
-    int response;  // カードから受け取った1バイト
-
-    // 直前の処理でカードがビジーならば抜けさせるためのクロックを8回与える
-    spi_transfer(0xff);
-    // コマンドフレームは6バイト固定で，先頭バイトの上位2ビット'01'がホストからの送信を表す
-    spi_transfer(0x40 | cmd_index);
-    // 引数32ビットを上位バイトから順に送る(下位8ビット以外は引数の型が切り捨てる)
-    spi_transfer(arg >> 24);
-    spi_transfer(arg >> 16);
-    spi_transfer(arg >> 8);
-    spi_transfer(arg);
-    // SPIモードではCRCは基本的に無視されるが，CMD0とCMD8だけは正しい値が必須のため呼び出し元から受け取る
-    spi_transfer(crc);
-
-    // 応答が返るまでの間はMISOがHigh(0xff)のままなので，最上位ビットが0のバイトが応答の先頭になる
-    // 規格上の待ち時間(NCR)は最大8バイトのため，余裕を見て16回まで読む
-    for (int i = 0; i < 16; i++) {
-        response = spi_transfer(0xff);
-        if ((response & 0x80) == 0) {
-            return response;
-        }
-    }
-    return 0xff;
-}
-
-// カードを非選択へ戻して解放する
-// カードの内部状態機械はSCKでしか進まないため，SSを戻した後に8クロック与えて後始末を完了させる
-void sd_release(void) {
-    spi_ss = 1;
-    spi_transfer(0xff);
-}
-
-// 初期化のコマンド列を順に実行する(どこで失敗したのかが分かるように各段の応答を表示している)
-// 呼び出す前にspi_ssを0にしてカードを選択しておくこと
-// 戻り値: 1(初期化完了) / 0(失敗)
-int sd_init_commands(void) {
-    // カードが返す応答の形式
-    // R1: どのコマンドにも共通する1バイトのステータス(bit0:in idle state / bit2:illegal command / bit7:常に0)
-    // R3: CMD58だけが返す形式で，R1に4バイトのOCRが続く
-    // R7: CMD8だけが返す形式で，R1に4バイトが続く
-
-    int response;  // 各コマンドのR1応答
-    int received;  // R1に続く4バイトを1バイトずつ受け取る変数
-    int echoed;    // R7の末尾2バイト(受理された電圧範囲とチェックパターン)
-    int ocr_high;  // R3のOCRの最上位バイト(CCSビットを含む)
-    int ready;     // ACMD41が完了を返したか(0:未完了，1:完了)
-
-    // CMD0(GO_IDLE_STATE): ソフトリセット．アイドル状態へ入ればin idle stateのみが立った0x01が返る
-    response = sd_command(0, 0x00000000, 0x95);
-    print("CMD0: ");
-    print_hex(response);
-    print("\n");
-    if (response != 0x01) {
-        return 0;
-    }
-
-    // CMD8(SEND_IF_COND): 2.7〜3.6Vで動かせるかの問い合わせ．引数下位の0xaaはエコーバックされるチェックパターン
-    response = sd_command(8, 0x000001aa, 0x87);
-    print("CMD8: ");
-    print_hex(response);
-    // 無応答を表す0xffはillegal commandビットも含むため，v1カードの判定より先に切り分ける
-    if (response == 0xff) {
-        print(" (no response)\n");
-        return 0;
-    }
-    // CMD8はSD規格v2で追加されたため，v1カードはillegal command(bit2)を立てて拒否する
-    // 拒否された場合はR1しか返らないため続く4バイトを読まず，ACMD41の引数も異なるサポート外としてここで止める
-    if ((response & 0x04) != 0) {
-        print(" (SD v1, unsupported)\n");
-        return 0;
-    }
-    if (response != 0x01) {
-        print("\n");
-        return 0;
-    }
-    // 受理された場合の応答はR7で，R1に続く4バイトのうち末尾2バイトが受理された電圧範囲と送ったチェックパターンのエコーバックになる
-    echoed = 0;
-    for (int i = 0; i < 4; i++) {
-        received = spi_transfer(0xff);
-        print(" ");
-        print_hex(received);
-        echoed = ((echoed << 8) | received) & 0xffff;  // 末尾2バイトだけを残す
-    }
-    print("\n");
-    // CMD8の引数0x000001aaの下位2バイト(0x01=2.7〜3.6V，0xaa=チェックパターン)がそのまま戻らなければ，配線か電圧に問題がある
-    if (echoed != 0x01aa) {
-        print("check pattern mismatch\n");
-        return 0;
-    }
-
-    // ACMD41(SD_SEND_OP_COND): 初期化の開始指示．内部初期化中は0x01を返し続け，完了すると0x00になる
-    // 完了まで最大1秒かかることが規格上許容されているため，遅いカードを取りこぼさない回数を見る
-    ready = 0;
-    for (int i = 0; i < 1000 && ready == 0; i++) {
-        // ACMDはCMDとは別の命令セットで，CMD55の直後の1コマンドだけがそちらとして解釈される
-        response = sd_command(55, 0x00000000, 0x65);
-        // CMD55が通っていないと続くコマンドは通常のCMD41として解釈されるため，前提が崩れたまま繰り返さず止める
-        // カードはACMD41が完了するまでアイドル状態にあるため，in idle state(bit0)以外が立っていれば失敗とみなす
-        if ((response & 0xfe) != 0) {
-            print("CMD55: ");
-            print_hex(response);
-            print("\n");
-            return 0;
-        }
-        // 引数のbit30(HCS)で大容量カード(SDHC/SDXC)を扱えるホストであることを申告する
-        response = sd_command(41, 0x40000000, 0x77);
-        if (response == 0x00) {
-            ready = 1;
-        }
-    }
-    print("ACMD41: ");
-    print_hex(response);
-    if (ready == 0) {
-        // 上限まで繰り返しても完了しなかった(直前に表示したのが最後に返った応答)
-        print(" (not ready)\n");
-        return 0;
-    }
-    print("\n");
-
-    // CMD58(READ_OCR): アドレスの単位を決めるCCSビットを読む
-    // 応答はR3(R1に4バイトのOCRが続く)で，CCSはOCRの最上位バイトのbit6にある
-    response = sd_command(58, 0x00000000, 0x01);
-    print("CMD58: ");
-    print_hex(response);
-    // 失敗した場合も4バイト読み切らないと以降の転送がずれるため，読み出しは先に済ませる
-    // OCRのbit31(power up status)は確認しない．ACMD41が完了を返した後であり，必ず立っているため
-    ocr_high = 0;
-    for (int i = 0; i < 4; i++) {
-        received = spi_transfer(0xff);
-        print(" ");
-        print_hex(received);
-        if (i == 0) {
-            ocr_high = received;
-        }
-    }
-    if (response != 0x00) {
-        print(" (failed)\n");
-        return 0;
-    }
-    // OCRの最上位バイトのbit6(CCS)がアドレスの単位を表す
-    sd_block_addressing = (ocr_high >> 6) & 1;
-    if (sd_block_addressing == 1) {
-        print(" (block addressing)\n");
-        return 1;
-    }
-    print(" (byte addressing)\n");
-
-    // CMD16(SET_BLOCKLEN): バイト単位アドレスのカードにブロック長を512バイトへ揃えさせる
-    // ブロック単位のカードは512バイト固定でこのコマンドが効かないため，そちらへは送らない
-    response = sd_command(16, 512, 0x01);
-    print("CMD16: ");
-    print_hex(response);
-    print("\n");
-    return response == 0x00;
-}
-
-// SDカードをSPIモードへ入れ，ブロックを読み書きできる状態まで初期化する
-// アドレスの単位の判定までを含むため，完了後はブロックの読み書きをそのまま行える
-// 戻り値: 1(初期化完了) / 0(失敗)
-int sd_init(void) {
-    int ready;  // 初期化コマンド列の結果
-
-    // 一度成功した後の再実行が失敗した場合に前のカードの値が残らないよう，入口で揃えて初期化する
-    // sd_block_addressingはCMD58に到達しないと設定されないため，そこまで進まず失敗する経路がある
-    sd_ready = 0;
-    sd_block_addressing = 0;
-
-    // カードは自前の発振器を持たずSCKで内部回路を動かすため，電源投入後に74クロック以上を与える必要がある(ここでは80クロック)
-    // SSをHighのまま送ることで，カードはこれをコマンドと解釈せず単なるクロック供給として受け取る
-    spi_ss = 1;
-    for (int i = 0; i < 10; i++) {
-        spi_transfer(0xff);
-    }
-
-    // カードを選択してから初期化のコマンド列を発行する
-    // カードはCMD0を受け取った瞬間のSSでモードを決めるため，ここで選択しておくことがSPIモードへの切り替えになる
-    spi_ss = 0;
-    ready = sd_init_commands();
-
-    // 途中で失敗してもカードがMISOを掴んだままにならないよう，成否によらずここで解放する
-    sd_release();
-    sd_ready = ready;
-    return ready;
-}
-
-// ブロック番号をコマンドの引数へ変換する
-int sd_block_arg(int block) {
-    if (sd_block_addressing == 1) {
-        return block;
-    }
-    return block * 512;
-}
-
-// ブロックの読み出しを開始し，512バイトを受け取れる状態にする
-// 呼び出す前にsd_initを成功させておくこと(アドレスの単位が確定していないと誤った番地を読む)
-// 成功した場合はsd_read_byteを512回呼んだ後にsd_read_endを呼ぶこと(失敗した場合はカードを解放済みのため呼ばない)
-// 戻り値: 1(受信可能) / 0(失敗)
-int sd_read_begin(int block) {
-    int response;  // CMD17のR1応答
-    int token;     // カードから受け取ったトークン
-
-    spi_ss = 0;
-    // CMD17(READ_SINGLE_BLOCK): 1ブロックの読み出し要求．CRCは無視されるためエンドビットのみを立てた値を渡す
-    response = sd_command(17, sd_block_arg(block), 0x01);
-    if (response != 0x00) {
-        print("CMD17: ");
-        print_hex(response);
-        print("\n");
-        sd_release();
-        return 0;
-    }
-
-    // データが揃うまでMISOはHigh(0xff)のままで，先頭に0xfeのデータ開始トークンが現れる
-    // 規格上の読み出し時間の上限(100ms)を上回るだけの回数を見る(1バイトの転送に最低でも数百サイクルかかる)
-    for (int i = 0; i < 200000; i++) {
-        token = spi_transfer(0xff);
-        if (token == 0xfe) {
-            return 1;
-        }
-        // 0xff以外が来た場合はエラートークンであり，待っても0xfeへは変わらない
-        if (token != 0xff) {
-            print("read token: ");
-            print_hex(token);
-            print("\n");
-            sd_release();
-            return 0;
-        }
-    }
-    print("read timeout\n");
-    sd_release();
-    return 0;
-}
-
-// 読み出し中のブロックから1バイト受け取る
-int sd_read_byte(void) {
-    return spi_transfer(0xff);
-}
-
-// 512バイト読み終えた後の後始末を行う
-void sd_read_end(void) {
-    // データの後にCRCが2バイト続く．SPIモードでは検査されないため読み捨てる
-    spi_transfer(0xff);
-    spi_transfer(0xff);
-    sd_release();
-}
-
-// ブロックの書き込みを開始し，512バイトを送れる状態にする
-// 呼び出す前にsd_initを成功させておくこと(アドレスの単位が確定していないと誤った番地へ書く)
-// 成功した場合はsd_write_byteを512回呼んだ後にsd_write_endを呼ぶこと(失敗した場合はカードを解放済みのため呼ばない)
-// 戻り値: 1(送信可能) / 0(失敗)
-int sd_write_begin(int block) {
-    int response;  // CMD24のR1応答
-
-    spi_ss = 0;
-    // CMD24(WRITE_BLOCK): 1ブロックの書き込み要求．CRCは無視されるためエンドビットのみを立てた値を渡す
-    response = sd_command(24, sd_block_arg(block), 0x01);
-    if (response != 0x00) {
-        print("CMD24: ");
-        print_hex(response);
-        print("\n");
-        sd_release();
-        return 0;
-    }
-
-    // 応答とデータ開始トークンの間には1バイト以上の間隔が必要なため，ダミーを1バイト挟む
-    spi_transfer(0xff);
-    // データ開始トークンを送ると，以降の512バイトがブロックの内容として扱われる
-    spi_transfer(0xfe);
-    return 1;
-}
-
-// 書き込み中のブロックへ1バイト送る
-void sd_write_byte(char value) {
-    spi_transfer(value);
-}
-
-// 512バイト送り終えた後の後始末を行い，書き込みが受理されたかを返す
-// 戻り値: 1(書き込み成功) / 0(失敗)
-int sd_write_end(void) {
-    int response;  // データ応答トークン
-
-    // データの後にCRCを2バイト送る．SPIモードでは検査されないためダミーでよい
-    spi_transfer(0xff);
-    spi_transfer(0xff);
-
-    // データ応答トークンはbit4が0で，下位3ビットが受理・CRCエラー・書き込みエラーを表す
-    // トークンが現れるまで0xffが数バイト挟まることがあるため，bit4が0のバイトが来るまで待つ
-    response = 0xff;
-    for (int i = 0; i < 200000; i++) {
-        response = spi_transfer(0xff);
-        if ((response & 0x10) == 0) {
-            break;
-        }
-    }
-    // 下位5ビットが0x05(xxx00101)であれば受理された
-    if ((response & 0x1f) != 0x05) {
-        print("data response: ");
-        print_hex(response);
-        print("\n");
-        sd_release();
-        return 0;
-    }
-
-    // カードは内部の書き込みが終わるまでMISOをLowに保つ(ビジー)．終わると0xffへ戻る
-    // 規格上の書き込み時間の上限(250ms)を上回るだけの回数を見る
-    for (int i = 0; i < 200000; i++) {
-        if (spi_transfer(0xff) == 0xff) {
-            sd_release();
-            return 1;
-        }
-    }
-    print("write timeout\n");
-    sd_release();
-    return 0;
-}
-
-// ファイルテーブルをSDカードへ書き出す
-// カードが使えない状態では何もしない(カードが無いまま操作するたびにエラーを出さないため)
-void fs_save(void) {
-    char value;  // 送る1バイトを受けておく変数(配列要素のメンバを関数へ直接渡すのは言語仕様として非対応なので経由する)
-
-    // カードが初期化されていなければ書き込む先がない
-    if (sd_ready == 0) {
-        return;
-    }
-    // 書き込みの手続きに入れなければ保存できない
-    if (sd_write_begin(fs_block) == 0) {
-        print_error("save failed\n");
-        return;
-    }
-
-    // ファイルテーブルフォーマット名を上位バイトから3バイト送り，続けてバージョン番号を1バイト送る
-    // 読み出し側はどちらも一致したときだけ復元する
-    sd_write_byte(fs_format_name >> 16);
-    sd_write_byte(fs_format_name >> 8);
-    sd_write_byte(fs_format_name);
-    sd_write_byte(fs_format_version);
-    // 4件それぞれの使用中フラグを送る
-    for (int i = 0; i < 4; i++) {
-        value = file_used[i];
-        sd_write_byte(value);
-    }
-    // 4件それぞれのエントリを，名前8バイト・内容32バイトの順に送る
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 8; j++) {
-            value = entries[i].name[j];
-            sd_write_byte(value);
-        }
-        for (int j = 0; j < 32; j++) {
-            value = entries[i].content[j];
-            sd_write_byte(value);
-        }
-    }
-    // ブロックは512バイト固定で送り切る必要があるため，テーブルが使わない残りを0で埋める
-    for (int i = fs_used_bytes; i < 512; i++) {
-        sd_write_byte(0);
-    }
-
-    // カードが書き込みを受理しなければ，保存できていない
-    if (sd_write_end() == 0) {
-        print_error("save failed\n");
+// FAT32の各関数が返した失敗の理由を，改行付きのメッセージとして出力する
+void print_fat_message(int status) {
+    switch (status) {
+    case FAT_ERR_READ:
+        print("cannot read card\n");
+        break;
+    case FAT_ERR_NOT_FAT32:
+        print("no FAT32 volume\n");
+        break;
+    case FAT_ERR_BROKEN:
+        print("broken file system\n");
+        break;
+    case FAT_ERR_NOT_MOUNTED:
+        print("no volume mounted\n");
+        break;
+    case FAT_ERR_BAD_NAME:
+        print("invalid file name\n");
+        break;
+    case FAT_ERR_NOT_FOUND:
+        print("no such file\n");
+        break;
+    case FAT_ERR_IS_DIR:
+        print("is a directory\n");
+        break;
+    default:
+        print("unexpected error\n");
+        break;
     }
 }
 
-// SDカードからファイルテーブルを復元する
-// ファイルテーブルフォーマット名かバージョン番号が一致しないブロック(まだ書き込んでいないカードや，
-// 他の用途・古いファイルテーブルフォーマットで使ったカード)は読み捨て，呼び出し元が用意した空のテーブルのまま起動できるようにする
-// fs_saveと対になるよう，カードが使えない状態では何もしない
-// 表示にprint_errorを使わないのは，起動時にも呼ばれ，その時点ではコマンド名が入っていないため
-void fs_load(void) {
-    int format_name = 0;  // 先頭3バイトを上位バイトから組み立てたファイルテーブルフォーマット名
-    int format_version;   // 4バイト目のバージョン番号
-    int value;            // 読み出した1バイト
-    int matched;          // ファイルテーブルフォーマット名とバージョン番号がどちらも一致したか(0:不一致，1:一致)
-
-    // カードが初期化されていなければ読む先がない
-    if (sd_ready == 0) {
-        return;
-    }
-    // 読み出しの手続きに入れなければ復元できない
-    if (sd_read_begin(fs_block) == 0) {
-        print("sd: cannot read file table\n");
-        return;
-    }
-
-    // 先頭3バイトのファイルテーブルフォーマット名と4バイト目のバージョン番号を読み，このブロックが読める形式のファイルテーブルかどうかを決める
-    for (int i = 0; i < 3; i++) {
-        format_name = (format_name << 8) | sd_read_byte();
-    }
-    format_version = sd_read_byte();
-    matched = format_name == fs_format_name && format_version == fs_format_version;
-
-    // 以降は一致しない場合も読み進める．512バイト読み切らないとカードがデータを送り続け，以降の転送がずれるため
-    // 4件それぞれの使用中フラグを受け取る
-    for (int i = 0; i < 4; i++) {
-        value = sd_read_byte();
-        if (matched == 1) {
-            // 1のときだけ使用中とし，それ以外の値はすべて未使用として扱う
-            // (0と1以外の値をそのまま入れると，空きとしても使用中としても扱われないエントリになる)
-            file_used[i] = value == 1;
-        }
-    }
-    // 4件それぞれのエントリを，名前8バイト・内容32バイトの順に受け取る
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 8; j++) {
-            value = sd_read_byte();
-            if (matched == 1) {
-                entries[i].name[j] = value;
-            }
-        }
-        for (int j = 0; j < 32; j++) {
-            value = sd_read_byte();
-            if (matched == 1) {
-                entries[i].content[j] = value;
-            }
-        }
-    }
-    // テーブルが使っていない残りは中身を捨てるが，512バイトに満たない分を読み終える必要がある
-    for (int i = fs_used_bytes; i < 512; i++) {
-        sd_read_byte();
-    }
-    // CRCを読み捨ててカードを解放する
-    sd_read_end();
-
-    if (matched == 0) {
-        // このブロックは次にテーブルを変えた時点で上書きされるため，中身があるカードなら失われる
-        print("sd: no file table (will be overwritten)\n");
-        return;
-    }
-    // 書き込み途中で電源が落ちた場合に終端の無い文字列が復元され得るため，末尾を終端で固定する
-    for (int i = 0; i < 4; i++) {
-        entries[i].name[7] = '\0';
-        entries[i].content[31] = '\0';
-    }
-    // RAM上のテーブルをカードの内容で置き換えたことを伝える(既にファイルがある状態で呼ばれた場合，それらはここで失われる)
-    print("sd: file table loaded\n");
+// FAT32の各関数が返した失敗を，実行中のコマンドのエラーとして出力する
+void print_fat_error(int status) {
+    print_error_head();
+    print_fat_message(status);
 }
 
 // echoコマンド: コマンド名以降の引数部分をそのまま出力する
 void handle_echo(int pos) {
-    char args[64];  // コマンド名を除いた引数部分
-    extract_text_arg(input, pos, args);
+    char args[INPUT_SIZE];  // コマンド名を除いた引数部分
+    extract_text_arg(input, pos, args, INPUT_SIZE);
     print(args);
     print("\n");
 }
 
-// file_usedを先頭から走査し，未使用エントリのインデックスを返す．空きが無ければ-1を返す
-int find_free_entry(void) {
-    for (int i = 0; i < 4; i++) {
-        if (file_used[i] == 0) {
-            return i;
-        }
+// ルートディレクトリの走査で，エントリの名前を1行出力する(ディレクトリは末尾に'/'を付けて区別する)
+int print_entry(struct FatEntry *entry) {
+    char text[FAT_NAME_TEXT_SIZE];  // 表示用の名前
+    fat_format_name(entry, text);
+    print(text);
+    if ((entry->attr & ATTR_DIRECTORY) != 0) {
+        print("/");
     }
-    return -1;
-}
-
-// nameの先頭7文字(ヌル終端が先に来ればそこまで)をtruncatedへコピーし，ヌル終端する
-// (保存側のrename_fileも同じ7文字の打ち切りを自前で持つ．コピー先がentries[].nameであり，構造体配列のメンバを関数へ渡せないためこの関数を呼べない)
-void truncate_name(char name[], char truncated[]) {
-    int i = 0;
-    while (name[i] != '\0' && i < 7) {
-        truncated[i] = name[i];
-        i = i + 1;
-    }
-    truncated[i] = '\0';
-}
-
-// nameが使用中のエントリのファイル名と重複しているかを判定する
-// 戻り値: 1(重複する) / 0(重複しない)
-int is_name_duplicated(int entry, char name[]) {
-    int found;  // nameと同名の使用中エントリ(無ければ-1)
-
-    // 同名のエントリを探す
-    found = find_entry_by_name(name);
-    // entry自身が見つかるのは名前が変わらない場合であり，重複には当たらない
-    return found != -1 && found != entry;
-}
-
-// nameの内容をentries[entry].nameへ1文字ずつコピーする(7文字を超える分は切り捨てる)
-// 戻り値: 1(付けた) / 0(名前が重複するため何も書き換えなかった)
-int rename_file(int entry, char name[]) {
-    int i = 0;
-
-    if (is_name_duplicated(entry, name)) {
-        return 0;
-    }
-
-    while (name[i] != '\0' && i < 7) {
-        entries[entry].name[i] = name[i];
-        i = i + 1;
-    }
-    entries[entry].name[i] = '\0';
-    return 1;
-}
-
-// entries[entry].nameをnameの先頭7文字で設定し，内容を空にしたうえで使用中フラグを立てる
-// 戻り値: 1(作成した) / 0(名前が重複するため作成しなかった)
-int create_file(int entry, char name[]) {
-    // entryは未使用エントリであり自分自身が一致することはないため，どのエントリとの重複も許さない判定になる
-    if (is_name_duplicated(entry, name)) {
-        return 0;
-    }
-    rename_file(entry, name);
-    entries[entry].content[0] = '\0';
-    file_used[entry] = 1;
-    return 1;
-}
-
-// contentの内容をentries[entry].contentへ1文字ずつコピーする(31文字を超える分は切り捨てる)
-void write_file(int entry, char content[]) {
-    int i = 0;
-    while (content[i] != '\0' && i < 31) {
-        entries[entry].content[i] = content[i];
-        i = i + 1;
-    }
-    entries[entry].content[i] = '\0';
-}
-
-// nameとentries[entry].nameが一致するか比較する(streqは構造体配列のメンバを渡せないため手動比較する)
-int names_match(char name[], int entry) {
-    int j = 0;
-    while (j < 8) {
-        if (name[j] != entries[entry].name[j]) {
-            return 0;
-        }
-        if (entries[entry].name[j] == '\0') {
-            // 同じ位置でヌル終端に達した(一致)
-            return 1;
-        }
-        j = j + 1;
-    }
-    // 保存名も検索名(find_entry_by_nameが切り詰める)も7文字以内でヌル終端されるためここへは到達しないが，値を返さない経路を作らないために一致として返す
-    return 1;
-}
-
-// nameと一致する使用中エントリのインデックスを返す．無ければ-1を返す(保存名は7文字に切り詰められているため，検索名も同じ規則で切り詰めてから照合する)
-int find_entry_by_name(char name[]) {
-    char truncated[8];  // nameを7文字に切り詰めた検索名
-    truncate_name(name, truncated);
-    for (int i = 0; i < 4; i++) {
-        if (file_used[i] == 1 && names_match(truncated, i)) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-// entryの使用中フラグを下ろし，未使用エントリとして扱えるようにする(nameやcontentのクリアは行わない．再利用時にcreate_fileが上書きするため)
-void delete_file(int entry) {
-    file_used[entry] = 0;
-}
-
-// entries[entry].nameを一時バッファへ1文字ずつコピーしてから出力する(printは直接配列のみ受け付けるため)
-void print_entry(int entry) {
-    char entry_buf[8];  // 出力用の一時バッファ(entries[].nameと同じ幅)
-    int i = 0;
-    while (entries[entry].name[i] != '\0') {
-        entry_buf[i] = entries[entry].name[i];
-        i = i + 1;
-    }
-    entry_buf[i] = '\0';
-    print(entry_buf);
     print("\n");
+    // 全エントリを出力するため，走査は打ち切らない
+    return 0;
 }
 
-// lsコマンド: 使用中の全エントリの名前を順に出力する
+// lsコマンド: ルートディレクトリにあるファイル・ディレクトリの名前を順に出力する
 void handle_ls(int pos) {
+    int status;  // 走査の結果
+
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
         return;
     }
-    for (int i = 0; i < 4; i++) {
-        if (file_used[i] == 1) {
-            print_entry(i);
-        }
+    status = fat_walk_root(print_entry);
+    if (status != FAT_OK) {
+        print_fat_error(status);
     }
 }
 
-// entries[entry].contentを一時バッファへ1文字ずつコピーしてから出力する(printは直接配列のみ受け付けるため)
-void print_content(int entry) {
-    char content_buf[32];  // 出力用の一時バッファ(entries[].contentと同じ幅)
-    int i = 0;
-    while (entries[entry].content[i] != '\0') {
-        content_buf[i] = entries[entry].content[i];
-        i = i + 1;
-    }
-    content_buf[i] = '\0';
-    print(content_buf);
-    print("\n");
-}
-
-// touchコマンド: 引数のファイル名でファイルを1件作成する(既に同名のファイルがあれば作成しない)
-void handle_touch(int pos) {
-    char name[64];  // 先頭の引数(作成するファイル名)
-    int entry;      // 割り当てたエントリのインデックス
-
-    // コマンド名(touch)の直後の引数をファイル名として取り出す
-    pos = extract_arg(input, pos, name);
-    // ファイル名が指定されていなければ何もしない
-    if (name[0] == '\0') {
-        print_error("missing argument\n");
-        return;
-    }
-    // ファイル名の後に余分な引数があれば何もしない
-    if (has_extra_args(input, pos)) {
-        print_error("too many arguments\n");
-        return;
-    }
-
-    // 空きエントリが無ければ作成できない
-    entry = find_free_entry();
-    if (entry == -1) {
-        print_error("no free entry\n");
-        return;
-    }
-    // 空きエントリを取り出したファイル名で使用中にする．既に同名のファイルがあれば作成されない
-    if (create_file(entry, name) == 0) {
-        print_error("file already exists\n");
-        return;
-    }
-    // テーブルを変えたので，電源を切っても残るようカードへ書き出す
-    fs_save();
-}
-
-// writeコマンド: 引数の先頭トークンをファイル名，残りを内容として丸ごと上書きする
-void handle_write(int pos) {
-    char name[64];     // 先頭トークン(ファイル名)
-    char content[64];  // ファイル名を除いた残り(書き込む内容)
-    int entry;         // 対象エントリのインデックス
-
-    // コマンド名(write)の直後の引数をファイル名として取り出す
-    pos = extract_arg(input, pos, name);
-    // ファイル名が指定されていなければ何もしない
-    if (name[0] == '\0') {
-        print_error("missing argument\n");
-        return;
-    }
-
-    // ファイル名以降の引数部分を丸ごと書き込む内容として取り出す
-    extract_text_arg(input, pos, content);
-
-    // ファイル名から対象エントリを探す
-    entry = find_entry_by_name(name);
-    // 対象ファイルが無ければ何もしない(自動作成はしない)
-    if (entry == -1) {
-        print_error("no such file\n");
-        return;
-    }
-
-    // 取り出した内容でエントリの中身を丸ごと上書きする
-    write_file(entry, content);
-    // テーブルを変えたので，電源を切っても残るようカードへ書き出す
-    fs_save();
-}
-
-// catコマンド: 引数のファイル名に対応する内容を出力する
+// catコマンド: 引数のファイル名に対応するファイルの内容を出力する
 void handle_cat(int pos) {
-    char name[64];  // 先頭の引数(読み出すファイル名)
-    int entry;      // 対象エントリのインデックス
+    char name[INPUT_SIZE];  // 先頭の引数(読み出すファイル名)
+    struct FatEntry entry;  // 見つかったファイルのエントリ
+    struct FatFile file;    // 読み出し中のファイルの位置
+    int length;             // 読み込んだセクタのうち内容にあたるバイト数
+    int status;             // FAT32の各関数の結果
+    int last = '\n';        // 最後に出力した文字(内容が改行で終わらなければ改行を補うため．空のファイルでは補わないよう改行から始める)
 
     // コマンド名(cat)の直後の引数をファイル名として取り出す
-    pos = extract_arg(input, pos, name);
+    pos = extract_arg(input, pos, name, INPUT_SIZE);
     // ファイル名が指定されていなければ何もしない
     if (name[0] == '\0') {
         print_error("missing argument\n");
@@ -806,103 +122,70 @@ void handle_cat(int pos) {
         return;
     }
 
-    // ファイル名から対象エントリを探す
-    entry = find_entry_by_name(name);
-    // 対象ファイルが無ければ何もしない
-    if (entry == -1) {
-        print_error("no such file\n");
+    // ファイル名から対象のエントリを探して開く
+    status = fat_find(name, &entry);
+    if (status == FAT_OK) {
+        status = fat_open(&entry, &file);
+    }
+    if (status != FAT_OK) {
+        print_fat_error(status);
         return;
     }
 
-    // 見つかったエントリの内容を出力する
-    print_content(entry);
+    // 1セクタずつ読み込んで出力する
+    while (1) {
+        status = fat_read(&file, &length);
+        if (status == FAT_END) {
+            break;
+        }
+        if (status != FAT_OK) {
+            // 途中まで出力した内容とエラーメッセージが同じ行に並ばないよう改行を挟む
+            if (last != '\n') {
+                print("\n");
+            }
+            print_fat_error(status);
+            return;
+        }
+        last = fat_sector[length - 1];
+        // printはヌル終端か配列の終わりまでを出力するため，内容がセクタの途中で終わる場合だけ終端を置く
+        if (length < SD_BLOCK_SIZE) {
+            fat_sector[length] = '\0';
+        }
+        print(fat_sector);
+    }
+    if (last != '\n') {
+        print("\n");
+    }
 }
 
-// rmコマンド: 引数のファイル名に対応するエントリを削除する
-void handle_rm(int pos) {
-    char name[64];  // 先頭の引数(削除するファイル名)
-    int entry;      // 対象エントリのインデックス
-
-    // コマンド名(rm)の直後の引数をファイル名として取り出す
-    pos = extract_arg(input, pos, name);
-    // ファイル名が指定されていなければ何もしない
-    if (name[0] == '\0') {
-        print_error("missing argument\n");
-        return;
+// SDカードを初期化し，カード上のFAT32ボリュームをマウントする
+// 失敗した場合の表示は，起動時と実行中のコマンドとで前置きが異なるため呼び出し元に任せる
+// 戻り値: FAT_OK / FAT_ERR_READ(カードを初期化できなかった) / fat_mountの失敗
+int mount_card(void) {
+    // 初期化に失敗したときに前のカードのボリュームを読まないよう，先に外しておく
+    fat_unmount();
+    // 途中経過はsd_initが表示する
+    if (sd_init() == 0) {
+        return FAT_ERR_READ;
     }
-    // ファイル名の後に余分な引数があれば何もしない
-    if (has_extra_args(input, pos)) {
-        print_error("too many arguments\n");
-        return;
-    }
-
-    // ファイル名から対象エントリを探す
-    entry = find_entry_by_name(name);
-    // 対象ファイルが無ければ何もしない
-    if (entry == -1) {
-        print_error("no such file\n");
-        return;
-    }
-
-    // 見つかったエントリを削除する
-    delete_file(entry);
-    // テーブルを変えたので，電源を切っても残るようカードへ書き出す
-    fs_save();
+    return fat_mount();
 }
 
-// mvコマンド: 引数の先頭トークンを旧ファイル名，次のトークンを新ファイル名として名前を変更する
-void handle_mv(int pos) {
-    char old_name[64];  // 先頭トークン(旧ファイル名)
-    char new_name[64];  // 次のトークン(新ファイル名)
-    int entry;          // 対象エントリのインデックス
-
-    // コマンド名(mv)の直後の2つの引数を，旧ファイル名・新ファイル名として順に取り出す
-    pos = extract_arg(input, pos, old_name);
-    pos = extract_arg(input, pos, new_name);
-    // 旧ファイル名・新ファイル名のどちらかが指定されていなければ何もしない
-    if (old_name[0] == '\0' || new_name[0] == '\0') {
-        print_error("missing argument\n");
-        return;
-    }
-    // 新ファイル名の後に余分な引数があれば何もしない
-    if (has_extra_args(input, pos)) {
-        print_error("too many arguments\n");
-        return;
-    }
-
-    // 旧ファイル名から対象エントリを探す
-    entry = find_entry_by_name(old_name);
-    // 対象ファイルが無ければ何もしない
-    if (entry == -1) {
-        print_error("no such file\n");
-        return;
-    }
-
-    // 見つかったエントリの名前を付け替える．新ファイル名が他のファイルと重複していれば付け替えられない
-    if (rename_file(entry, new_name) == 0) {
-        print_error("file already exists\n");
-        return;
-    }
-    // テーブルを変えたので，電源を切っても残るようカードへ書き出す
-    fs_save();
-}
-
-// sdinitコマンド: SDカードの初期化を実行する
+// sdinitコマンド: SDカードを初期化し，カード上のFAT32ボリュームをマウントし直す
 void handle_sdinit(int pos) {
+    int status;  // マウントの結果
+
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
         return;
     }
-    // 途中経過はsd_initが表示するため，ここでは最終結果だけを伝える
-    if (sd_init() == 0) {
-        print_error("initialization failed\n");
+    status = mount_card();
+    if (status != FAT_OK) {
+        print_fat_error(status);
         return;
     }
-    print("card ready\n");
-    // 初期化しただけではRAM上のテーブルは起動時のままであり，このあとの操作で保存すると
-    // カード上のテーブルをそれで上書きしてしまうため，ここで読み直して揃える
-    fs_load();
+    print("volume mounted\n");
 }
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
@@ -915,11 +198,7 @@ void handle_help(int pos) {
     print("echo\n");
     print("help\n");
     print("ls\n");
-    print("touch\n");
-    print("write\n");
     print("cat\n");
-    print("rm\n");
-    print("mv\n");
     print("sdinit\n");
 }
 
@@ -929,7 +208,7 @@ void handle_unknown(void) {
     print_error("unknown command\n");
 }
 
-// グローバル配列cmdの内容に応じた処理を呼び出す(streqは直接配列のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
+// グローバル配列cmdの内容に応じた処理を呼び出す(streqは配列変数のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
 // 引数の取り出し対象は1行分の入力を保持するinputで固定のため，コマンド側へは位置だけを渡す
 void dispatch(int pos) {
     if (streq(cmd, "echo")) {
@@ -938,16 +217,8 @@ void dispatch(int pos) {
         handle_help(pos);
     } else if (streq(cmd, "ls")) {
         handle_ls(pos);
-    } else if (streq(cmd, "touch")) {
-        handle_touch(pos);
-    } else if (streq(cmd, "write")) {
-        handle_write(pos);
     } else if (streq(cmd, "cat")) {
         handle_cat(pos);
-    } else if (streq(cmd, "rm")) {
-        handle_rm(pos);
-    } else if (streq(cmd, "mv")) {
-        handle_mv(pos);
     } else if (streq(cmd, "sdinit")) {
         handle_sdinit(pos);
     } else {
@@ -956,20 +227,22 @@ void dispatch(int pos) {
 }
 
 void main(void) {
-    int pos;  // コマンド名の直後の位置(引数の取り出し開始位置)
-    for (int i = 0; i < 4; i++) {  // グローバル配列の初期値は不定なため，起動時に明示的にクリアする
-        file_used[i] = 0;
-    }
-    // カードがあればテーブルを復元する．無い場合は上でクリアした空のテーブルのまま起動する
-    if (sd_init() == 1) {
-        fs_load();
+    int pos;     // コマンド名の直後の位置(引数の取り出し開始位置)
+    int status;  // 起動時のマウントの結果
+
+    // カードがあればボリュームをマウントする．失敗してもsdinitでやり直せるよう，シェルはそのまま起動する
+    // 表示にprint_errorを使わないのは，この時点ではコマンド名が入っていないため
+    status = mount_card();
+    if (status == FAT_OK) {
+        print("fat: volume mounted\n");
     } else {
-        print("sd: unavailable (files are not saved)\n");
+        print("fat: ");
+        print_fat_message(status);
     }
     while (1) {
         print("> ");  // 入力待ちであることを示すプロンプト
         scan(input);
-        pos = extract_arg(input, 0, cmd);
+        pos = extract_arg(input, 0, cmd, INPUT_SIZE);
         dispatch(pos);
     }
 }
