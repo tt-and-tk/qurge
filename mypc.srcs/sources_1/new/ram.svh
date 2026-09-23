@@ -16,6 +16,7 @@ package ram_p;
 
     // 定数
     localparam int RAM_SIZE = 65536;         // メモリの実容量(バイト)．範囲外番地をアドレスバス幅で判定するため2のべき乗とする
+    localparam int CODE_AREA_BASE = RAM_SIZE / 2;  // コード領域(読み込んだプログラムの命令を置く，メモリの後半全体)の先頭番地．前半はスタックなどに使う
 
     // 変数型
     typedef logic [$clog2(RAM_SIZE)-1:0] address_bus_t;  // アドレスバス幅
