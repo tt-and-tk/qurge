@@ -290,7 +290,8 @@ int fat_parse_bpb(unsigned int fs_start) {
 
     // ファイルシステムは先頭から予約領域(BPBを含む)・FAT(複製の数だけ)・データ領域の順に並ぶため，データ領域より前の大きさを求める
     reserved = fat_read_u16(BPB_RESERVED_SECTORS);
-    // 予約領域が無い記録は壊れている(FATの先頭がBPBと同じセクタになり，FATを書き換えるとBPBを壊す)
+    // 予約領域が無い記録は壊れている
+    // FATの先頭がBPBと同じセクタになり，FATを書き換えるとBPBを壊すため
     if (reserved == 0) {
         return FAT_ERR_NOT_FAT32;
     }
