@@ -308,6 +308,7 @@ int fat_parse_bpb(unsigned int fs_start) {
     fat_sectors_per_cluster = fat_sector[BPB_SECTORS_PER_CLUSTER];
     fat_cluster_shift = shift;
     fat_cluster_count = (total - system_size) >> shift;
+    // クラスタは番号2から並ぶため，データ領域の最後のクラスタの番号はクラスタ数+1になる
     last_cluster = fat_cluster_count + FAT_FIRST_CLUSTER - 1;
     // 最後のクラスタの番号が不良クラスタや終わりを表す値に届く記録は壊れている(それらの番号をデータ領域のクラスタと区別できなくなるため)
     if (last_cluster >= FAT_CLUSTER_BAD) {
