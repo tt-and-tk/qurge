@@ -855,6 +855,43 @@ module cpu_tb;
         end
     endtask
 
+    // 1命令で実行を続けるか停止するかを確かめるテストケース
+    typedef struct {
+        string    name;         // テストケースの名前
+        machine_t instruction;  // 確かめる命令
+        bit       halts;        // 停止するか
+    } operand_case_t;
+
+    // 命令が実際に使うオペランドだけが読み書き可否の判定対象になるか．読み込み不可の番地として0x11を使い，
+    // 割り算の除数に使うr2には1を入れておく
+    task automatic test_operand_checks();
+        operand_case_t cases[$] = '{
+            '{$sformatf("即値を使うMOVはrs1が読み込み不可でも停止しない"),       mov(4'hf, 6'h11, 1, im(5)),                   1'b0},
+            '{$sformatf("即値でシフト量を指定するとrs2が読み込み不可でも停止しない"), sll(1, 6'h11, 3, im(1)),                  1'b0},
+            '{$sformatf("NOTはrs2が読み込み不可でも停止しない"),                   raw(3'h1, NOT, 1, 6'h11, 3, NO_IMM),          1'b0},
+            '{$sformatf("imm未使用のDIVは余りの格納先が書き込み不可でも停止しない"), div(1, 2, 3, {1'b0, 26'h0, PC_ADDR}),       1'b0},
+            '{$sformatf("即値の番地へのJMPはrs1が読み込み不可でも停止しない"),     jmp(6'h11, im(2)),                            1'b0},
+            '{$sformatf("即値の番地のRMはrs1が読み込み不可でも停止しない"),       rm(4'hf, 6'h11, 3, im(32'h100)),              1'b0},
+            '{$sformatf("WMは使わないrdが書き込み不可でも停止しない"),             raw(3'h6, WM, 0, 2, PC_ADDR, im(32'h100)),    1'b0},
+            '{$sformatf("即値を出力するPRINTはrs1が読み込み不可でも停止しない"),   print(6'h11, im(32'h41)),                     1'b0}
+        };
+
+        foreach (cases[i]) begin
+            begin_test(cases[i].name);
+            run('{movi(2, 32'd1), cases[i].instruction});
+            if (cases[i].halts)
+                expect_halt(1);
+            else
+                expect_end();
+        end
+
+        // immを扱わない命令ではimm[32]を即値使用フラグとして扱わない
+        `BEGIN_TEST("ADDはimm[32]が1でもrs1とrs2を足す");
+        run('{movi(1, 32'd3), movi(2, 32'd4), raw(3'h1, ADD, 1, 2, 3, im(32'd100))});
+        expect_end();
+        expect_reg(3, 32'd7);
+    endtask
+
     // ボード上の入出力ピンにつながるレジスタ
     task automatic test_pins();
         `BEGIN_TEST("出力用のレジスタへの書き込みが対応するピンに出る");
@@ -953,6 +990,7 @@ module cpu_tb;
         test_m_type();
         test_io_type();
         test_register_access();
+        test_operand_checks();
         test_pins();
         test_common();
         finish_test();
