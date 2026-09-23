@@ -239,7 +239,10 @@ module cpu_tb;
 
     // 命令列を実行する．append_endが1なら末尾に自分自身へジャンプする命令(正常終了)を付け，
     // その命令の実行に入った時点を正常終了とする．停止した場合は，停止した命令のクロックの直後
-    // (レジスタが初期値へ戻る前)にレジスタを採取する
+    // (レジスタが初期値へ戻る前)にレジスタを採取する．
+    // 仕様上，停止した時点のレジスタの値は残らないが，CPUは停止を検出した次のクロックで初期値へ戻すため，
+    // その間に採取すれば停止した番地と，停止した命令がレジスタを書き換えていないことを確認できる．
+    // 停止と同じクロックで初期値へ戻す実装に変えた場合は，この採取方法を見直す必要がある
     task automatic run(input machine_t body[$], input bit append_end = 1'b1, input bit keep_ram = 1'b0);
         machine_t instructions[$] = body;
 
@@ -915,7 +918,7 @@ module cpu_tb;
         expect_halt(2);
         expect_mem32(32'h100, 32'h1);
 
-        `BEGIN_TEST("停止した次のサイクルにレジスタが初期値へ戻る");
+        `BEGIN_TEST("停止するとレジスタが初期値へ戻り，リセットまで停止が続く");
         run('{movi(1, 32'd5), movi(SP_ADDR, 32'h100), movi(PC_ADDR, 32'd0)});
         expect_halt(2);
         expect_reg(1, 32'd5);
