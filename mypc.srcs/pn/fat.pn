@@ -99,10 +99,12 @@ const int FAT_ENTRY_SIZE = 4;                                   // 1クラスタ
 const int FAT_ENTRIES_PER_SECTOR = SD_BLOCK_SIZE / FAT_ENTRY_SIZE;  // 1セクタに収まるクラスタの数
 const int FAT_ENTRIES_PER_SECTOR_SHIFT = 7;                     // FAT_ENTRIES_PER_SECTOR(128)の2の対数(実行時の除算を避けシフトで求めるため)
 const unsigned int FAT_CLUSTER_MASK = 0x0fffffff;               // FATの値のうちクラスタ番号を表す下位28ビット
+const unsigned int FAT_CLUSTER_BAD = 0x0ffffff7;                // 不良クラスタを表す値(これ以上の値はクラスタの番号に使えない)
 const unsigned int FAT_CLUSTER_END = 0x0ffffff8;                // これ以上の値はクラスタチェーンの終わりを表す
 const unsigned int FAT_CLUSTER_LAST = 0x0fffffff;               // クラスタチェーンの最後のクラスタのFATに書く，終わりを表す値
 const unsigned int FAT_CLUSTER_FREE = 0;                        // 空きクラスタのFATの値
 const int FAT_FIRST_CLUSTER = 2;                                // データ領域の先頭にあたるクラスタ番号(0と1は予約)
+const unsigned int FAT_MAX_SECTORS = (FAT_CLUSTER_MASK + 1) >> FAT_ENTRIES_PER_SECTOR_SHIFT;  // FAT1つの大きさ(セクタ数)の上限(28ビットで表せる全クラスタの値を並べた大きさ)
 
 // ディレクトリエントリの形式
 const int DIR_ENTRY_SIZE = 32;         // 1エントリのバイト数
@@ -255,6 +257,7 @@ int fat_parse_bpb(unsigned int fs_start) {
     unsigned int reserved;      // 予約セクタ数
     unsigned int total;         // ファイルシステム全体のセクタ数
     unsigned int system_size;   // データ領域より前(予約領域とFAT)のセクタ数
+    unsigned int last_cluster;  // データ領域の最後のクラスタの番号
     unsigned int fsinfo;        // ファイルシステムの先頭から数えたFSInfoセクタの位置
     int shift = -1;             // 1クラスタのセクタ数の2の対数(2のべき乗でなければ-1のまま)
 
@@ -288,6 +291,10 @@ int fat_parse_bpb(unsigned int fs_start) {
     // ファイルシステムは先頭から予約領域(BPBを含む)・FAT(複製の数だけ)・データ領域の順に並ぶため，データ領域より前の大きさを求める
     reserved = fat_read_u16(BPB_RESERVED_SECTORS);
     fat_sectors_per_fat = fat_read_u32(BPB_FAT_SIZE_32);
+    // クラスタ番号で指せる範囲を超える大きさのFATは壊れている(上限があることで，データ領域より前の大きさの計算も桁あふれしない)
+    if (fat_sectors_per_fat > FAT_MAX_SECTORS) {
+        return FAT_ERR_NOT_FAT32;
+    }
     total = fat_read_u32(BPB_TOTAL_SECTORS_32);
     system_size = reserved + fat_num_fats * fat_sectors_per_fat;
     // データ領域が残らない大きさの記録は壊れている
@@ -301,6 +308,18 @@ int fat_parse_bpb(unsigned int fs_start) {
     fat_sectors_per_cluster = fat_sector[BPB_SECTORS_PER_CLUSTER];
     fat_cluster_shift = shift;
     fat_cluster_count = (total - system_size) >> shift;
+    // クラスタは番号2から並ぶため，データ領域の最後のクラスタの番号はクラスタ数+1になる
+    last_cluster = fat_cluster_count + FAT_FIRST_CLUSTER - 1;
+    // 最後のクラスタの番号が，不良クラスタを表す値以上(終わりを表す値はその上に並ぶ)に届く記録は壊れている
+    // それらの番号は，データ領域のクラスタと区別できなくなるため
+    if (last_cluster >= FAT_CLUSTER_BAD) {
+        return FAT_ERR_NOT_FAT32;
+    }
+    // 最後のクラスタの値を含むFATのセクタが，FATの範囲に無い記録は壊れている(FATの大きさが0の記録もここで弾かれる)
+    // 収まらないクラスタの値を読み書きすると，FATの外にある複製やデータ領域のセクタをFATとして扱ってしまう
+    if ((last_cluster >> FAT_ENTRIES_PER_SECTOR_SHIFT) >= fat_sectors_per_fat) {
+        return FAT_ERR_NOT_FAT32;
+    }
     // ルートディレクトリの開始クラスタがデータ領域の外を指す記録は壊れている
     fat_root_cluster = fat_read_u32(BPB_ROOT_CLUSTER) & FAT_CLUSTER_MASK;
     if (fat_is_valid_cluster(fat_root_cluster) == 0) {
