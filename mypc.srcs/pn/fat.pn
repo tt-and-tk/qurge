@@ -862,6 +862,8 @@ int fat_alloc_cluster(unsigned int prev, unsigned int *cluster) {
         // 値の上位4ビットは予約のため，下位28ビットで空きかどうかを判定する
         if ((fat_read_u32((candidate & (FAT_ENTRIES_PER_SECTOR - 1)) * FAT_ENTRY_SIZE) & FAT_CLUSTER_MASK) == FAT_CLUSTER_FREE) {
             // 途中で失敗しても使用中のクラスタが空きクラスタを指さないよう，終わりを表す値を書いてからつなぐ
+            // つなぎに失敗しても確保したクラスタは解放しない．全てのFATへ順に書くため，1つ目のFATでは既にprevがつながっている可能性があり，
+            // 解放すると使用中のprevが空きクラスタを指すため
             status = fat_set_cluster(candidate, FAT_CLUSTER_LAST);
             if (status == FAT_OK && prev != 0) {
                 status = fat_set_cluster(prev, candidate);
@@ -1026,10 +1028,14 @@ int fat_extend_dir(void) {
     }
     // ディレクトリへつなぐ前に0で埋めておく(途中で失敗しても，ディレクトリが以前の中身の残ったクラスタを含まないようにするため)
     status = fat_clear_cluster(cluster);
+    // 埋められなければ，どこからも指されないクラスタが残らないよう解放する(まだつないでいないため，解放しても既存の内容は壊れない)
     if (status != FAT_OK) {
+        fat_free_chain(cluster);
         return status;
     }
     // ディレクトリの最後のクラスタの次へつなぐ
+    // 失敗しても解放しない．全てのFATへ順に書くため，1つ目のFATでは既につながっている可能性があり，
+    // 解放するとディレクトリが空きクラスタを指し，後で別のファイルに確保されて内容が混ざる(0で埋め終えたクラスタのため，残してもディレクトリは壊れない)
     status = fat_set_cluster(fat_sector_to_cluster(fat_last_dir_sector), cluster);
     if (status != FAT_OK) {
         return status;
