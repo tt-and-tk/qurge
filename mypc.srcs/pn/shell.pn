@@ -108,7 +108,7 @@ void handle_cat(int pos) {
     int status;             // FAT32の各関数の結果
     int last = '\n';        // 最後に出力した文字(内容が改行で終わらなければ改行を補うため．空のファイルでは補わないよう改行から始める)
 
-    // コマンド名(cat)の直後の引数をファイル名として取り出す
+    // コマンド名(cat)の直後の引数をファイル名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
     if (extract_only_arg(pos, name) == 0) {
         return;
     }
@@ -159,7 +159,7 @@ void handle_touch(int pos) {
     struct FatEntry entry;  // 作成したファイルのエントリ
     int status;             // 作成の結果
 
-    // コマンド名(touch)の直後の引数をファイル名として取り出す
+    // コマンド名(touch)の直後の引数をファイル名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
     if (extract_only_arg(pos, name) == 0) {
         return;
     }
@@ -214,7 +214,7 @@ void handle_rm(int pos) {
     struct FatEntry entry;  // 削除するファイルのエントリ
     int status;             // 検索・削除の結果
 
-    // コマンド名(rm)の直後の引数をファイル名として取り出す
+    // コマンド名(rm)の直後の引数をファイル名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
     if (extract_only_arg(pos, name) == 0) {
         return;
     }
@@ -263,7 +263,7 @@ void handle_mkdir(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(作成するディレクトリ名)
     int status;             // 作成の結果
 
-    // コマンド名(mkdir)の直後の引数をディレクトリ名として取り出す
+    // コマンド名(mkdir)の直後の引数をディレクトリ名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
     if (extract_only_arg(pos, name) == 0) {
         return;
     }
@@ -280,7 +280,7 @@ void handle_rmdir(int pos) {
     struct FatEntry entry;  // 削除するディレクトリのエントリ
     int status;             // 検索・削除の結果
 
-    // コマンド名(rmdir)の直後の引数をディレクトリ名として取り出す
+    // コマンド名(rmdir)の直後の引数をディレクトリ名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
     if (extract_only_arg(pos, name) == 0) {
         return;
     }
