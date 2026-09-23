@@ -1,14 +1,13 @@
 // SDカードのドライバ．Arduino互換ヘッダのSPIピン(AR_SPI)をソフトウェアで駆動してカードを初期化し，ブロックを読み書きする
 #pragma once
 
-const int SD_BLOCK_SIZE = 512;  // 1ブロックのバイト数(どのカードもこの長さで読み書きする)
+const int SD_BLOCK_SIZE = 512;  // 1ブロックのバイト数(扱うSDHC/SDXCカードはこの長さに固定されている)
 
 // SS(チップセレクト)の出力レベル(0:カードを選択中，1:非選択)
 // AR_SPIへの書き込みは常に全ビットを同時に置き換えるため，SSだけを別に保ち回す
 int spi_ss = 1;  // 初期値はハードウェアのリセット値(非選択)と揃える
 
-int sd_ready = 0;             // カードの初期化が完了しているか(0:未完了，1:完了)
-int sd_block_addressing = 0;  // コマンド引数のアドレスの単位(1:ブロック単位(SDHC/SDXC)，0:バイト単位(SDSC))
+int sd_ready = 0;  // カードの初期化が完了しているか(0:未完了，1:完了)
 
 // 0〜15の値を16進数1桁の文字へ変換する
 char hex(int value) {
@@ -124,7 +123,7 @@ int sd_init_commands(void) {
         return 0;
     }
     // CMD8はSD規格v2で追加されたため，v1カードはillegal command(bit2)を立てて拒否する
-    // 拒否された場合はR1しか返らないため続く4バイトを読まず，ACMD41の引数も異なるサポート外としてここで止める
+    // v1カードはすべてバイト単位の番地を使うSDSCであり扱わないため，R1しか返らない拒否応答の後は続く4バイトを読まずここで止める
     if ((response & 0x04) != 0) {
         print(" (SD v1, unsupported)\n");
         return 0;
@@ -184,7 +183,7 @@ int sd_init_commands(void) {
     }
     print("\n");
 
-    // CMD58(READ_OCR): アドレスの単位を決めるCCSビットを読む
+    // CMD58(READ_OCR): ブロック単位の番地を使うカード(SDHC/SDXC)かを表すCCSビットを読む
     // 応答はR3(R1に4バイトのOCRが続く)で，CCSはOCRの最上位バイトのbit6にある
     response = sd_command(58, 0x00000000, 0x01);
     print("CMD58: ");
@@ -204,33 +203,20 @@ int sd_init_commands(void) {
         print(" (failed)\n");
         return 0;
     }
-    // OCRの最上位バイトのbit6(CCS)がアドレスの単位を表す
-    sd_block_addressing = (ocr_high >> 6) & 1;
-    if (sd_block_addressing == 1) {
-        print(" (block addressing)\n");
-        return 1;
+    // CCSが0のカードはバイト単位の番地を使うSDSCであり，ブロック番号をそのまま番地として渡すと誤った位置を読み書きするため扱わない
+    if (((ocr_high >> 6) & 1) == 0) {
+        print(" (SDSC, unsupported)\n");
+        return 0;
     }
-    print(" (byte addressing)\n");
-
-    // CMD16(SET_BLOCKLEN): バイト単位アドレスのカードにブロック長をSD_BLOCK_SIZEへ揃えさせる
-    // ブロック単位のカードはこの長さで固定でこのコマンドが効かないため，そちらへは送らない
-    response = sd_command(16, SD_BLOCK_SIZE, 0x01);
-    print("CMD16: ");
-    print_hex(response);
     print("\n");
-    return response == 0x00;
+    return 1;
 }
 
 // SDカードをSPIモードへ入れ，ブロックを読み書きできる状態まで初期化する
-// アドレスの単位の判定までを含むため，完了後はブロックの読み書きをそのまま行える
+// ブロック単位の番地を使うカードであることの確認までを含むため，完了後はブロックの読み書きをそのまま行える
 // 戻り値: 1(初期化完了) / 0(失敗)
 int sd_init(void) {
     int ready;  // 初期化コマンド列の結果
-
-    // 一度成功した後の再実行が失敗した場合に前のカードの値が残らないよう，入口で揃えて初期化する
-    // sd_block_addressingはCMD58に到達しないと設定されないため，そこまで進まず失敗する経路がある
-    sd_ready = 0;
-    sd_block_addressing = 0;
 
     // カードは自前の発振器を持たずSCKで内部回路を動かすため，電源投入後に74クロック以上を与える必要がある(ここでは80クロック)
     // SSをHighのまま送ることで，カードはこれをコマンドと解釈せず単なるクロック供給として受け取る
@@ -250,16 +236,6 @@ int sd_init(void) {
     return ready;
 }
 
-// ブロック番号をコマンドの引数へ変換する
-unsigned int sd_block_arg(unsigned int block) {
-    // ブロック単位のカード(SDHC/SDXC)は，ブロック番号をそのまま渡す
-    if (sd_block_addressing == 1) {
-        return block;
-    }
-    // バイト単位のカード(SDSC)は，ブロックの先頭のバイト位置に換算して渡す
-    return block * SD_BLOCK_SIZE;
-}
-
 // 1ブロックを読み出し，bufの先頭からSD_BLOCK_SIZEバイトへ格納する
 // 失敗しても表示は行わない(他の出力の途中でも呼ばれるため，失敗の伝え方は呼び出し元が決める)
 // 戻り値: 1(読み出し成功) / 0(失敗．bufの内容は保証されない)
@@ -267,15 +243,15 @@ int sd_read_block(unsigned int block, unsigned char *buf) {
     int response;   // CMD17のR1応答
     int token;      // カードから最後に受け取ったバイト(待ちの上限に達したときはMISOのアイドル値0xffになる)
 
-    // アドレスの単位が確定していないと誤った番地を読むため，初期化が完了していなければ読まない
+    // ブロック単位の番地を使うカードだと確認できていないと誤った位置を読むため，初期化が完了していなければ読まない
     if (sd_ready == 0) {
         return 0;
     }
 
     // カードを選択して読み出しを要求する
     spi_ss = 0;
-    // CMD17(READ_SINGLE_BLOCK): 1ブロックの読み出し要求．CRCは無視されるためエンドビットのみを立てた値を渡す
-    response = sd_command(17, sd_block_arg(block), 0x01);
+    // CMD17(READ_SINGLE_BLOCK): 1ブロックの読み出し要求．番地はブロック番号そのもので，CRCは無視されるためエンドビットのみを立てた値を渡す
+    response = sd_command(17, block, 0x01);
     // 要求が受理されなければ，カードを解放して失敗とする
     if (response != 0x00) {
         sd_release();
@@ -314,15 +290,15 @@ int sd_read_block(unsigned int block, unsigned char *buf) {
 int sd_write_block(unsigned int block, unsigned char *buf) {
     int response;  // CMD24のR1応答と，書き込んだデータへの応答
 
-    // アドレスの単位が確定していないと誤った番地へ書くため，初期化が完了していなければ書かない
+    // ブロック単位の番地を使うカードだと確認できていないと誤った位置へ書くため，初期化が完了していなければ書かない
     if (sd_ready == 0) {
         return 0;
     }
 
     // カードを選択して書き込みを要求する
     spi_ss = 0;
-    // CMD24(WRITE_BLOCK): 1ブロックの書き込み要求．CRCは無視されるためエンドビットのみを立てた値を渡す
-    response = sd_command(24, sd_block_arg(block), 0x01);
+    // CMD24(WRITE_BLOCK): 1ブロックの書き込み要求．番地はブロック番号そのもので，CRCは無視されるためエンドビットのみを立てた値を渡す
+    response = sd_command(24, block, 0x01);
     // 要求が受理されなければ，カードを解放して失敗とする
     if (response != 0x00) {
         sd_release();
