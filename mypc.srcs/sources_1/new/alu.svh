@@ -199,7 +199,7 @@ package alu_p;
     // 命令のデコード時点で分かる情報(命令種別・func・レジスタ番地)から，その命令が実行可能かを
     // 判定する．
     function util_p::bool_t is_instruction_executable(
-        logic             pc_valid,  // 命令をROMの範囲内から取得できたか
+        logic             pc_valid,  // 命令を，命令を置ける番地(ROMの範囲内またはコード領域)から取得できたか
         machine_p::type_t m_type,
         machine_p::func_t func,
         machine_p::addr_t rs1,
