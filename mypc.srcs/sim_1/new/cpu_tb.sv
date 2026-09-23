@@ -767,6 +767,14 @@ module cpu_tb;
         expect_end();
         expect_reg(1, 32'd5);
 
+        // メモリへ書いた5をRMでr1へ読み戻し，直後(先読みされる番地)のEQでr2の5と比較して2つ先へ分岐する
+        `BEGIN_TEST("先読みされた分岐は直前のRMで読んだ値を比較し，自身の番地から分岐する");
+        run('{movi(2, 32'd5), movi(4, 32'd5), wm(4'hf, 6'h00, 4, im(32'h100)),
+              rm(4'hf, 6'h00, 1, im(32'h100)), eq(1, 2, im(2)), movi(3, 32'd1)});
+        // 分岐してr3へ代入する命令を飛び越え，r3は0のまま残る
+        expect_end();
+        expect_reg(3, 32'd0);
+
         // 分岐先をimmで指定しない分岐を実行する
         `BEGIN_TEST("F系でimm未使用は停止する");
         run('{eq(0, 0, 33'h0_0000_0002)});
@@ -818,6 +826,16 @@ module cpu_tb;
         expect_reg(1, 32'd1);
         expect_reg(5, 32'h8000);
         expect_mem32(32'h7ffc, 32'd2);
+
+        // DIVで求めた6番地の関数を直後(先読みされる番地)のCALLで呼び，関数の中はRMの直後のRETで戻る
+        `BEGIN_TEST("先読みされたCALL・RETもスタックを読み書きして呼び出し・復帰する");
+        run('{movi(1, 32'd24), movi(2, 32'd4), div(1, 2, 3, NO_IMM), call(3, NO_IMM), movr(5, SP_ADDR),
+              jmp(6'h00, im(8)), rm(4'hf, 6'h00, 7, im(32'h100)), ret()});
+        // 戻り先4が積まれ，戻るとSPが元に戻る
+        expect_end();
+        expect_reg(5, 32'h8000);
+        expect_reg(SP_ADDR, 32'h8000);
+        expect_mem32(32'h7ffc, 32'd4);
 
         // r1を1ずつ減らしながら自分自身を呼び出し，r2に呼び出した段数，r4に戻った段数を数える
         `BEGIN_TEST("12段にネストした関数呼び出しからすべて戻る");
