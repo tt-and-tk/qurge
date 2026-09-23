@@ -862,7 +862,7 @@ module cpu_tb;
         bit       halts;        // 停止するか
     } operand_case_t;
 
-    // 命令が実際に使うオペランドだけが読み書き可否の判定対象になるか．読み込み不可の番地として0x11を使い，
+    // 命令の種類ごとに，実際に使うオペランドだけが読み書き可否の判定対象になるか．読み込み不可の番地として0x11を使い，
     // 割り算の除数に使うr2には1を入れておく
     task automatic test_operand_checks();
         operand_case_t cases[$] = '{
@@ -873,7 +873,18 @@ module cpu_tb;
             '{$sformatf("即値の番地へのJMPはrs1が読み込み不可でも停止しない"),     jmp(6'h11, im(2)),                            1'b0},
             '{$sformatf("即値の番地のRMはrs1が読み込み不可でも停止しない"),       rm(4'hf, 6'h11, 3, im(32'h100)),              1'b0},
             '{$sformatf("WMは使わないrdが書き込み不可でも停止しない"),             raw(3'h6, WM, 0, 2, PC_ADDR, im(32'h100)),    1'b0},
-            '{$sformatf("即値を出力するPRINTはrs1が読み込み不可でも停止しない"),   print(6'h11, im(32'h41)),                     1'b0}
+            '{$sformatf("即値を出力するPRINTはrs1が読み込み不可でも停止しない"),   print(6'h11, im(32'h41)),                     1'b0},
+            '{$sformatf("rs2でシフト量を指定するとrs2が読み込み不可なら停止する"), sll(1, 6'h11, 3, NO_IMM),                   1'b1},
+            '{$sformatf("imm使用のDIVは余りの格納先が書き込み不可なら停止する"),   div(1, 2, 3, im(PC_ADDR)),                    1'b1},
+            '{$sformatf("レジスタの番地へのJMPはrs1が読み込み不可なら停止する"),   jmp(6'h11, NO_IMM),                           1'b1},
+            '{$sformatf("レジスタの番地へのCALLはrs1が読み込み不可なら停止する"),  call(6'h11, NO_IMM),                          1'b1},
+            '{$sformatf("分岐はrs1が読み込み不可なら停止する"),                   eq(6'h11, 0, im(1)),                          1'b1},
+            '{$sformatf("RMは書き込み先が書き込み不可なら停止する"),               rm(4'hf, 6'h00, PC_ADDR, im(32'h100)),        1'b1},
+            '{$sformatf("WMは書き込むデータのrs2が読み込み不可なら停止する"),     wm(4'hf, 6'h00, 6'h11, im(32'h100)),          1'b1},
+            '{$sformatf("RMRは番地の基準のrs1が読み込み不可なら停止する"),       rmr(4'hf, 6'h11, 3, im(0)),                   1'b1},
+            '{$sformatf("WMRは書き込むデータのrs2が読み込み不可なら停止する"),   wmr(4'hf, 2, 6'h11, im(0)),                   1'b1},
+            '{$sformatf("SCANは書き込み先が書き込み不可なら停止する"),             scan(PC_ADDR),                                1'b1},
+            '{$sformatf("レジスタを出力するPRINTはrs1が読み込み不可なら停止する"), print(6'h11, NO_IMM),                         1'b1}
         };
 
         foreach (cases[i]) begin
