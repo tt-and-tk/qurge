@@ -99,6 +99,7 @@ const int FAT_ENTRY_SIZE = 4;                                   // 1クラスタ
 const int FAT_ENTRIES_PER_SECTOR = SD_BLOCK_SIZE / FAT_ENTRY_SIZE;  // 1セクタに収まるクラスタの数
 const int FAT_ENTRIES_PER_SECTOR_SHIFT = 7;                     // FAT_ENTRIES_PER_SECTOR(128)の2の対数(実行時の除算を避けシフトで求めるため)
 const unsigned int FAT_CLUSTER_MASK = 0x0fffffff;               // FATの値のうちクラスタ番号を表す下位28ビット
+const unsigned int FAT_CLUSTER_BAD = 0x0ffffff7;                // 不良クラスタを表す値(これ以上の値はクラスタの番号に使えない)
 const unsigned int FAT_CLUSTER_END = 0x0ffffff8;                // これ以上の値はクラスタチェーンの終わりを表す
 const unsigned int FAT_CLUSTER_LAST = 0x0fffffff;               // クラスタチェーンの最後のクラスタのFATに書く，終わりを表す値
 const unsigned int FAT_CLUSTER_FREE = 0;                        // 空きクラスタのFATの値
@@ -256,6 +257,7 @@ int fat_parse_bpb(unsigned int fs_start) {
     unsigned int reserved;      // 予約セクタ数
     unsigned int total;         // ファイルシステム全体のセクタ数
     unsigned int system_size;   // データ領域より前(予約領域とFAT)のセクタ数
+    unsigned int last_cluster;  // データ領域の最後のクラスタの番号
     unsigned int fsinfo;        // ファイルシステムの先頭から数えたFSInfoセクタの位置
     int shift = -1;             // 1クラスタのセクタ数の2の対数(2のべき乗でなければ-1のまま)
 
@@ -306,9 +308,14 @@ int fat_parse_bpb(unsigned int fs_start) {
     fat_sectors_per_cluster = fat_sector[BPB_SECTORS_PER_CLUSTER];
     fat_cluster_shift = shift;
     fat_cluster_count = (total - system_size) >> shift;
-    // データ領域の最後のクラスタ(番号はクラスタ数+1)の値を含むFATのセクタが，FATの範囲に無い記録は壊れている(FATの大きさが0の記録もここで弾かれる)
+    last_cluster = fat_cluster_count + FAT_FIRST_CLUSTER - 1;
+    // 最後のクラスタの番号が不良クラスタや終わりを表す値に届く記録は壊れている(それらの番号をデータ領域のクラスタと区別できなくなるため)
+    if (last_cluster >= FAT_CLUSTER_BAD) {
+        return FAT_ERR_NOT_FAT32;
+    }
+    // 最後のクラスタの値を含むFATのセクタが，FATの範囲に無い記録は壊れている(FATの大きさが0の記録もここで弾かれる)
     // 収まらないクラスタの値を読み書きすると，FATの外にある複製やデータ領域のセクタをFATとして扱ってしまう
-    if (((fat_cluster_count + FAT_FIRST_CLUSTER - 1) >> FAT_ENTRIES_PER_SECTOR_SHIFT) >= fat_sectors_per_fat) {
+    if ((last_cluster >> FAT_ENTRIES_PER_SECTOR_SHIFT) >= fat_sectors_per_fat) {
         return FAT_ERR_NOT_FAT32;
     }
     // ルートディレクトリの開始クラスタがデータ領域の外を指す記録は壊れている
