@@ -1189,7 +1189,8 @@ int fat_mkdir(char *text) {
 }
 
 // entryのファイルの内容を，dataの先頭lengthバイトで丸ごと置き換える
-// 新しい内容を空きクラスタへ書き終えてから差し替えるため，途中で失敗してもファイルは元の内容のまま残る(一時的に元の内容と新しい内容の両方の空きが要る)
+// 新しい内容を空きクラスタへ書き終えてから差し替えるため，失敗を返した場合はファイルは元の内容のまま残る(一時的に元の内容と新しい内容の両方の空きが要る)
+// 差し替えた後に元の内容の解放に失敗しても，成功を返す
 int fat_write(struct FatEntry *entry, char *data, int length) {
     unsigned int old_cluster = entry->cluster;      // 置き換える前の内容の開始クラスタ
     unsigned int old_size = entry->size;            // 置き換える前の内容のバイト数
@@ -1253,9 +1254,11 @@ int fat_write(struct FatEntry *entry, char *data, int length) {
         }
         return status;
     }
-    // 元の内容の解放は，エントリを差し替えた後に行う(先に解放すると，差し替えに失敗したときに使用中のエントリが空きクラスタを指すため)
+    // 元の内容は，エントリを差し替えた後に解放し，解放の結果によらず成功を返す
+    // 先に解放すると，差し替えに失敗したときに使用中のエントリが空きクラスタを指す
+    // 差し替えた後であれば，解放しきれなかったクラスタはどのエントリからも指されないだけで内容を壊さない(パソコンのディスク検査で回収できる)
     if (old_cluster != 0) {
-        return fat_free_chain(old_cluster);
+        fat_free_chain(old_cluster);
     }
     return FAT_OK;
 }
@@ -1274,7 +1277,9 @@ int fat_delete_entry(struct FatEntry *entry) {
     if (status != FAT_OK) {
         return status;
     }
-    // 中身の解放は，エントリを削除した後に行う(先に解放すると，エントリの削除に失敗したときに使用中のエントリが空きクラスタを指すため)
+    // 中身は，エントリを削除した後に解放し，解放の失敗はそのまま返す
+    // 先に解放すると，エントリの削除に失敗したときに使用中のエントリが空きクラスタを指す
+    // 削除は失敗時にエントリを元の状態へ戻すことを約束しない操作のため，解放の失敗を成功に読み替えず，カードの読み書きの失敗やチェーンの破損を伝える
     if (entry->cluster != 0) {
         return fat_free_chain(entry->cluster);
     }
