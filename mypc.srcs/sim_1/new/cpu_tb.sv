@@ -876,6 +876,7 @@ module cpu_tb;
             '{$sformatf("即値を出力するPRINTはrs1が読み込み不可でも停止しない"),   print(6'h11, im(32'h41)),                     1'b0},
             '{$sformatf("rs2でシフト量を指定するとrs2が読み込み不可なら停止する"), sll(1, 6'h11, 3, NO_IMM),                   1'b1},
             '{$sformatf("imm使用のDIVは余りの格納先が書き込み不可なら停止する"),   div(1, 2, 3, im(PC_ADDR)),                    1'b1},
+            '{$sformatf("imm使用のDIVは余りの格納先が番地の上限を超えると停止する"), div(1, 2, 3, im(6'h35)),                    1'b1},
             '{$sformatf("レジスタの番地へのJMPはrs1が読み込み不可なら停止する"),   jmp(6'h11, NO_IMM),                           1'b1},
             '{$sformatf("レジスタの番地へのCALLはrs1が読み込み不可なら停止する"),  call(6'h11, NO_IMM),                          1'b1},
             '{$sformatf("分岐はrs1が読み込み不可なら停止する"),                   eq(6'h11, 0, im(1)),                          1'b1},
