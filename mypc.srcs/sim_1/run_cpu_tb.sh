@@ -1,6 +1,6 @@
 #!/bin/bash
 # CPUのテストベンチ(new/cpu_tb.sv)をVivado付属のシミュレータでコンパイル・実行する．
-# Vivadoのbinディレクトリ(xvlog・xelab・xsim)にPATHが通っている必要がある．Git Bash・WSL・Linuxのいずれからも実行できる．
+# Vivadoのbinディレクトリ(xvlog・xelab・xsim)にPATHが通っている必要がある．
 # 引数にguiを指定すると，実行せずに波形ビューア付きのシミュレータを開く．
 # 全テストケースが合格すれば終了コード0，不合格があれば0以外で終わる．
 # Vivadoプロジェクト(mypc.xpr)のシミュレーション機能を使わないのは，ブロックダイアグラムの
