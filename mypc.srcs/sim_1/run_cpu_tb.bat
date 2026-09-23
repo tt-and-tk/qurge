@@ -26,9 +26,6 @@ rem findをフルパスで呼ぶのは，PATHの並びによっては同名の別のコマンドが呼ばれるた
 echo %cmdcmdline% | "%SystemRoot%\System32\find.exe" /i "%~0" >nul
 if not errorlevel 1 set "own_window=1"
 
-rem 現在のコードページを控える(シミュレータの実行後に戻すため)
-for /f "tokens=2 delims=:" %%c in ('chcp') do set /a saved_codepage=%%c
-
 rem 出力先へ移動する(コンパイル結果・ログはカレントディレクトリに出力される)
 if not exist "%work_dir%" mkdir "%work_dir%"
 pushd "%work_dir%"
@@ -51,14 +48,20 @@ if errorlevel 1 goto finish
 rem guiを指定された場合は，波形ビューア付きのシミュレータを開いて終わる
 if /i "%~1"=="gui" goto gui
 
-rem 全テストケースを実行する．実行中だけ，子のコマンドプロンプトの中でコードページをUTF-8へ切り替えて戻す．
-rem 切り替えるのは，テストベンチが結果をUTF-8で出力し，そのままでは画面で文字化けするため．
-rem 子の中で戻すのは，このファイルを読み進める間にUTF-8へ切り替わっていると，日本語を含む行を誤って読むため．
-cmd /c "chcp 65001 >nul & call xsim cpu_tb -runall & chcp %saved_codepage% >nul"
+rem 前回のログを消す(実行に失敗したとき，前回のログで合否を判定しないため)
+if exist xsim.log del xsim.log
+
+rem 全テストケースを実行する．画面への出力は捨て，終了後にログを表示する．
+rem テストベンチは結果をUTF-8で出力し，そのまま画面に出すとコードページ932では文字化けするため．
+rem コードページをUTF-8へ切り替えて表示しないのは，元の932へ戻すときに画面が消去されるため．
+echo テストを実行しています...
+call xsim cpu_tb -runall >nul
+
+rem ログをUTF-8として読み，画面のコードページに合わせて表示する
+powershell -NoProfile -Command "Get-Content -Encoding UTF8 -Path xsim.log"
 
 rem 最後まで実行され($finishに達し)，ログにエラーが出ていなければ合格とする．
 rem xsimの終了コードを使わないのは，$fatalで終わっても0になるため．
-rem また，上の子のコマンドプロンプトからは受け取れないため．
 findstr /b /c:"$finish called" xsim.log >nul
 if errorlevel 1 goto finish
 findstr /b /c:"Error:" /c:"Fatal:" xsim.log >nul
