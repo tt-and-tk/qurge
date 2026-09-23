@@ -1134,11 +1134,14 @@ module cpu_tb;
         if (gpio !== 19'h54281)
             fail($sformatf("GPIO8〜GPIO26: 期待値0x54281，実際0x%h", gpio));
 
+        // 以降の入力ピンのテストケースでは，ピンの値を実行前に設定し，最初の命令から読み出す．
+        // 同期化のシフトレジスタはリセット中も動くため，リセットが解けた時点で値は届いている
+
         // タクトスイッチ・DIPスイッチを押した状態で，それぞれのレジスタを読み出す
         `BEGIN_TEST("タクトスイッチ・DIPスイッチの状態を読める");
         btn = 4'b1010;
         sw  = 2'b01;
-        run('{nop(), movr(1, BTN_ADDR), movr(2, SW_ADDR)});
+        run('{movr(1, BTN_ADDR), movr(2, SW_ADDR)});
         // 後のテストケースへ影響しないよう，スイッチを離した状態へ戻す
         btn = 4'b0;
         sw  = 2'b0;
@@ -1147,10 +1150,10 @@ module cpu_tb;
         expect_reg(1, 32'b1010);
         expect_reg(2, 32'b01);
 
-        // MISOピンを1にした状態で，同期化を待ってからSPIのレジスタを読み出す
+        // MISOピンを1にした状態で，SPIのレジスタを読み出す
         `BEGIN_TEST("MISOピンの値がSPIのレジスタのビット3に読める");
         ck_miso = 1'b1;
-        run('{nop(), nop(), movr(1, SPI_ADDR)});
+        run('{movr(1, SPI_ADDR)});
         // 後のテストケースへ影響しないよう，MISOピンを0へ戻す
         ck_miso = 1'b0;
         // ビット3がMISOの1，ビット0がSSの初期値1になる
