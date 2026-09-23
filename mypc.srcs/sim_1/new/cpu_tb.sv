@@ -745,6 +745,11 @@ module cpu_tb;
         expect_halt(2);
         expect_mem32(32'h0, 32'h0);
 
+        `BEGIN_TEST("足した番地がメモリの範囲外になるRMRは停止する");
+        run('{movi(1, 32'hfffc), movi(2, 32'h77), rmr(4'hf, 1, 2, im(32'd4))});
+        expect_halt(2);
+        expect_reg(2, 32'h77);
+
         `BEGIN_TEST("BRMは停止する");
         run('{brm(4'hf, 0, 0, 1, im(0))});
         expect_halt(0);
