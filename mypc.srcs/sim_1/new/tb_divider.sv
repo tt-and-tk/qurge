@@ -12,20 +12,21 @@ module tb_divider #(
     parameter int LATENCY   = 36,  // 入力を受け付けてから結果が出るまでのサイクル数(2以上)
     parameter bit IS_SIGNED = 1    // 1なら符号あり，0なら符号なしの除算を行う
     ) (
-    input  logic        aclk,
-    input  logic        aresetn,
-    input  logic [31:0] s_axis_divisor_tdata,
-    input  logic        s_axis_divisor_tvalid,
-    input  logic [31:0] s_axis_dividend_tdata,
-    input  logic        s_axis_dividend_tvalid,
-    output logic [63:0] m_axis_dout_tdata = '0,
-    output logic        m_axis_dout_tvalid = 1'b0
+    input  logic        aclk,                          // クロック
+    input  logic        aresetn,                       // リセット(Lowで有効)
+    input  logic [31:0] s_axis_divisor_tdata,          // 除数
+    input  logic        s_axis_divisor_tvalid,         // 除数が有効か
+    input  logic [31:0] s_axis_dividend_tdata,         // 被除数
+    input  logic        s_axis_dividend_tvalid,        // 被除数が有効か
+    output logic [63:0] m_axis_dout_tdata = '0,        // 計算結果(上位32ビットが商，下位32ビットが余り)
+    output logic        m_axis_dout_tvalid = 1'b0      // 計算結果が出たサイクルだけ1になる
     );
 
     logic [63:0] result_pipe[0:LATENCY - 2] = '{default: '0};  // 計算結果を出力まで遅らせるシフトレジスタ
     logic        valid_pipe [0:LATENCY - 2] = '{default: 1'b0}; // 各段の計算結果が有効か
 
-    // 商と余りを求める．符号ありでは0方向へ切り捨て，余りの符号は被除数に従う(SystemVerilogの/と%に同じ)
+    // 被除数を除数で割った商と余りを，上位32ビットに商，下位32ビットに余りを置いて返す．
+    // 符号ありでは0方向へ切り捨て，余りの符号は被除数に従う
     function automatic logic [63:0] divide(input logic [31:0] dividend, input logic [31:0] divisor);
         // 0除算はCPUが除算IPへ送らないため扱わない
         if (divisor == '0)
@@ -34,8 +35,10 @@ module tb_divider #(
         // 仕様上結果は不定のため，ここでは桁あふれした商(最小値)と余り0を返す
         if (IS_SIGNED && dividend == 32'h8000_0000 && divisor == 32'hffff_ffff)
             return {32'h8000_0000, 32'h0};
+        // 符号ありの除算．SystemVerilogの/と%は0方向へ切り捨て，余りの符号を被除数に合わせる
         if (IS_SIGNED)
             return {32'($signed(dividend) / $signed(divisor)), 32'($signed(dividend) % $signed(divisor))};
+        // 符号なしの除算
         return {dividend / divisor, dividend % divisor};
     endfunction
 
