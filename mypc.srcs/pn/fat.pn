@@ -862,6 +862,7 @@ int fat_alloc_cluster(unsigned int prev, unsigned int *cluster) {
         // 値の上位4ビットは予約のため，下位28ビットで空きかどうかを判定する
         if ((fat_read_u32((candidate & (FAT_ENTRIES_PER_SECTOR - 1)) * FAT_ENTRY_SIZE) & FAT_CLUSTER_MASK) == FAT_CLUSTER_FREE) {
             // 途中で失敗しても使用中のクラスタが空きクラスタを指さないよう，終わりを表す値を書いてからつなぐ
+            // つなぎに失敗しても確保したクラスタは解放しない．全てのFATへ順に書くため，1つ目のFATでは既にprevがつながっている可能性があり，解放すると使用中のprevが空きクラスタを指すため
             status = fat_set_cluster(candidate, FAT_CLUSTER_LAST);
             if (status == FAT_OK && prev != 0) {
                 status = fat_set_cluster(prev, candidate);
