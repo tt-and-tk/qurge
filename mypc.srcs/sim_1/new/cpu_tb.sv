@@ -47,6 +47,8 @@ module cpu_tb;
     logic        stdout_tready = 1'b0;
 
     // ボード上の入出力ピン
+    logic [ 3:0] btn = 4'b0;
+    logic [ 1:0] sw = 2'b0;
     logic [ 3:0] led;
     logic [ 5:0] rgb_led;
     logic [ 7:0] ja, jb;
@@ -72,8 +74,8 @@ module cpu_tb;
         .divu_dividend_tvalid(divu_dividend_tvalid),
         .divu_dout_tdata(divu_dout_tdata),
         .divu_dout_tvalid(divu_dout_tvalid),
-        .btn(4'b0),
-        .sw(2'b0),
+        .btn(btn),
+        .sw(sw),
         .led(led),
         .rgb_led(rgb_led),
         .stdin_tdata(stdin_tdata),
@@ -806,15 +808,81 @@ module cpu_tb;
         expect_halt(0);
     endtask
 
+    // 仕様(register.md)の表に基づき，その番地のレジスタを命令のオペランドとして読めるか
+    function automatic bit spec_readable(input addr_t addr);
+        case (addr) inside
+            [6'h00:6'h10], [6'h1c:6'h21], 6'h29, 6'h2a, 6'h31: return 1'b1;
+            default: return 1'b0;
+        endcase
+    endfunction
+
+    // 仕様(register.md)の表に基づき，その番地のレジスタを命令のオペランドとして書けるか
+    function automatic bit spec_writable(input addr_t addr);
+        case (addr) inside
+            [6'h00:6'h10], 6'h1d, 6'h1e, [6'h22:6'h28], 6'h2a, [6'h2d:6'h30], 6'h33: return 1'b1;
+            default: return 1'b0;
+        endcase
+    endfunction
+
+    // 全番地のレジスタについて，MOVで読む・書くと仕様どおりに実行を続けるか停止するか
+    task automatic test_register_access();
+        for (int addr = 0; addr <= REGISTER_MAX_ADDR; addr++) begin
+            if (spec_readable(addr))
+                begin_test($sformatf("レジスタ0x%02hは読み出せる", addr));
+            else
+                begin_test($sformatf("レジスタ0x%02hを読み出すと停止する", addr));
+            run('{movi(1, 32'h77), movr(2, addr)});
+            if (spec_readable(addr)) begin
+                expect_end();
+            end
+            else begin
+                expect_halt(1);
+                expect_reg(2, 32'h0);
+            end
+
+            if (spec_writable(addr))
+                begin_test($sformatf("レジスタ0x%02hへ書き込める", addr));
+            else
+                begin_test($sformatf("レジスタ0x%02hへ書き込むと停止する", addr));
+            run('{nop(), movi(addr, 32'h0)});
+            if (spec_writable(addr))
+                expect_end();
+            else
+                expect_halt(1);
+        end
+    endtask
+
     // ボード上の入出力ピンにつながるレジスタ
     task automatic test_pins();
-        `BEGIN_TEST("LED・SPIのレジスタへの書き込みがピンに出る");
-        run('{movi(LED_ADDR, 32'h5), movi(SPI_ADDR, 32'b0110)});
+        `BEGIN_TEST("出力用のレジスタへの書き込みが対応するピンに出る");
+        run('{movi(LED_ADDR, 32'h5), movi(RGB_LED_ADDR, 32'h2a), movi(PMOD_A_ADDR, 32'ha5), movi(PMOD_B_ADDR, 32'h5a),
+              movi(AR_LOW_ADDR, 32'h81), movi(AR_HIGH_ADDR, 32'h21), movi(AR_MISC_ADDR, 32'b101),
+              movi(SPI_ADDR, 32'b0110), movi(GPIO1_ADDR, 32'h81), movi(GPIO2_ADDR, 32'h42), movi(GPIO3_ADDR, 32'h5)});
         expect_end();
         if (led !== 4'h5)
             fail($sformatf("LED: 期待値0x5，実際0x%h", led));
+        if (rgb_led !== 6'h2a)
+            fail($sformatf("RGB LED: 期待値0x2a，実際0x%h", rgb_led));
+        if (ja !== 8'ha5 || jb !== 8'h5a)
+            fail($sformatf("Pmod A・B: 期待値0xa5・0x5a，実際0x%h・0x%h", ja, jb));
+        if (ar !== 14'h2181)
+            fail($sformatf("AR0〜AR13: 期待値0x2181，実際0x%h", ar));
+        if ({a, ar_sda, ar_scl} !== 3'b101)
+            fail($sformatf("A・AR_SDA・AR_SCL: 期待値101，実際%b", {a, ar_sda, ar_scl}));
         if ({ck_sck, ck_mosi, ck_ss} !== 3'b110)
             fail($sformatf("SPI(SCK,MOSI,SS): 期待値110，実際%b", {ck_sck, ck_mosi, ck_ss}));
+        if (gpio !== 19'h54281)
+            fail($sformatf("GPIO8〜GPIO26: 期待値0x54281，実際0x%h", gpio));
+
+        `BEGIN_TEST("タクトスイッチ・DIPスイッチの状態を読める");
+        btn = 4'b1010;
+        sw  = 2'b01;
+        run('{nop(), movr(1, BTN_ADDR), movr(2, SW_ADDR)});
+        btn = 4'b0;
+        sw  = 2'b0;
+        expect_end();
+        expect_reg(1, 32'b1010);
+        expect_reg(2, 32'b01);
 
         `BEGIN_TEST("MISOピンの値がSPIのレジスタのビット3に読める");
         ck_miso = 1'b1;
@@ -826,11 +894,6 @@ module cpu_tb;
 
     // 命令の種類によらない停止の条件と，停止後の挙動
     task automatic test_common();
-        `BEGIN_TEST("読み込み不可のレジスタを読むと停止する");
-        run('{movi(1, 32'h77), add(6'h11, 0, 1)});
-        expect_halt(1);
-        expect_reg(1, 32'h77);
-
         `BEGIN_TEST("使わないフィールドでもレジスタ番地の上限を超えると停止する");
         run('{nop(), raw(3'h0, NOP, 6'h35, 0, 0, NO_IMM)});
         expect_halt(1);
@@ -886,6 +949,7 @@ module cpu_tb;
         test_j_type();
         test_m_type();
         test_io_type();
+        test_register_access();
         test_pins();
         test_common();
         finish_test();
