@@ -149,9 +149,9 @@ int sd_init_commands(void) {
     }
 
     // ACMD41(SD_SEND_OP_COND): 初期化の開始指示．内部初期化中は0x01を返し続け，完了すると0x00になる
-    // 完了まで最大1秒かかることが規格上許容されているため，遅いカードを取りこぼさない回数を見る
+    // 完了まで最大1秒かかることが規格上許容されているため，それを上回るだけの回数を見る
     ready = 0;
-    for (int i = 0; i < 1000 && ready == 0; i++) {
+    for (int i = 0; i < 50000 && ready == 0; i++) {
         // ACMDはCMDとは別の命令セットで，CMD55の直後の1コマンドだけがそちらとして解釈される
         response = sd_command(55, 0x00000000, 0x65);
         // CMD55が通っていないと続くコマンドは通常のCMD41として解釈されるため，前提が崩れたまま繰り返さず止める
@@ -164,6 +164,13 @@ int sd_init_commands(void) {
         }
         // 引数のbit30(HCS)で大容量カード(SDHC/SDXC)を扱えるホストであることを申告する
         response = sd_command(41, 0x40000000, 0x77);
+        // in idle state(bit0)以外が立っていればエラー応答か無応答であり，繰り返しても完了しないため止める
+        if ((response & 0xfe) != 0) {
+            print("ACMD41: ");
+            print_hex(response);
+            print(" (failed)\n");
+            return 0;
+        }
         if (response == 0x00) {
             ready = 1;
         }
