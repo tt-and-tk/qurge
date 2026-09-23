@@ -30,6 +30,9 @@
 // 命令パイプライン処理の概要．FETCH(ROMへ番地を出す)→FETCH_CAPTURE(結果を取り込む)→
 // CHECK(実行可否を確認する)→EXECUTEの4フェーズを基本とする．ROMはクロックに同期した読み出しの
 // ため，番地を出した次のサイクルにならないと結果が確定しない．
+// プログラムカウンタがメインメモリのコード領域を指す場合は，FETCH_CAPTUREの代わりにFETCH_RAMで
+// メインメモリから命令を読み出す．メインメモリの読み出しは1回32ビットのため，64ビットの命令を
+// イミディエイトデータ・命令語の順に2回に分けて読む．
 //
 // 実行可否の確認は，命令のデコード時点で分かる情報(命令種別・func・レジスタ番地など)はCHECK
 // フェーズでalu.svh::is_instruction_executable()により一括判定する．レジスタの値そのものに基づく
@@ -43,6 +46,8 @@
 // 先読みが成立するには実行フェーズが3サイクル以上続く必要がある(ROMの読み出しに1サイクルかかり，
 // 取り込んだ結果を使えるのはさらに次のサイクルから)．これに届かない命令と，分岐・ジャンプを行う命令
 // (メモリの応答を待つため複数サイクルかかるCALL・RETを含む)は毎回4フェーズすべてを経る．
+// 先読みはROMの命令に限る．次の番地がROMの範囲外(コード領域を含む)であれば先読みを取り込まず，
+// 命令の完了後にFETCHから取得し直す(メインメモリの読み出しポートは実行中の命令と共用のため)．
 module alu_sv (
     input logic clk,
     input logic resetn,
@@ -116,8 +121,8 @@ module alu_sv (
     // レジスタの初期値．FPGAのコンフィグ直後の値とリセット時の値を兼ねており，
     // どちらの経路で初期化されても同じ状態から始まる
     localparam register_t REGISTER_INIT[REGISTER_MAX_ADDR:0] = '{
-        // スタックポインタは，スタックが空であることを表すメモリの末尾の次の番地(容量と同じ値)
-        SP_ADDR:  register_t'(RAM_SIZE),
+        // スタックはメモリの前半に置く．スタックポインタは，スタックが空であることを表す前半の末尾の次の番地(コード領域の先頭と同じ値)
+        SP_ADDR:  register_t'(CODE_AREA_BASE),
         // Arduino SPIのSSはアクティブLowのため，非選択を表すHighにする
         SPI_ADDR: 32'h1,
         default:  '0
@@ -144,11 +149,15 @@ module alu_sv (
     // ===== 命令の保持・先読み =====
     // 現在実行中の命令と，実行中にあらかじめ取得しておいた次の命令の2系統を保持する
 
-    // CHECK/EXECUTEフェーズで検証・実行の対象になっている命令．FETCH/FETCH_CAPTUREフェーズの
+    // CHECK/EXECUTEフェーズで検証・実行の対象になっている命令．FETCH/FETCH_CAPTURE/FETCH_RAMフェーズの
     // 間は，まだ取り込みが済んでおらず前回実行した命令の値が残ったままで，意味を持たない．
     machine_p::machine_t current_instruction = nop();
-    // current_instructionをROMの実容量範囲内から取得できたか(CPU_FETCH_CAPTUREで確定する)
+    // current_instructionを，命令を置ける番地(ROMの実容量範囲内またはコード領域)から取得できたか
+    // (CPU_FETCH_CAPTURE・CPU_FETCH_RAMで確定する)
     logic current_instruction_pc_valid = 1'b1;
+
+    // CPU_FETCH_RAMで読み出し中のワードが命令の上位32ビット(命令語)か．0なら下位32ビット(イミディエイトデータ)
+    logic fetching_upper_word = 1'b0;
 
     // 実行中に先読みしておいた次の命令を保持するバッファ．複数サイクルにまたがる命令の
     // 待機中に埋まり，1サイクルで完了する命令の実行中は埋まらないまま次の命令へ進む．
@@ -217,6 +226,25 @@ module alu_sv (
                              : (func_r == DIVU) ? divu_dout_tdata
                              : '0;
 
+    // ===== コード領域からの命令の取得(組み合わせ回路) =====
+
+    // コード領域内の命令の順番を表すのに要るプログラムカウンタの下位ビット幅
+    localparam int CODE_AREA_PC_WIDTH = $clog2(rom_p::CODE_AREA_PC_NUM);
+
+    // プログラムカウンタがコード領域を指しているか．コード領域の先頭のプログラムカウンタは命令数の倍数のため，
+    // 下位ビットを除いた上位ビットの一致だけで判定する(大小比較2つより回路が小さい)
+    logic pc_in_code_area;
+    assign pc_in_code_area = (register[PC_ADDR] >> CODE_AREA_PC_WIDTH) == (rom_p::CODE_AREA_PC_BASE >> CODE_AREA_PC_WIDTH);
+
+    // プログラムカウンタが指す命令の，下位ワード(イミディエイトデータ)・上位ワード(命令語)のメインメモリ上の番地．
+    // コード領域の先頭番地はコード領域の大きさの倍数のため，加算の代わりに，先頭番地・命令の順番×8・ワードの位置×4を
+    // ビットごとのORで組み立てる(加算器を通さないぶん経路が短い)
+    ram_p::address_bus_t fetch_lower_address;
+    ram_p::address_bus_t fetch_upper_address;
+    assign fetch_lower_address = ram_p::address_bus_t'(CODE_AREA_BASE)
+                               | (ram_p::address_bus_t'(register[PC_ADDR][CODE_AREA_PC_WIDTH-1:0]) << 3);
+    assign fetch_upper_address = fetch_lower_address | ram_p::address_bus_t'(4);
+
     // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
     // 実行フェーズの間のみ意味を持つ(それ以外のフェーズでは直前に実行した命令の値が残っている)
 
@@ -267,6 +295,14 @@ module alu_sv (
                        : (command.m_type == M_TYPE && (func_r == RMR || func_r == WMR)) ? rs1_val_r + imm_r[31:0]   // rs1にイミディエイトデータを足した番地(32ビットで折り返す)
                        : imm_r[32]                                                      ? imm_r[31:0]               // イミディエイトデータで指定された番地
                        : rs1_val_r;                                                                                 // rs1で指定された番地
+
+    // mem_addressが読み書きしてよい範囲に収まっているか．CALL・RETが積み下ろしするスタックはメモリの前半に限り，
+    // 後半のコード領域に入る場合は範囲外とする(空のスタックでのRETを停止させ，CALLがコード領域を書き換えないようにするため)．
+    // それ以外の命令はメモリ全体を読み書きできる．コード領域の先頭番地は2のべき乗のため，前半に収まるかはビット幅で判定できる
+    util_p::bool_t mem_address_in_range;
+    assign mem_address_in_range = (command.m_type == J_TYPE)
+        ? util_p::is_within_bit_width(mem_address, $clog2(CODE_AREA_BASE))
+        : util_p::is_within_bit_width(mem_address, $bits(ram_p::address_bus_t));
 
     // 分岐・ジャンプを行わない命令の次の番地(現在の番地の直後)．オペランドの値に依存せず
     // プログラムカウンタだけから求まる
@@ -353,7 +389,7 @@ module alu_sv (
     // 先読みが間に合っていない場合は今サイクルのrom_read.machineを信用できない)．
     // 先読みが完了しかつ実行可能だと分かればCHECKを省略してEXECUTEへ直接進み，先読み済みだが
     // 実行できないと分かった場合はCHECKへ進む(CHECKで停止させる)．先読みが間に合っていない
-    // 場合はFETCHへ戻ってROMから改めて取得し直す．
+    // 場合と，次の番地がROMの範囲外のため先読みしなかった場合はFETCHへ戻って改めて取得し直す．
     // これらの命令はいずれも分岐・ジャンプを行わないため，プログラムカウンタは順番どおりの
     // 次の番地(sequential_pc)へ更新する．分岐・ジャンプを行う命令をこのタスクから完了させては
     // ならない(飛び先が無視される)．
@@ -411,8 +447,8 @@ module alu_sv (
             current_instruction_pc_valid <= prefetched_instruction_pc_valid;
             cpu_phase <= CPU_CHECK;
         end
-        // 先読みが間に合っていない．プログラムカウンタは上で次の番地へ更新済みなので，
-        // FETCHへ戻って改めてROMから取得し直す
+        // 先読みが間に合っていない，または次の番地がROMの範囲外のため先読みしていない．
+        // プログラムカウンタは上で次の番地へ更新済みなので，FETCHへ戻って改めて取得し直す
         else begin
             cpu_phase <= CPU_FETCH;
         end
@@ -440,12 +476,12 @@ module alu_sv (
     endtask
 
     // メモリを読み書きする命令が，メモリへ要求を出す際に呼ぶタスク．番地はmem_addressを使い，
-    // アドレスバス幅を超える上位ビットが立っている場合は，折り返した番地へアクセスせず要求を出さずに停止する
+    // 読み書きしてよい範囲(mem_address_in_range)を外れる場合は，折り返した番地へアクセスせず要求を出さずに停止する
     // (停止した命令はメモリ・レジスタをいずれも書き換えない)
     task automatic request_ram_read(
         input machine_p::mask_t mask  // 読み込むバイトの指定
     );
-        if (!util_p::is_within_bit_width(mem_address, $bits(ram_p::address_bus_t))) begin
+        if (!mem_address_in_range) begin
             is_halted <= 1'b1;
         end
         else begin
@@ -463,7 +499,7 @@ module alu_sv (
         input machine_p::mask_t mask,  // 書き込むバイトの指定
         input register_t        data   // 書き込むデータ
     );
-        if (!util_p::is_within_bit_width(mem_address, $bits(ram_p::address_bus_t))) begin
+        if (!mem_address_in_range) begin
             is_halted <= 1'b1;
         end
         else begin
@@ -563,6 +599,7 @@ module alu_sv (
             prefetched_instruction <= nop();
             prefetched_instruction_valid <= 1'b0;
             current_instruction_pc_valid <= 1'b1;
+            fetching_upper_word <= 1'b0;
             prefetched_instruction_pc_valid <= 1'b1;
             can_prefetch_d1 <= 1'b0;
             rs1_val_r <= '0;
@@ -647,10 +684,21 @@ module alu_sv (
             // CPUの実行サイクルごとに処理記載
             unique case (cpu_phase)
                 // フェッチ1サイクル目(プログラムの1命令目，および先読みが間に合わなかった
-                // 命令の取得し直しがここを通る)．ROMへ番地を出す(comb blockで実施済み)だけで，
-                // 同期読み出しの結果はまだ確定していないため次のサイクルまで待つ
+                // 命令の取得し直しがここを通る)．
                 CPU_FETCH: begin
-                    cpu_phase <= CPU_FETCH_CAPTURE;
+                    // コード領域を指していれば，メインメモリへ命令の下位ワードの読み出しを要求する
+                    if (pc_in_code_area) begin
+                        ram_read.valid   <= 1'b1;
+                        ram_read.mask    <= 4'hf;
+                        ram_read.address <= fetch_lower_address;
+                        fetching_upper_word <= 1'b0;
+                        cpu_phase <= CPU_FETCH_RAM;
+                    end
+                    // それ以外はROMへ番地を出す(comb blockで実施済み)だけで，同期読み出しの結果はまだ確定して
+                    // いないため次のサイクルまで待つ．ROMの幅に収まらない番地もここを通り，CHECKで停止する
+                    else begin
+                        cpu_phase <= CPU_FETCH_CAPTURE;
+                    end
                 end
 
                 // フェッチ2サイクル目．前サイクルに出した番地に対応するrom_read.machineが
@@ -663,6 +711,31 @@ module alu_sv (
 
                     // 次のサイクルへ
                     cpu_phase <= CPU_CHECK;
+                end
+
+                // コード領域の命令を，メインメモリから下位ワード・上位ワードの順に取り込む．
+                // メインメモリの読み出しを要求している間は停止しない(停止はCHECK・EXECUTEでのみ起こる)ことを前提に，
+                // 停止時のメインメモリのリセットは行っていない(メインメモリはresetnでのみリセットされる)
+                CPU_FETCH_RAM: begin
+                    // 読み出しが完了したら，読んだワードを命令の該当する位置へ取り込む
+                    if (ram_read.ready) begin
+                        // 下位ワード(イミディエイトデータ)を取り込み，続けて上位ワードを読む．validを下ろさずに番地だけを
+                        // 変えると，メインメモリは完了を返した次のサイクルに待機へ戻った時点で新しい要求として受け付ける
+                        // (一度下ろすと，上げ直すまでの1サイクルが余分にかかる)
+                        if (!fetching_upper_word) begin
+                            current_instruction[31:0] <= ram_read.data;
+                            ram_read.address <= fetch_upper_address;
+                            fetching_upper_word <= 1'b1;
+                        end
+                        // 上位ワード(命令語)を取り込んで命令が揃ったので，読み出しを終えて実行前確認へ進む
+                        else begin
+                            current_instruction[63:32] <= ram_read.data;
+                            current_instruction_pc_valid <= 1'b1;
+                            ram_read.valid <= 1'b0;
+                            fetching_upper_word <= 1'b0;
+                            cpu_phase <= CPU_CHECK;
+                        end
+                    end
                 end
 
                 // 実行前確認(プログラムの1命令目，先読みが間に合わずFETCHから取得し直した
@@ -702,13 +775,15 @@ module alu_sv (
                     // 早すぎる値を掴んでしまう)．can_prefetchも同時に要求するのは，捕捉が
                     // 完了しprefetched_instruction_valid <= 1'b1が反映された直後の1サイクルは
                     // can_prefetch_d1がまだ1のまま残っており，その間に古い要求(番地'0)への
-                    // 応答で誤って再取り込みしてしまうのを防ぐため
-                    if (can_prefetch && can_prefetch_d1) begin
-                        // 番地がROMの実容量の範囲内(rom_read.valid)であり，
-                        // かつpc_bus_tの幅に収まっている(pc_fits_in_width)場合にのみ有効とする
+                    // 応答で誤って再取り込みしてしまうのを防ぐため．
+                    // 次の番地がpc_bus_tの幅に収まらない(コード領域を含むROMの範囲外)場合は取り込まず，
+                    // 命令の完了後にFETCHで取得し直す．この条件をcan_prefetch側に加えないのは，ROMの番地入力までの
+                    // 組み合わせ経路が伸びるため(取り込み側なら計算済みのpc_fits_in_widthをイネーブルに使うだけで済む)
+                    if (can_prefetch && can_prefetch_d1 && pc_fits_in_width) begin
+                        // 番地がROMの実容量の範囲内(rom_read.valid)である場合にのみ有効とする
                         prefetched_instruction <= rom_read.machine;
                         prefetched_instruction_valid <= 1'b1;
-                        prefetched_instruction_pc_valid <= rom_read.valid && pc_fits_in_width;
+                        prefetched_instruction_pc_valid <= rom_read.valid;
                     end
 
                     // 関数タイプごとに実行
@@ -1088,6 +1163,11 @@ module alu_sv (
                             is_halted <= 1'b1;
                         end
                     endcase
+                end
+
+                // 定義されていない実行フェーズ(フェーズを表すビット幅のうち使っていない値)．動作を保証できないため停止させる
+                default: begin
+                    is_halted <= 1'b1;
                 end
             endcase
         end
