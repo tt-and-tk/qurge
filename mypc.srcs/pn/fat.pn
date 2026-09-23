@@ -306,7 +306,7 @@ int fat_parse_bpb(unsigned int fs_start) {
     fat_sectors_per_cluster = fat_sector[BPB_SECTORS_PER_CLUSTER];
     fat_cluster_shift = shift;
     fat_cluster_count = (total - system_size) >> shift;
-    // データ領域の最後のクラスタの値がFATに収まらない記録は壊れている(FATの大きさが0の記録もここで弾かれる)
+    // データ領域の最後のクラスタ(番号はクラスタ数+1)の値を含むFATのセクタが，FATの範囲に無い記録は壊れている(FATの大きさが0の記録もここで弾かれる)
     // 収まらないクラスタの値を読み書きすると，FATの外にある複製やデータ領域のセクタをFATとして扱ってしまう
     if (((fat_cluster_count + FAT_FIRST_CLUSTER - 1) >> FAT_ENTRIES_PER_SECTOR_SHIFT) >= fat_sectors_per_fat) {
         return FAT_ERR_NOT_FAT32;
