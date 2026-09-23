@@ -297,10 +297,10 @@ module cpu_tb;
                 set_ram_byte(code_area_address(index + i) + b, instructions[i][b * 8 +: 8]);
     endfunction
 
-    // 命令列をROMへ書き込み，リセットしてから，正常終了・停止・打ち切りのいずれかに至るまで実行する．
+    // 命令列をROMの先頭へ，code_area・rom_tailの命令列をそれぞれコード領域・ROMの末尾へ書き込み，
+    // リセットしてから，正常終了・停止・打ち切りのいずれかに至るまで実行する．
     // 実行の終わり方と，終えた時点のレジスタの値を残す．停止した場合のレジスタの値は，停止した命令が
     // 実行された時点のもの(初期値へ戻る前)になる．
-    // code_area・rom_tailに命令列を入れておくと，それぞれコード領域・ROMの末尾にも置いてから実行する．
     // 末尾に正常終了を表す命令を付けない場合(ROMの範囲外へ進む場合の検証)は2番目の引数を0に，
     // 前の実行でメモリへ書いた値を残す場合は3番目の引数を1にする
     task automatic run(input machine_t body[$], input bit append_end = 1'b1, input bit keep_ram = 1'b0);
