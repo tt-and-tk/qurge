@@ -66,8 +66,8 @@ void handle_echo(int pos) {
     print("\n");
 }
 
-// ルートディレクトリの走査で，エントリの名前を1行出力する(ディレクトリは末尾に'/'を付けて区別する)
-// fat_walk_rootへ渡す関数は走査を打ち切るかどうかを戻り値で伝える決まりのため，常に続ける場合もvoidにはしない
+// ディレクトリの走査で，エントリの名前を1行出力する(ディレクトリは末尾に'/'を付けて区別する)
+// fat_walkへ渡す関数は走査を打ち切るかどうかを戻り値で伝える決まりのため，常に続ける場合もvoidにはしない
 int print_entry(struct FatEntry *entry) {
     char text[FAT_NAME_TEXT_SIZE];  // 表示用の名前
     // エントリの名前を"NAME.EXT"形式に整えて出力する
@@ -83,7 +83,7 @@ int print_entry(struct FatEntry *entry) {
     return 0;
 }
 
-// lsコマンド: ルートディレクトリにあるファイル・ディレクトリの名前を順に出力する
+// lsコマンド: 現在のディレクトリにあるファイル・ディレクトリの名前を順に出力する
 void handle_ls(int pos) {
     int status;  // 走査の結果
 
@@ -92,8 +92,8 @@ void handle_ls(int pos) {
         print_error("too many arguments\n");
         return;
     }
-    // ルートディレクトリを走査して各エントリの名前を出力し，走査に失敗すればその理由を出力する
-    status = fat_walk_root(print_entry);
+    // 現在のディレクトリを走査して各エントリの名前を出力し，走査に失敗すればその理由を出力する
+    status = fat_walk(print_entry);
     if (status != FAT_OK) {
         print_fat_error(status);
     }
@@ -108,7 +108,7 @@ void handle_cat(int pos) {
     int status;             // FAT32の各関数の結果
     int last = '\n';        // 最後に出力した文字(内容が改行で終わらなければ改行を補うため．空のファイルでは補わないよう改行から始める)
 
-    // コマンド名(cat)の直後の引数をファイル名として取り出す
+    // コマンド名(cat)の直後の引数をファイル名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
     if (extract_only_arg(pos, name) == 0) {
         return;
     }
@@ -159,7 +159,7 @@ void handle_touch(int pos) {
     struct FatEntry entry;  // 作成したファイルのエントリ
     int status;             // 作成の結果
 
-    // コマンド名(touch)の直後の引数をファイル名として取り出す
+    // コマンド名(touch)の直後の引数をファイル名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
     if (extract_only_arg(pos, name) == 0) {
         return;
     }
@@ -193,7 +193,7 @@ void handle_write(int pos) {
 
     // 書き込み先のファイルを決める．無ければ空のファイルを作成し，同名のファイルが既にあればそれを使う
     // 作成の処理は，同名のファイルがあれば作成せずにそのエントリを返してFAT_ERR_EXISTSを返すため，その場合も書き込み先が決まったものとして扱う
-    // (名前での検索を別に行うと，作成の処理が同じ名前を探すためにルートディレクトリをもう一度走査することになるため，作成の処理に任せる)
+    // (名前での検索を別に行うと，作成の処理が同じ名前を探すためにディレクトリをもう一度走査することになるため，作成の処理に任せる)
     status = fat_create(name, &entry);
     if (status == FAT_ERR_EXISTS) {
         status = FAT_OK;
@@ -214,7 +214,7 @@ void handle_rm(int pos) {
     struct FatEntry entry;  // 削除するファイルのエントリ
     int status;             // 検索・削除の結果
 
-    // コマンド名(rm)の直後の引数をファイル名として取り出す
+    // コマンド名(rm)の直後の引数をファイル名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
     if (extract_only_arg(pos, name) == 0) {
         return;
     }
@@ -258,6 +258,85 @@ void handle_mv(int pos) {
     }
 }
 
+// mkdirコマンド: 引数の名前で，空のディレクトリを作成する
+void handle_mkdir(int pos) {
+    char name[INPUT_SIZE];  // 先頭の引数(作成するディレクトリ名)
+    int status;             // 作成の結果
+
+    // コマンド名(mkdir)の直後の引数をディレクトリ名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
+    if (extract_only_arg(pos, name) == 0) {
+        return;
+    }
+    // ディレクトリを作成し，失敗すればその理由を出力する(同名のファイル・ディレクトリが既にある場合も失敗になる)
+    status = fat_mkdir(name);
+    if (status != FAT_OK) {
+        print_fat_error(status);
+    }
+}
+
+// rmdirコマンド: 引数の名前に対応する空のディレクトリを削除する
+void handle_rmdir(int pos) {
+    char name[INPUT_SIZE];  // 先頭の引数(削除するディレクトリ名)
+    struct FatEntry entry;  // 削除するディレクトリのエントリ
+    int status;             // 検索・削除の結果
+
+    // コマンド名(rmdir)の直後の引数をディレクトリ名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
+    if (extract_only_arg(pos, name) == 0) {
+        return;
+    }
+    // ディレクトリ名から対象のエントリを探して削除し，失敗すればその理由を出力する(中身が残っている場合も失敗になる)
+    status = fat_find(name, &entry);
+    if (status == FAT_OK) {
+        status = fat_rmdir(&entry);
+    }
+    if (status != FAT_OK) {
+        print_fat_error(status);
+    }
+}
+
+// cdコマンド: 引数の名前のディレクトリへ現在のディレクトリを移す．引数が無ければルートディレクトリへ移す
+void handle_cd(int pos) {
+    char name[INPUT_SIZE];  // 先頭の引数(移動先のディレクトリ名)
+    int status;             // 移動の結果
+
+    // コマンド名(cd)の直後の引数をディレクトリ名として取り出す
+    pos = extract_arg(input, pos, name, INPUT_SIZE);
+    // 移動先の後に余分な引数があれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return;
+    }
+    // 引数が無ければルートディレクトリへ，あればそのディレクトリへ移り，失敗すればその理由を出力する
+    if (name[0] == '\0') {
+        status = fat_chdir_root();
+    } else {
+        status = fat_chdir(name);
+    }
+    if (status != FAT_OK) {
+        print_fat_error(status);
+    }
+}
+
+// pwdコマンド: 現在のディレクトリの絶対パスを出力する
+void handle_pwd(int pos) {
+    char path[FAT_PATH_SIZE];  // 現在のディレクトリの絶対パス
+    int status;                // パスの取得の結果
+
+    // 引数を取らないコマンドのため，引数が指定されていれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return;
+    }
+    // パスを取り出して1行で出力し，失敗すればその理由を出力する
+    status = fat_getcwd(path);
+    if (status != FAT_OK) {
+        print_fat_error(status);
+        return;
+    }
+    print(path);
+    print("\n");
+}
+
 // sdinitコマンド: SDカードを初期化し，カード上のFAT32ファイルシステムをマウントし直す
 void handle_sdinit(int pos) {
     int status;  // マウントの結果
@@ -292,6 +371,10 @@ void handle_help(int pos) {
     print("write\n");
     print("rm\n");
     print("mv\n");
+    print("mkdir\n");
+    print("rmdir\n");
+    print("cd\n");
+    print("pwd\n");
     print("sdinit\n");
 }
 
@@ -321,6 +404,14 @@ void dispatch(int pos) {
         handle_rm(pos);
     } else if (streq(cmd, "mv")) {
         handle_mv(pos);
+    } else if (streq(cmd, "mkdir")) {
+        handle_mkdir(pos);
+    } else if (streq(cmd, "rmdir")) {
+        handle_rmdir(pos);
+    } else if (streq(cmd, "cd")) {
+        handle_cd(pos);
+    } else if (streq(cmd, "pwd")) {
+        handle_pwd(pos);
     } else if (streq(cmd, "sdinit")) {
         handle_sdinit(pos);
     } else {
