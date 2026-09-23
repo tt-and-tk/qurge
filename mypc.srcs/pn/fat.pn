@@ -1082,8 +1082,9 @@ int fat_add_entry(struct FatEntry *entry) {
     if (sd_read_block(entry->sector, fat_sector) == 0) {
         return FAT_ERR_READ;
     }
-    // エントリを書き，書き換えたセクタをカードへ書き込む
+    // 読み込んだセクタの中で，控えた場所にエントリを書く
     fat_put_new_entry(entry);
+    // 書き換えたセクタをカードへ書き込む
     if (sd_write_block(entry->sector, fat_sector) == 0) {
         return FAT_ERR_WRITE;
     }
@@ -1149,27 +1150,31 @@ int fat_mkdir(char *text) {
     if (status != FAT_ERR_NOT_FOUND) {
         return status;
     }
-    // 中身を置くクラスタを1つ確保し，0で埋めて全エントリを未使用にする
+    // 中身を置くクラスタを1つ確保する
     status = fat_alloc_cluster(0, &cluster);
     if (status != FAT_OK) {
         return status;
     }
+    // 確保したクラスタを0で埋め，全エントリを未使用にする
     status = fat_clear_cluster(cluster);
     // 0で埋め終えたfat_sectorを先頭セクタとして，`.`と`..`のエントリをこの順に並べて書き込む
-    // 親がルートディレクトリであれば，`..`には開始クラスタの代わりに0を書く決まりである
     if (status == FAT_OK) {
+        // `..`に書く親ディレクトリの開始クラスタを決める．親がルートディレクトリであれば，開始クラスタの代わりに0を書く決まりである
         if (fat_depth == 0) {
             parent = 0;
         } else {
             parent = fat_dir_clusters[fat_depth];
         }
+        // 先頭のエントリに，確保したクラスタを指す`.`を書く
         fat_put_dot_entry(0, 1, cluster);
+        // 2番目のエントリに，親ディレクトリを指す`..`を書く
         fat_put_dot_entry(DIR_ENTRY_SIZE, 2, parent);
+        // 2つのエントリを書いたセクタを，クラスタの先頭セクタへ書き込む
         if (sd_write_block(fat_cluster_sector(cluster), fat_sector) == 0) {
             status = FAT_ERR_WRITE;
         }
     }
-    // 中身を用意できたら，現在のディレクトリへディレクトリのエントリを書き込む
+    // 中身を用意できたら，確保したクラスタを中身とするディレクトリのエントリを，現在のディレクトリへ書き込む
     if (status == FAT_OK) {
         entry.attr = ATTR_DIRECTORY;
         entry.name_case = fat_name_case(text);
@@ -1287,6 +1292,7 @@ int fat_remove(struct FatEntry *entry) {
     if ((entry->attr & ATTR_DIRECTORY) != 0) {
         return FAT_ERR_IS_DIR;
     }
+    // ファイルであれば，エントリを削除して中身を解放する
     return fat_delete_entry(entry);
 }
 
