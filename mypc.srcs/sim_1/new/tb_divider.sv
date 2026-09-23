@@ -3,6 +3,7 @@
 // 除算IP(Divider Generator)の振る舞いモデル．ブロックダイアグラム上の除算IPと同じく，
 // 被除数・除数のtvalidが両方立ったサイクルの入力を受け付け，LATENCYサイクル後にdout_tvalidを
 // 1サイクルだけ立てる．dout_tdataは上位32ビットが商，下位32ビットが余りで，次の結果が出るまで前回の値を保持する．
+// リセット(aresetn)が入ると，計算途中の結果を捨てる．
 // 実物のIPを使わないのは，シミュレーションをブロックダイアグラムの出力生成物に依存させないため
 //////////////////////////////////////////////////////////////////////////////////
 
@@ -12,6 +13,7 @@ module tb_divider #(
     parameter bit IS_SIGNED = 1    // 1なら符号あり，0なら符号なしの除算を行う
     ) (
     input  logic        aclk,
+    input  logic        aresetn,
     input  logic [31:0] s_axis_divisor_tdata,
     input  logic        s_axis_divisor_tvalid,
     input  logic [31:0] s_axis_dividend_tdata,
@@ -38,21 +40,28 @@ module tb_divider #(
     endfunction
 
     always_ff @(posedge aclk) begin
-        // 両方の入力が揃ったサイクルに計算し，シフトレジスタの先頭へ入れる
-        valid_pipe[0]  <= s_axis_divisor_tvalid && s_axis_dividend_tvalid;
-        result_pipe[0] <= (s_axis_divisor_tvalid && s_axis_dividend_tvalid)
-            ? divide(s_axis_dividend_tdata, s_axis_divisor_tdata) : '0;
-
-        // 1段ずつ後ろへ送る
-        for (int i = 1; i <= LATENCY - 2; i++) begin
-            valid_pipe[i]  <= valid_pipe[i - 1];
-            result_pipe[i] <= result_pipe[i - 1];
+        // リセット中は計算途中の結果をすべて無効にする
+        if (!aresetn) begin
+            valid_pipe         <= '{default: 1'b0};
+            m_axis_dout_tvalid <= 1'b0;
         end
+        else begin
+            // 両方の入力が揃ったサイクルに計算し，シフトレジスタの先頭へ入れる
+            valid_pipe[0]  <= s_axis_divisor_tvalid && s_axis_dividend_tvalid;
+            result_pipe[0] <= (s_axis_divisor_tvalid && s_axis_dividend_tvalid)
+                ? divide(s_axis_dividend_tdata, s_axis_divisor_tdata) : '0;
 
-        // 最後の段に届いた有効な結果だけを出力し，それ以外のサイクルは前回の結果を出し続ける
-        m_axis_dout_tvalid <= valid_pipe[LATENCY - 2];
-        if (valid_pipe[LATENCY - 2])
-            m_axis_dout_tdata <= result_pipe[LATENCY - 2];
+            // 1段ずつ後ろへ送る
+            for (int i = 1; i <= LATENCY - 2; i++) begin
+                valid_pipe[i]  <= valid_pipe[i - 1];
+                result_pipe[i] <= result_pipe[i - 1];
+            end
+
+            // 最後の段に届いた有効な結果だけを出力し，それ以外のサイクルは前回の結果を出し続ける
+            m_axis_dout_tvalid <= valid_pipe[LATENCY - 2];
+            if (valid_pipe[LATENCY - 2])
+                m_axis_dout_tdata <= result_pipe[LATENCY - 2];
+        end
     end
 
 endmodule

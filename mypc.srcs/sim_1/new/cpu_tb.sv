@@ -114,7 +114,7 @@ module cpu_tb;
 
     // レイテンシはブロックダイアグラム上の除算IP(符号あり: top_div_gen_0_0，符号なし: top_div_gen_0_1)に合わせる
     tb_divider #(.LATENCY(36), .IS_SIGNED(1)) div_model (
-        .aclk(clk),
+        .aclk(clk), .aresetn(resetn),
         .s_axis_divisor_tdata(div_divisor_tdata),
         .s_axis_divisor_tvalid(div_divisor_tvalid),
         .s_axis_dividend_tdata(div_dividend_tdata),
@@ -123,7 +123,7 @@ module cpu_tb;
         .m_axis_dout_tvalid(div_dout_tvalid)
     );
     tb_divider #(.LATENCY(34), .IS_SIGNED(0)) divu_model (
-        .aclk(clk),
+        .aclk(clk), .aresetn(resetn),
         .s_axis_divisor_tdata(divu_divisor_tdata),
         .s_axis_divisor_tvalid(divu_divisor_tvalid),
         .s_axis_dividend_tdata(divu_dividend_tdata),
