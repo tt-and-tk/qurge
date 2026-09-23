@@ -1421,9 +1421,11 @@ int fat_chdir(char *text) {
     if (length + separator + name_length >= FAT_PATH_SIZE) {
         return FAT_ERR_PATH_TOO_LONG;
     }
+    // 区切りの'/'を挟む場合は，パスの末尾に書く
     if (separator != 0) {
         fat_cwd[length] = '/';
     }
+    // 続けて名前を写す．名前の後ろのヌル終端(name[name_length])まで写し，それを新しいパスのヌル終端とする
     for (int i = 0; i <= name_length; i++) {
         fat_cwd[length + separator + i] = name[i];
     }
