@@ -528,6 +528,14 @@ module cpu_tb;
         expect_reg(4, 32'd3);
         expect_reg(6, 32'd5);
 
+        // rs1・rs2のそれぞれにPCを指定し，r0(値0)との和としてPCを読む
+        `BEGIN_TEST("先読みされた命令がrs1・rs2のどちらでPCを読んでもその命令の番地が読める");
+        run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, NO_IMM), add(PC_ADDR, 0, 4),
+              div(1, 2, 3, NO_IMM), add(0, PC_ADDR, 5)});
+        expect_end();
+        expect_reg(4, 32'd3);
+        expect_reg(5, 32'd5);
+
         `BEGIN_TEST("書き込み不可のPCへのMOVは停止する");
         run('{nop(), movi(PC_ADDR, 32'd0)});
         expect_halt(1);
