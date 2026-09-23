@@ -166,6 +166,13 @@ int sd_init_commands(void) {
         }
         // 引数のbit30(HCS)で大容量カード(SDHC/SDXC)を扱えるホストであることを申告する
         response = sd_command(41, 0x40000000, 0x77);
+        // in idle state(bit0)以外が立っていればエラー応答か無応答であり，繰り返しても完了しないため止める
+        if ((response & 0xfe) != 0) {
+            print("ACMD41: ");
+            print_hex(response);
+            print(" (failed)\n");
+            return 0;
+        }
         if (response == 0x00) {
             ready = 1;
         }
