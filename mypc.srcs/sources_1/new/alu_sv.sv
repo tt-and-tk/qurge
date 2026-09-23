@@ -129,7 +129,7 @@ module alu_sv (
     // 外部ピンからの非同期入力の準安定状態を消す2段のシフトレジスタ(添字1が後段)
     (* ASYNC_REG = "TRUE" *) logic [1:0][3:0] btn_sync = '0;  // タクトスイッチ
     (* ASYNC_REG = "TRUE" *) logic [1:0][1:0] sw_sync = '0;   // DIPスイッチ
-    (* ASYNC_REG = "TRUE" *) logic [1:0] miso_sync = 2'b00;   // Arduino SPIのMISO
+    (* ASYNC_REG = "TRUE" *) logic [1:0] miso_sync = '0;      // Arduino SPIのMISO
 
     // 実行フェーズ
     cpu_phase_enum cpu_phase = CPU_FETCH;
