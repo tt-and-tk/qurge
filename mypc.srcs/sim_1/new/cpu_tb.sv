@@ -720,6 +720,14 @@ module cpu_tb;
         expect_reg(4, 32'h5566_7788);
         expect_reg(5, 32'h99aa_bbcc);
 
+        // 0xffffffff + 0x101 = 0x1_00000100 の桁あふれを捨てた0x100番地を読み書きする
+        `BEGIN_TEST("RMR/WMRの番地の足し算は32ビットで桁あふれを捨てる");
+        run('{movi(1, 32'hffff_ffff), movi(2, 32'h1234_5678),
+              wmr(4'hf, 1, 2, im(32'h101)), rmr(4'hf, 1, 3, im(32'h101))});
+        expect_end();
+        expect_mem32(32'h100, 32'h1234_5678);
+        expect_reg(3, 32'h1234_5678);
+
         `BEGIN_TEST("RMの直後の命令は読んだ値を使える(フォワーディング)");
         run('{movi(1, 32'd21), wm(4'hf, 6'h00, 1, im(32'h100)), rm(4'hf, 6'h00, 2, im(32'h100)), add(2, 2, 3)});
         expect_end();
