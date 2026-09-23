@@ -3,6 +3,7 @@ rem CPU‚ÌƒeƒXƒgƒxƒ“ƒ`(new\cpu_tb.sv)‚ğVivado•t‘®‚ÌƒVƒ~ƒ…ƒŒ[ƒ^‚ÅƒRƒ“ƒpƒCƒ‹EÀs
 rem Vivado‚ÌbinƒfƒBƒŒƒNƒgƒŠ(xvlogExelabExsim)‚ÉPATH‚ª’Ê‚Á‚Ä‚¢‚é•K—v‚ª‚ ‚éD
 rem ˆø”‚Égui‚ğw’è‚·‚é‚ÆCÀs‚¹‚¸‚É”gŒ`ƒrƒ…[ƒA•t‚«‚ÌƒVƒ~ƒ…ƒŒ[ƒ^‚ğŠJ‚­D
 rem ‘SƒeƒXƒgƒP[ƒX‚ª‡Ši‚·‚ê‚ÎI—¹ƒR[ƒh0C•s‡Ši‚ª‚ ‚ê‚Î0ˆÈŠO‚ÅI‚í‚éD
+rem ƒ_ƒuƒ‹ƒNƒŠƒbƒN‚ÅÀs‚µ‚½ê‡‚ÍCŒ‹‰Ê‚ğ“Ç‚ß‚é‚æ‚¤CƒEƒBƒ“ƒhƒE‚ª•Â‚¶‚é‘O‚ÉƒL[“ü—Í‚ğ‘Ò‚ÂD
 rem
 rem VivadoƒvƒƒWƒFƒNƒg(mypc.xpr)‚ÌƒVƒ~ƒ…ƒŒ[ƒVƒ‡ƒ“‹@”\‚Íg‚í‚È‚¢D
 rem g‚¤‚ÆƒuƒƒbƒNƒ_ƒCƒAƒOƒ‰ƒ€‚ÌƒVƒ~ƒ…ƒŒ[ƒVƒ‡ƒ“—po—Í¶¬•¨‚Ü‚Å¶¬EƒRƒ“ƒpƒCƒ‹‚·‚é‚±‚Æ‚É‚È‚èCŠÔ‚ª‚©‚©‚é‚½‚ßD
@@ -17,6 +18,13 @@ set "sim_dir=%~dp0"                                  & rem ‚±‚Ìƒtƒ@ƒCƒ‹‚Ì‚ ‚éƒfƒ
 set "src_dir=%sim_dir%..\sources_1\new"              & rem CPU–{‘Ì‚Ìƒ\[ƒX
 set "work_dir=%sim_dir%..\..\mypc.sim\cpu_tb"        & rem ƒRƒ“ƒpƒCƒ‹Œ‹‰ÊEƒƒO‚Ìo—Íæ(GitŠÇ—ŠO)
 set "exit_code=1"                                    & rem ‚±‚Ìƒtƒ@ƒCƒ‹‚ÌI—¹ƒR[ƒhD‡Ši‚ğŠm‚©‚ß‚é‚Ü‚Å‚Í¸”s‚Æ‚µ‚Ä‚¨‚­
+set "own_window=0"                                   & rem ‚±‚Ìƒtƒ@ƒCƒ‹‚ğÀs‚·‚é‚½‚ß‚¾‚¯‚ÉŠJ‚¢‚½ƒEƒBƒ“ƒhƒE‚©(1‚È‚çI—¹‘O‚ÉƒL[“ü—Í‚ğ‘Ò‚Â)
+
+rem ƒ_ƒuƒ‹ƒNƒŠƒbƒN‚ÅÀs‚·‚é‚ÆC‚±‚Ìƒtƒ@ƒCƒ‹‚ÌƒpƒX‚ğŠÜ‚ŞƒRƒ}ƒ“ƒhƒ‰ƒCƒ“‚ÅƒRƒ}ƒ“ƒhƒvƒƒ“ƒvƒg‚ª‹N“®‚³‚ê‚éD
+rem ŠJ‚¢‚Ä‚¢‚éƒRƒ}ƒ“ƒhƒvƒƒ“ƒvƒg‚©‚çÀs‚µ‚½ê‡‚ÍCƒRƒ}ƒ“ƒhƒ‰ƒCƒ“‚É‚±‚Ìƒtƒ@ƒCƒ‹‚ÌƒpƒX‚ªŠÜ‚Ü‚ê‚È‚¢D
+rem find‚ğƒtƒ‹ƒpƒX‚ÅŒÄ‚Ô‚Ì‚ÍCPATH‚Ì•À‚Ñ‚É‚æ‚Á‚Ä‚Í“¯–¼‚Ì•Ê‚ÌƒRƒ}ƒ“ƒh‚ªŒÄ‚Î‚ê‚é‚½‚ßD
+echo %cmdcmdline% | "%SystemRoot%\System32\find.exe" /i "%~0" >nul
+if not errorlevel 1 set "own_window=1"
 
 rem Œ»İ‚ÌƒR[ƒhƒy[ƒW‚ğT‚¦‚é(ƒVƒ~ƒ…ƒŒ[ƒ^‚ÌÀsŒã‚É–ß‚·‚½‚ß)
 for /f "tokens=2 delims=:" %%c in ('chcp') do set /a saved_codepage=%%c
@@ -62,6 +70,10 @@ call xsim cpu_tb -gui
 set "exit_code=0"
 
 :finish
-rem Œ³‚ÌƒfƒBƒŒƒNƒgƒŠ‚Ö–ß‚µ‚ÄI‚í‚é
+rem Œ³‚ÌƒfƒBƒŒƒNƒgƒŠ‚Ö–ß‚·
 popd
+
+rem ‚±‚Ìƒtƒ@ƒCƒ‹‚Ì‚½‚ß‚ÉŠJ‚¢‚½ƒEƒBƒ“ƒhƒE‚È‚çC•Â‚¶‚é‘O‚ÉŒ‹‰Ê‚ğ“Ç‚ß‚é‚æ‚¤ƒL[“ü—Í‚ğ‘Ò‚Â
+if "%own_window%"=="1" pause
+
 endlocal & exit /b %exit_code%
