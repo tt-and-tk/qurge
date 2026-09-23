@@ -444,7 +444,7 @@ int fat_walk_dir(unsigned int cluster, int (*visit)(struct FatEntry *)) {
     if (fat_mounted == 0) {
         return FAT_ERR_NOT_MOUNTED;
     }
-    // データ領域の外を指す開始クラスタは壊れており，辿ると無関係なセクタを読む
+    // 開始クラスタがデータ領域の外を指していれば，記録が壊れているためエラーにする(そのまま辿ると無関係なセクタを読む)
     if (fat_is_valid_cluster(cluster) == 0) {
         return FAT_ERR_BROKEN;
     }
@@ -1308,7 +1308,7 @@ int fat_rmdir(struct FatEntry *entry) {
     if ((entry->attr & ATTR_DIRECTORY) == 0) {
         return FAT_ERR_NOT_DIR;
     }
-    // 名前を持つディレクトリがルートディレクトリの中身を指すのは記録が壊れており，削除するとルートディレクトリを解放してしまう
+    // 開始クラスタがルートディレクトリのものであれば，記録が壊れているためエラーにする(そのまま削除するとルートディレクトリを解放してしまう)
     if (entry->cluster == fat_root_cluster) {
         return FAT_ERR_BROKEN;
     }
@@ -1394,7 +1394,8 @@ int fat_chdir(char *text) {
     if ((entry.attr & ATTR_DIRECTORY) == 0) {
         return FAT_ERR_NOT_DIR;
     }
-    // データ領域の外やルートディレクトリの中身を指すのは記録が壊れている(ルートディレクトリへ移るとパスと中身が食い違う)
+    // 開始クラスタがデータ領域の外かルートディレクトリのものであれば，記録が壊れているためエラーにする
+    // (そのまま移ると，データ領域の外では無関係なセクタを読み，ルートディレクトリではパスと中身が食い違う)
     if (fat_is_valid_cluster(entry.cluster) == 0 || entry.cluster == fat_root_cluster) {
         return FAT_ERR_BROKEN;
     }
