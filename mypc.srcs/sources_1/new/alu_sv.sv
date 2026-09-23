@@ -27,9 +27,9 @@
 `include "machine.svh"
 `include "register.svh"
 
-// 命令パイプライン処理の概要．FETCH_REQUEST(命令の読み出しを要求する)→FETCH_ROM_CAPTUREまたは
-// FETCH_RAM_CAPTURE(読み出した命令を取り込む)→CHECK(実行可否を確認する)→EXECUTEの4フェーズを基本とする．
-// 命令はプログラムカウンタに応じてROMかメインメモリのコード領域から読み出し，取り込むフェーズは読み出し元ごとに分ける．
+// 命令パイプライン処理の概要．FETCH_SELECT(取得元を選んで読み出しを始める)→FETCH_ROMまたは
+// FETCH_RAM(取得元から命令を取り込む)→CHECK(実行可否を確認する)→EXECUTEの4フェーズを基本とする．
+// 命令はプログラムカウンタに応じてROMかメインメモリのコード領域から読み出し，取り込むフェーズは取得元ごとに分ける．
 // ROMはクロックに同期した読み出しのため，番地を出した次のサイクルに結果が確定する．メインメモリは応答を
 // 待つ必要があり，読み出しも1回32ビットのため，64ビットの命令をイミディエイトデータ・命令語の順に2回に分けて読む．
 //
@@ -43,7 +43,7 @@
 // 先読みしないのは，メインメモリの読み出しポートを実行中の命令と共用しているため．
 // 読み出し・書き込みに使うレジスタ番地の依存関係も先読みの時点で確認しておき，直前の命令がこのサイクルに
 // 書き込む値をレジスタの読み出し結果の代わりに使う(フォワーディング)ことで，命令完了時に
-// FETCH_REQUEST/FETCH_ROM_CAPTURE/CHECKを省略して直接次の命令のEXECUTEから始められる場合がある．
+// FETCH_SELECT/FETCH_ROM/CHECKを省略して直接次の命令のEXECUTEから始められる場合がある．
 // 先読みが成立するには実行フェーズが3サイクル以上続く必要がある(ROMの読み出しに1サイクルかかり，
 // 取り込んだ結果を使えるのはさらに次のサイクルから)．これに届かない命令と，分岐・ジャンプを行う命令
 // (メモリの応答を待つため複数サイクルかかるCALL・RETを含む)，次の命令がコード領域にある命令は，毎回4フェーズすべてを経る．
@@ -137,7 +137,7 @@ module alu_sv (
     (* ASYNC_REG = "TRUE" *) logic [1:0] miso_sync = '0;      // Arduino SPIのMISO
 
     // 実行フェーズ
-    cpu_phase_enum cpu_phase = CPU_FETCH_REQUEST;
+    cpu_phase_enum cpu_phase = CPU_FETCH_SELECT;
 
     // 実行できない命令を検出して停止していることを表すフラグ．立っている間は下のリセット
     // ブロックの中身を毎サイクル実行し続けて停止状態を保ち，外部からのリセット(resetn)が
@@ -149,14 +149,14 @@ module alu_sv (
     // ===== 命令の保持・先読み =====
     // 現在実行中の命令と，実行中にあらかじめ取得しておいた次の命令の2系統を保持する
 
-    // CHECK/EXECUTEフェーズで検証・実行の対象になっている命令．FETCH_REQUEST/FETCH_ROM_CAPTURE/FETCH_RAM_CAPTURE
+    // CHECK/EXECUTEフェーズで検証・実行の対象になっている命令．FETCH_SELECT/FETCH_ROM/FETCH_RAM
     // フェーズの間は，まだ取り込みが済んでおらず前回実行した命令の値が残ったままで，意味を持たない．
     machine_p::machine_t current_instruction = nop();
     // current_instructionを，命令を置ける番地(ROMの実容量範囲内またはコード領域)から取得できたか
-    // (CPU_FETCH_ROM_CAPTURE・CPU_FETCH_RAM_CAPTUREで確定する)
+    // (CPU_FETCH_ROM・CPU_FETCH_RAMで確定する)
     logic current_instruction_pc_valid = 1'b1;
 
-    // CPU_FETCH_RAM_CAPTUREで読み出し中のワードが命令の上位32ビット(命令語)か．0なら下位32ビット(イミディエイトデータ)
+    // CPU_FETCH_RAMで読み出し中のワードが命令の上位32ビット(命令語)か．0なら下位32ビット(イミディエイトデータ)
     logic fetching_upper_word = 1'b0;
 
     // 実行中に先読みしておいた次の命令を保持するバッファ．複数サイクルにまたがる命令の
@@ -240,11 +240,12 @@ module alu_sv (
 
     // コード領域についての判定は，次の2つの前提の上に成り立つ
     // ROMの命令数の上限を変えるなどして前提が崩れた場合は，誤った判定のまま合成されないよう，組み立て時にエラーにする
-    // 先頭のプログラムカウンタが命令数の倍数でなければ，上の分け方が成り立たない
+    // 前提1: 先頭のプログラムカウンタが命令数の倍数である
+    // 倍数でなければ，プログラムカウンタを上に書いた下位ビットと上位ビットに分けられない
     if (rom_p::CODE_AREA_PC_BASE % rom_p::CODE_AREA_PC_NUM != 0)
         $error("コード領域の先頭のプログラムカウンタがコード領域の命令数の倍数になっていません");
-    // 先読みの取り込みでは，次の番地がROMへ渡せる幅(pc_bus_t)に収まらないことを，ROMの外を指すことの判定に使う
-    // このため，先頭のプログラムカウンタは，その幅で表せる範囲のちょうど直後でなければならない
+    // 前提2: 先頭のプログラムカウンタが，ROMへ渡せる幅(pc_bus_t)で表せる範囲のちょうど直後である
+    // 先読みの取り込みでは，次の番地がこの幅に収まらないことを，ROMの外を指すことの判定に使うため
     if (rom_p::CODE_AREA_PC_BASE != 2 ** $bits(rom_p::pc_bus_t))
         $error("コード領域の先頭のプログラムカウンタが，ROMへ渡せる幅で表せる範囲の直後になっていません");
 
@@ -261,7 +262,7 @@ module alu_sv (
     // 何番目か × 8はそれより下のビットに収まるため，立っているビットが重ならず，加算とORの結果が同じになる
     // このため，加算器を使わずORで組み立てる
     assign fetch_lower_address = ram_p::address_bus_t'(CODE_AREA_BASE)                                       // 最上位ビット: コード領域の先頭番地
-                               | (ram_p::address_bus_t'(register[PC_ADDR][CODE_AREA_PC_WIDTH-1:0]) << 3);  // その下のビット: 何番目の命令か × 8(下位3ビットは0)
+                               | (ram_p::address_bus_t'(register[PC_ADDR][CODE_AREA_PC_WIDTH-1:0]) << 3);    // その下のビット: 何番目の命令か × 8(下位3ビットは0)
     // 上位ワードの番地は下位ワードの4バイト後．下位ワードの番地は8の倍数(下位3ビットが0)のため，4を表すビットを立てるだけでよい
     assign fetch_upper_address = fetch_lower_address | ram_p::address_bus_t'(4);
 
@@ -316,10 +317,11 @@ module alu_sv (
                        : imm_r[32]                                                      ? imm_r[31:0]               // イミディエイトデータで指定された番地
                        : rs1_val_r;                                                                                 // rs1で指定された番地
 
-    // mem_addressが読み書きしてよい範囲に収まっているか．
-    // J系の命令のうちメモリを読み書きするのはCALL・RETだけで，その番地は飛び先ではなく，戻り先を積み下ろしするスタックの番地である．
-    // スタックはメモリの前半に置くため，J系では前半に収まる番地だけを範囲内とする(空のスタックでのRETを停止させ，
-    // CALLが後半のコード領域を書き換えないようにするため)．それ以外の命令はメモリ全体を読み書きできる．
+    // mem_addressが読み書きしてよい範囲に収まっているか
+    // J系の命令のうちメモリを読み書きするのはCALL・RETだけで，読み書きするのは戻り先を積み下ろしするスタックである
+    // スタックはメモリの前半に置くため，J系では前半に収まる番地だけを範囲内とする
+    // 空のスタックでのRETを停止させ，CALLが後半のコード領域を書き換えないようにするためである
+    // それ以外の命令はメモリ全体を読み書きできる
     // 前半の大きさ(コード領域の先頭番地)は2のべき乗のため，前半に収まるかはビット幅で判定できる
     util_p::bool_t mem_address_in_range;
     assign mem_address_in_range = (command.m_type == J_TYPE)
@@ -401,7 +403,7 @@ module alu_sv (
     end
 
     // 命令完了時に次の命令へ遷移する処理は，次の2つのタスクにまとめてある．CPU_EXECUTEフェーズで
-    // 命令完了時に次命令へ遷移する箇所は，cpu_phase <= CPU_FETCH_REQUEST;やプログラムカウンタの更新を
+    // 命令完了時に次命令へ遷移する箇所は，cpu_phase <= CPU_FETCH_SELECT;やプログラムカウンタの更新を
     // 直接書かず必ずどちらかのタスクを呼ぶこと(先読み機構(prefetched_instruction/can_prefetch)と
     // 連動しており，直接代入すると先読み結果が反映されない)．どちらのタスクも，CPU_EXECUTEの
     // 先頭で同じサイクルに取り込んだ先読みを，prefetched_instruction_validへの0の代入で打ち消す．
@@ -411,7 +413,7 @@ module alu_sv (
     // 先読みが間に合っていない場合は今サイクルのrom_read.machineを信用できない)．
     // 先読みが完了しかつ実行可能だと分かればCHECKを省略してEXECUTEへ直接進み，先読み済みだが
     // 実行できないと分かった場合はCHECKへ進む(CHECKで停止させる)．先読み済みでない場合は
-    // FETCH_REQUESTへ戻って改めて取得し直す．
+    // FETCH_SELECTへ戻って改めて取得し直す．
     // これらの命令はいずれも分岐・ジャンプを行わないため，プログラムカウンタは順番どおりの
     // 次の番地(sequential_pc)へ更新する．分岐・ジャンプを行う命令をこのタスクから完了させては
     // ならない(飛び先が無視される)．
@@ -472,9 +474,9 @@ module alu_sv (
         // 先読み済みでない．先読みが間に合っていない場合のほか，次の番地がROMへ渡せる幅に収まらない(コード領域を
         // 指すなど)場合もここに来る．後者はCPU_EXECUTEの先頭の先読みの取り込みで，先読み済みの印
         // (prefetched_instruction_valid)を立てずにおくためである．
-        // プログラムカウンタは上で次の番地へ更新済みなので，FETCH_REQUESTへ戻って改めて取得し直す
+        // プログラムカウンタは上で次の番地へ更新済みなので，FETCH_SELECTへ戻って改めて取得し直す
         else begin
-            cpu_phase <= CPU_FETCH_REQUEST;
+            cpu_phase <= CPU_FETCH_SELECT;
         end
 
         // 先読み済みだった命令は消費し終えたので無効化する(同じサイクルに取り込んだ先読みも打ち消す)
@@ -483,7 +485,7 @@ module alu_sv (
 
     // 先読みが成立し得ない命令(分岐・ジャンプを行う命令と，実行フェーズが3サイクルに届かない命令)の
     // 完了時に呼ぶタスク．
-    // プログラムカウンタを分岐・ジャンプを反映した番地(next_pc)へ更新し，FETCH_REQUESTから次の命令を
+    // プログラムカウンタを分岐・ジャンプを反映した番地(next_pc)へ更新し，FETCH_SELECTから次の命令を
     // 取得し直す．
     // これらの命令では先読み済みの命令を使う遷移は起こり得ない．先読み・フォワーディングの判定を
     // 持たないタスクに分けることで，演算結果や分岐の比較結果が次の命令のオペランドレジスタ
@@ -493,7 +495,7 @@ module alu_sv (
         // 分岐・ジャンプの結果を反映した番地へ進む
         register[PC_ADDR] <= next_pc;
 
-        cpu_phase <= CPU_FETCH_REQUEST;
+        cpu_phase <= CPU_FETCH_SELECT;
 
         // 先読み済みの命令を無効化する(同じサイクルに取り込んだ先読みも打ち消す)
         prefetched_instruction_valid <= 1'b0;
@@ -572,7 +574,7 @@ module alu_sv (
         gpio = {register[GPIO3_ADDR][2:0], register[GPIO2_ADDR][7:0], register[GPIO1_ADDR][7:0]};
 
         // ROMへ番地を出力する
-        if (cpu_phase == CPU_FETCH_REQUEST || cpu_phase == CPU_FETCH_ROM_CAPTURE) begin
+        if (cpu_phase == CPU_FETCH_SELECT || cpu_phase == CPU_FETCH_ROM) begin
             // フェッチ中(1サイクル目・同期読み出しの結果を待つ間とも)は，これから実行する
             // 命令の番地を出し続ける(プログラムの1命令目のフェッチ，または先読みが間に合わ
             // なかった命令の取得し直し)
@@ -618,7 +620,7 @@ module alu_sv (
         // リセット
         if (!resetn || is_halted) begin
             // 実行状態をリセット
-            cpu_phase <= CPU_FETCH_REQUEST;
+            cpu_phase <= CPU_FETCH_SELECT;
             current_instruction <= nop();
             prefetched_instruction <= nop();
             prefetched_instruction_valid <= 1'b0;
@@ -707,27 +709,27 @@ module alu_sv (
 
             // CPUの実行サイクルごとに処理記載
             unique case (cpu_phase)
-                // 命令の読み出しの要求(プログラムの1命令目，先読みが間に合わなかった命令，
-                // 次の命令がコード領域にある場合の取得がここを通る)．プログラムカウンタに応じて読み出し元を選ぶ
-                CPU_FETCH_REQUEST: begin
+                // 命令の取得の前段階(プログラムの1命令目，先読みが間に合わなかった命令，
+                // 次の命令がコード領域にある場合の取得がここを通る)．プログラムカウンタに応じて取得元を選び，読み出しを始める
+                CPU_FETCH_SELECT: begin
                     // コード領域を指していれば，メインメモリへ命令の下位ワードの読み出しを要求する
                     if (pc_in_code_area) begin
                         ram_read.valid   <= 1'b1;
                         ram_read.mask    <= 4'hf;
                         ram_read.address <= fetch_lower_address;
                         fetching_upper_word <= 1'b0;
-                        cpu_phase <= CPU_FETCH_RAM_CAPTURE;
+                        cpu_phase <= CPU_FETCH_RAM;
                     end
                     // それ以外はROMへ番地を出す(comb blockで実施済み)だけで，同期読み出しの結果はまだ確定して
                     // いないため次のサイクルまで待つ．ROMの幅に収まらない番地もここを通り，CHECKで停止する
                     else begin
-                        cpu_phase <= CPU_FETCH_ROM_CAPTURE;
+                        cpu_phase <= CPU_FETCH_ROM;
                     end
                 end
 
                 // ROMからの命令の取り込み．前サイクルに出した番地に対応するrom_read.machineが
                 // 確定しているので取り込む
-                CPU_FETCH_ROM_CAPTURE: begin
+                CPU_FETCH_ROM: begin
                     // 番地がROMの実容量の範囲内(rom_read.valid)であり，
                     // かつpc_bus_tの幅に収まっている(pc_fits_in_width)場合にのみ有効とする
                     current_instruction <= rom_read.machine;
@@ -740,7 +742,7 @@ module alu_sv (
                 // メインメモリ(コード領域)からの命令の取り込み．下位ワード・上位ワードの順に読み出して取り込む．
                 // メインメモリの読み出しを要求している間は停止しない(停止はCHECK・EXECUTEでのみ起こる)ことを前提に，
                 // 停止時のメインメモリのリセットは行っていない(メインメモリはresetnでのみリセットされる)
-                CPU_FETCH_RAM_CAPTURE: begin
+                CPU_FETCH_RAM: begin
                     // 読み出しが完了したら，読んだワードを命令の該当する位置へ取り込む
                     if (ram_read.ready) begin
                         // 下位ワード(イミディエイトデータ)を取り込み，続けて上位ワードを読む．validを下ろさずに番地だけを
@@ -762,7 +764,7 @@ module alu_sv (
                     end
                 end
 
-                // 実行前確認(プログラムの1命令目，先読みが間に合わずFETCH_REQUESTから取得し直した
+                // 実行前確認(プログラムの1命令目，先読みが間に合わずFETCH_SELECTから取得し直した
                 // 命令，先読みの時点で実行できないと分かった命令がここを通る)
                 CPU_CHECK: begin
                     // 実行可能な命令であれば実行フェーズへ進む
@@ -801,7 +803,7 @@ module alu_sv (
                     // can_prefetch_d1がまだ1のまま残っており，その間に古い要求(番地'0)への
                     // 応答で誤って再取り込みしてしまうのを防ぐため．
                     // 次の番地がROMへ渡せる幅(pc_bus_t)に収まらない場合は，ROMではなくコード領域などを指しているため
-                    // 取り込まず，命令の完了後にFETCH_REQUESTで取得し直す．この条件をcan_prefetch側に加えないのは，
+                    // 取り込まず，命令の完了後にFETCH_SELECTで取得し直す．この条件をcan_prefetch側に加えないのは，
                     // ROMの番地入力までの組み合わせ経路が伸びるため(取り込み側なら計算済みのpc_fits_in_widthを
                     // イネーブルに使うだけで済む)
                     if (can_prefetch && can_prefetch_d1 && pc_fits_in_width) begin
