@@ -835,6 +835,13 @@ module cpu_tb;
         run('{nop(), raw(3'h0, NOP, 6'h35, 0, 0, NO_IMM)});
         expect_halt(1);
 
+        // 複数サイクルかかるDIVの実行中に，次の未定義funcの命令を先読みして実行できないと判定する経路を通る
+        `BEGIN_TEST("先読みした命令が実行できない場合もその番地で停止する");
+        run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, NO_IMM), raw(3'h1, 6'h0a, 1, 2, 4, NO_IMM)});
+        expect_halt(3);
+        expect_reg(3, 32'd2);
+        expect_reg(4, 32'd0);
+
         `BEGIN_TEST("ROMの最後の命令の次へ進むと停止する");
         run('{nop(), nop()}, 1'b0);
         expect_halt(2);
