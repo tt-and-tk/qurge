@@ -123,7 +123,7 @@ int sd_init_commands(void) {
         return 0;
     }
     // CMD8はSD規格v2で追加されたため，v1カードはillegal command(bit2)を立てて拒否する
-    // 拒否された場合はR1しか返らないため続く4バイトを読まず，ACMD41の引数も異なるサポート外としてここで止める
+    // v1カードはすべてバイト単位の番地を使うSDSCであり扱わないため，R1しか返らない拒否応答の後は続く4バイトを読まずここで止める
     if ((response & 0x04) != 0) {
         print(" (SD v1, unsupported)\n");
         return 0;
