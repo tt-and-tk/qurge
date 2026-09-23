@@ -1,4 +1,6 @@
-// FAT32ファイルシステムの読み書き．SDカード上のファイルシステムをマウントし，ルートディレクトリにあるファイルを扱う操作を提供する
+// FAT32ファイルシステムの読み書き．SDカード上のファイルシステムをマウントし，現在のディレクトリ(下記)にあるファイル・ディレクトリを扱う操作を提供する
+// 現在のディレクトリは，名前を指定する操作の対象になるディレクトリである．マウントするとルートディレクトリになり，fat_chdirで1段ずつ移る．
+// 名前はパスではなく，現在のディレクトリの直下にあるファイル・ディレクトリの名前だけを指定する
 // 各操作は画面への出力を行わず結果を戻り値で返し，失敗の理由の表示は専用の関数で行う(前置きなどの表示の仕方は呼び出し側が決める)
 // 以下，Windowsなどが動く一般のパソコンを単にパソコンと書く(このPynthesisと区別するため)
 //
@@ -34,6 +36,8 @@
 //      元の長い名前は，そのエントリの直前に並べた長いファイル名のエントリ(属性0x0f．1件に13文字ずつ)に分けて記録する．
 //      ファイルの中身の位置や大きさは短い名前のエントリだけが持ち，長いファイル名のエントリは名前だけを持つ
 //    - ボリュームラベルのエントリ: カードの名前(パソコンでドライブ名として表示される)を記録する．ルートディレクトリにだけ置かれる
+//    - `.`・`..`のエントリ: ルート以外のディレクトリの先頭に，この順に1件ずつ置かれる短い名前のエントリ．`.`はそのディレクトリ自身，
+//      `..`は親ディレクトリの開始クラスタを持つ(親がルートディレクトリであれば0)．8.3形式の名前は'.'で始まらないため，名前の先頭で見分けられる
 //    FATに並ぶクラスタごとの値はエントリと呼ばず，FATの値と書く
 // MBR・ブートセクタ・FSInfoセクタは，決まった位置に決まった値(署名)を持つ．署名は，読んだセクタが目的の管理情報であることを確かめるために使う．
 // MBRとブートセクタの末尾の2バイトにある署名(0x55，0xaa)をブート署名と呼ぶ
@@ -55,6 +59,9 @@ const int FAT_ERR_IS_DIR = 10;      // ファイルに対する操作(読み出�
 const int FAT_ERR_WRITE = 11;       // カードへ書き込めなかった
 const int FAT_ERR_FULL = 12;        // 空きクラスタが無い
 const int FAT_ERR_EXISTS = 13;      // 指定した名前のエントリが既にある
+const int FAT_ERR_NOT_DIR = 14;     // ディレクトリに対する操作(移動・削除)を，ファイルに行おうとした
+const int FAT_ERR_NOT_EMPTY = 15;   // 削除しようとしたディレクトリに，ファイル・ディレクトリが残っている
+const int FAT_ERR_PATH_TOO_LONG = 16;  // 移動すると，現在のディレクトリのパスが保持できる長さを超える
 
 // MBR(ブロック0)の形式
 const int MBR_PARTITION_OFFSET = 0x1be;  // 第1パーティションエントリの位置
@@ -129,6 +136,10 @@ const int FAT_EXT_SIZE = 3;                                      // 拡張子の
 const int FAT_NAME_SIZE = FAT_BASE_SIZE + FAT_EXT_SIZE;          // 短い名前のエントリ上の名前のバイト数(ドットは記録しない)
 const int FAT_NAME_TEXT_SIZE = FAT_BASE_SIZE + FAT_EXT_SIZE + 2;  // 表示用の名前に要る配列の要素数(ドットとヌル終端を含む)
 
+// 現在のディレクトリのパスの大きさ
+const int FAT_PATH_SIZE = 256;                // パスを収める配列の要素数(ヌル終端を含む)
+const int FAT_MAX_DEPTH = FAT_PATH_SIZE / 2;  // ディレクトリの深さの上限(1段ごとに区切りと1文字以上の名前を足すため，パスに収まる段数はこれ未満になる)
+
 // 短い名前のエントリ(ファイル・ディレクトリ1つを表すエントリ)1件分の内容
 struct FatEntry {
     unsigned char name[FAT_NAME_SIZE];  // 8.3形式の名前(基本名8バイトの後に拡張子3バイトをドット無しで並べる．大文字，空白詰め)
@@ -166,11 +177,17 @@ unsigned int fat_root_cluster;        // ルートディレクトリの開始ク
 unsigned int fat_fsinfo_sector;       // FSInfoセクタの番号．マウントした後，空きクラスタ数を「不明」を表す値へ書き換えたら0にする(FSInfoセクタが無い場合も0)
 unsigned int fat_next_free;           // 空きクラスタを探すときに調べ始めるクラスタ(前回確保したクラスタ．毎回データ領域の先頭から調べ直さないため)
 
+// 現在のディレクトリ(マウントでルートディレクトリに設定し，fat_chdirが更新する)
+// 親へ戻る際にカード上の`..`のエントリを読まず，ルートから辿ってきた各段の開始クラスタを控えて使う(パスと開始クラスタが食い違わないようにするため)
+char fat_cwd[FAT_PATH_SIZE];                   // 現在のディレクトリの絶対パス(各段の表示用の名前を'/'に続けて並べる．ルートディレクトリは"/")
+unsigned int fat_dir_clusters[FAT_MAX_DEPTH];  // ルートディレクトリから現在のディレクトリまでの各段の開始クラスタ(添字は深さ)
+int fat_depth;                                 // 現在のディレクトリの深さ(ルートディレクトリは0)
+
 // fat_findが走査中に使う値(コールバックは引数を増やせないためグローバル変数で受け渡す)
 unsigned char fat_find_name[FAT_NAME_SIZE];  // 探している8.3形式の名前
 struct FatEntry *fat_find_result;            // 見つかったエントリの書き込み先
 
-// ファイルの作成で新しいエントリを置く場所．fat_walk_rootが走査の途中で控える(走査を最後まで終えたときだけ，ディレクトリ全体を調べた結果になる)
+// ファイル・ディレクトリの作成で新しいエントリを置く場所．ディレクトリの走査が途中で控える(走査を最後まで終えたときだけ，そのディレクトリ全体を調べた結果になる)
 int fat_slot_found;                // 未使用か削除済みのエントリが見つかったか(0:見つからない，1:見つかった)
 unsigned int fat_slot_sector;      // 最初に見つかった，未使用か削除済みのエントリがあるセクタの番号
 int fat_slot_offset;               // そのセクタの中で，そのエントリが始まるバイト位置
@@ -298,9 +315,9 @@ int fat_parse_bpb(unsigned int fs_start) {
     }
     // 空きクラスタはデータ領域の先頭から探し始める
     fat_next_free = FAT_FIRST_CLUSTER;
-    // 全ての検査を通ったときだけマウント済みにする
+    // 全ての検査を通ったときだけマウント済みにし，現在のディレクトリをルートディレクトリにする
     fat_mounted = 1;
-    return FAT_OK;
+    return fat_chdir_root();
 }
 
 // SDカードを初期化し，カード上のFAT32ファイルシステムをマウントする(カードを差し替えた後に呼び直せば，新しいカードをマウントし直す)
@@ -404,14 +421,14 @@ void fat_load_entry(int offset, struct FatEntry *entry) {
     entry->size = fat_read_u32(offset + DIR_FILE_SIZE);
 }
 
-// ルートディレクトリのエントリを先頭から1件ずつ，引数で受け取った関数visitへ渡す
+// 開始クラスタがclusterのディレクトリのエントリを先頭から1件ずつ，引数で受け取った関数visitへ渡す
 // visitはエントリ1件を受け取って処理し，走査を続けるなら0，打ち切るなら0以外を返す関数である(ディレクトリを辿る処理を1つにまとめ，エントリごとの処理だけを呼び出し側が差し替えるため)
 // visitが打ち切りを求めた時点でFAT_STOPPEDを返し，最後まで走査すればFAT_OKを返す
-// 渡すのはファイル・ディレクトリを表す短い名前のエントリだけで，削除済み・ボリュームラベル・長いファイル名のエントリは渡さない
+// 渡すのはそのディレクトリに置かれたファイル・ディレクトリを表す短い名前のエントリだけで，削除済み・ボリュームラベル・長いファイル名・`.`・`..`のエントリは渡さない
 // (長いファイル名のエントリは直後の短い名前のエントリと合わせて1つのファイルを表すため，単独では渡さず，その位置を短い名前のエントリに含めて渡す)
-// 走査の途中で，ファイルの作成で新しいエントリを置ける場所と，ディレクトリの最後のセクタを控える
+// 走査の途中で，新しいエントリを置ける場所と，ディレクトリの最後のセクタを控える
 // visitはエントリを走査中のセクタから写し取った後に呼ぶが，走査はfat_sectorを読み進めるため，visitの中でカードを読み書きする関数を呼ばないこと
-int fat_walk_root(int (*visit)(struct FatEntry *)) {
+int fat_walk_dir(unsigned int cluster, int (*visit)(struct FatEntry *)) {
     struct FatEntry entry;    // visitへ渡すエントリ
     unsigned int sector;      // 走査中のセクタの番号
     int status;               // 次のセクタを求めた結果
@@ -422,14 +439,18 @@ int fat_walk_root(int (*visit)(struct FatEntry *)) {
     int lfn_offset;           // そのセクタ内での先頭のエントリの位置
     int lfn_count = 0;        // 並んでいる長いファイル名のエントリの数
 
-    // マウントしていなければ，ルートディレクトリの位置が分からない
+    // マウントしていなければ，クラスタの位置が分からない
     if (fat_mounted == 0) {
         return FAT_ERR_NOT_MOUNTED;
     }
+    // データ領域の外を指す開始クラスタは壊れており，辿ると無関係なセクタを読む
+    if (fat_is_valid_cluster(cluster) == 0) {
+        return FAT_ERR_BROKEN;
+    }
     // 新しいエントリを置ける場所は，走査しながら探す
     fat_slot_found = 0;
-    // ルートディレクトリもファイルと同じくクラスタチェーンに沿って並ぶため，開始クラスタの先頭セクタから1セクタずつ辿る
-    sector = fat_cluster_sector(fat_root_cluster);
+    // ディレクトリもファイルと同じくクラスタチェーンに沿って並ぶため，開始クラスタの先頭セクタから1セクタずつ辿る
+    sector = fat_cluster_sector(cluster);
     while (1) {
         // ディレクトリが占めうる大きさを超えて続くチェーンは壊れている(循環していると辿り続けても走査が終わらない)
         if (read_sectors == DIR_MAX_SECTORS) {
@@ -469,8 +490,9 @@ int fat_walk_root(int (*visit)(struct FatEntry *)) {
                 lfn_count++;
                 continue;
             }
-            // ボリュームラベルのエントリは，ファイルでもディレクトリでもない(ここまでに並んだ長いファイル名のエントリも，どのファイルのものでもない)
-            if ((attr & ATTR_VOLUME_ID) != 0) {
+            // ボリュームラベルのエントリと`.`・`..`のエントリは，そのディレクトリに置かれたファイル・ディレクトリではない
+            // (ここまでに並んだ長いファイル名のエントリも，どのファイルのものでもない)
+            if ((attr & ATTR_VOLUME_ID) != 0 || first == '.') {
                 lfn_count = 0;
                 continue;
             }
@@ -496,6 +518,12 @@ int fat_walk_root(int (*visit)(struct FatEntry *)) {
             return status;
         }
     }
+}
+
+// 現在のディレクトリのエントリを，fat_walk_dirと同じ決まりで1件ずつvisitへ渡す
+int fat_walk(int (*visit)(struct FatEntry *)) {
+    // 現在のディレクトリの開始クラスタから走査する
+    return fat_walk_dir(fat_dir_clusters[fat_depth], visit);
 }
 
 // 英小文字を大文字へ変換する(それ以外の文字はそのまま返す)
@@ -672,8 +700,8 @@ int fat_match_entry(struct FatEntry *entry) {
     return 1;
 }
 
-// ルートディレクトリから"NAME.EXT"形式の名前textのエントリを探し，foundへ書き込む(大文字・小文字は区別しない)
-// 見つからなかった場合は，ルートディレクトリを最後まで走査した結果として，新しいエントリを置く場所が控えられている
+// 現在のディレクトリから"NAME.EXT"形式の名前textのエントリを探し，foundへ書き込む(大文字・小文字は区別しない)
+// 見つからなかった場合は，現在のディレクトリを最後まで走査した結果として，新しいエントリを置く場所が控えられている
 int fat_find(char *text, struct FatEntry *found) {
     int status;  // 名前の変換・走査の結果
 
@@ -682,9 +710,9 @@ int fat_find(char *text, struct FatEntry *found) {
     if (status != FAT_OK) {
         return status;
     }
-    // 一致したエントリの書き込み先を渡してから，ルートディレクトリを走査する
+    // 一致したエントリの書き込み先を渡してから，現在のディレクトリを走査する
     fat_find_result = found;
-    status = fat_walk_root(fat_match_entry);
+    status = fat_walk(fat_match_entry);
     // 最後まで走査して打ち切られなかったのは，一致するエントリが無かったとき
     if (status == FAT_OK) {
         return FAT_ERR_NOT_FOUND;
@@ -971,19 +999,10 @@ int fat_mark_deleted(unsigned int sector, int offset, int count) {
     }
 }
 
-// ルートディレクトリの最後に空のクラスタを1つつなぎ，その先頭を新しいエントリを置く場所として控える
-// ディレクトリの最後のセクタは，直前にルートディレクトリを最後まで走査した結果を使う
-int fat_extend_root(void) {
-    unsigned int cluster;  // つなぐクラスタ
-    int status;            // クラスタの確保・つなぎの結果
-
-    // 空きクラスタを1つ確保する．まだディレクトリにはつながず，どのファイルにも使われていないクラスタのため，既存の内容は壊れない
-    status = fat_alloc_cluster(0, &cluster);
-    if (status != FAT_OK) {
-        return status;
-    }
-    // ディレクトリへつなぐ前に，確保したクラスタの全セクタを0で埋めて全エントリを未使用にしておく
-    // (途中で失敗しても，ディレクトリが以前の中身の残ったクラスタを含まないようにするため)
+// clusterのクラスタの全セクタを0で埋め，ディレクトリの中身として使う前に全エントリを未使用にする
+// 終えた時点でfat_sectorは全て0になっている
+int fat_clear_cluster(unsigned int cluster) {
+    // 0で埋めたセクタを，クラスタの先頭から順に書き込む
     for (int i = 0; i < SD_BLOCK_SIZE; i++) {
         fat_sector[i] = 0;
     }
@@ -991,6 +1010,24 @@ int fat_extend_root(void) {
         if (sd_write_block(fat_cluster_sector(cluster) + i, fat_sector) == 0) {
             return FAT_ERR_WRITE;
         }
+    }
+    return FAT_OK;
+}
+
+// 直前に最後まで走査したディレクトリの最後に空のクラスタを1つつなぎ，その先頭を新しいエントリを置く場所として控える
+int fat_extend_dir(void) {
+    unsigned int cluster;  // つなぐクラスタ
+    int status;            // クラスタの確保・0埋め・つなぎの結果
+
+    // 空きクラスタを1つ確保する．まだディレクトリにはつながず，どのファイルにも使われていないクラスタのため，既存の内容は壊れない
+    status = fat_alloc_cluster(0, &cluster);
+    if (status != FAT_OK) {
+        return status;
+    }
+    // ディレクトリへつなぐ前に0で埋めておく(途中で失敗しても，ディレクトリが以前の中身の残ったクラスタを含まないようにするため)
+    status = fat_clear_cluster(cluster);
+    if (status != FAT_OK) {
+        return status;
     }
     // ディレクトリの最後のクラスタの次へつなぐ
     status = fat_set_cluster(fat_sector_to_cluster(fat_last_dir_sector), cluster);
@@ -1003,44 +1040,12 @@ int fat_extend_root(void) {
     return FAT_OK;
 }
 
-// ルートディレクトリに"NAME.EXT"形式の名前textで空のファイルを作成し，そのエントリをentryへ書き込む
-// 同じ名前のエントリが既にあれば，作成せずにそのエントリをentryへ書き込み，FAT_ERR_EXISTSを返す(大文字・小文字は区別しない)
-int fat_create(char *text, struct FatEntry *entry) {
-    int offset;  // 新しいエントリを置くセクタ内の位置
-    int status;  // 検索・ディレクトリの拡張の結果
+// fat_sectorへ読み込んだディレクトリのセクタの中で，entryの位置(offset)に新しいエントリを書く
+// カードへ書き込むのは呼び出し元が行う(fat_put_entryと同じく，同じセクタの他のエントリもあわせて書いてから1回で書き込めるようにするため)
+void fat_put_new_entry(struct FatEntry *entry) {
+    int offset = entry->offset;  // セクタ内でのエントリの位置
 
-    // 同じ名前が無いことを確かめる．見つからなければ走査が最後まで進み，新しいエントリを置く場所が控えられている
-    status = fat_find(text, entry);
-    if (status == FAT_OK) {
-        return FAT_ERR_EXISTS;
-    }
-    if (status != FAT_ERR_NOT_FOUND) {
-        return status;
-    }
-    // 置ける場所が無ければ，ルートディレクトリを1クラスタ広げてその先頭に置く
-    if (fat_slot_found == 0) {
-        status = fat_extend_root();
-        if (status != FAT_OK) {
-            return status;
-        }
-    }
-    // 名前は検索のために8.3形式へ変換したものを使い，中身の無いファイルとして設定する
-    for (int i = 0; i < FAT_NAME_SIZE; i++) {
-        entry->name[i] = fat_find_name[i];
-    }
-    entry->attr = ATTR_ARCHIVE;
-    entry->name_case = fat_name_case(text);
-    entry->cluster = 0;
-    entry->size = 0;
-    entry->sector = fat_slot_sector;
-    entry->offset = fat_slot_offset;
-    entry->lfn_count = 0;
-    // 新しいエントリを置く場所を含むセクタを読み込む(同じセクタに並ぶ他のエントリを残したまま書き込むため)
-    if (sd_read_block(entry->sector, fat_sector) == 0) {
-        return FAT_ERR_READ;
-    }
     // 置く場所が削除済みのエントリであれば古い値が残っているため，32バイト全体を0にしてから書き直す
-    offset = entry->offset;
     for (int i = 0; i < DIR_ENTRY_SIZE; i++) {
         fat_sector[offset + i] = 0;
     }
@@ -1051,11 +1056,131 @@ int fat_create(char *text, struct FatEntry *entry) {
     // 最後に更新した日時と，名前・属性などの項目を書く
     fat_put_modified_time(offset);
     fat_put_entry(entry);
-    // 書き換えたセクタをカードへ書き込む
+}
+
+// 属性・表示のフラグ・開始クラスタ・バイト数を設定したentryを，fat_find_nameに控えた名前で現在のディレクトリの新しいエントリとして書き込む
+// fat_findが同じ名前をFAT_ERR_NOT_FOUNDで返した後，他のディレクトリを走査せずに呼ぶこと(その走査が控えた名前と，新しいエントリを置く場所を使うため)
+int fat_add_entry(struct FatEntry *entry) {
+    int status;  // ディレクトリの拡張の結果
+
+    // 置ける場所が無ければ，ディレクトリを1クラスタ広げてその先頭に置く
+    if (fat_slot_found == 0) {
+        status = fat_extend_dir();
+        if (status != FAT_OK) {
+            return status;
+        }
+    }
+    // 名前は検索のために8.3形式へ変換したものを使い，控えた場所に置く(新しく付ける名前のため，長いファイル名のエントリは持たない)
+    for (int i = 0; i < FAT_NAME_SIZE; i++) {
+        entry->name[i] = fat_find_name[i];
+    }
+    entry->sector = fat_slot_sector;
+    entry->offset = fat_slot_offset;
+    entry->lfn_count = 0;
+    // 新しいエントリを置く場所を含むセクタを読み込む(同じセクタに並ぶ他のエントリを残したまま書き込むため)
+    if (sd_read_block(entry->sector, fat_sector) == 0) {
+        return FAT_ERR_READ;
+    }
+    // エントリを書き，書き換えたセクタをカードへ書き込む
+    fat_put_new_entry(entry);
     if (sd_write_block(entry->sector, fat_sector) == 0) {
         return FAT_ERR_WRITE;
     }
     return FAT_OK;
+}
+
+// 現在のディレクトリに"NAME.EXT"形式の名前textで空のファイルを作成し，そのエントリをentryへ書き込む
+// 同じ名前のエントリが既にあれば，作成せずにそのエントリをentryへ書き込み，FAT_ERR_EXISTSを返す(大文字・小文字は区別しない)
+int fat_create(char *text, struct FatEntry *entry) {
+    int status;  // 検索の結果
+
+    // 同じ名前が無いことを確かめる．見つからなければ走査が最後まで進み，新しいエントリを置く場所が控えられている
+    status = fat_find(text, entry);
+    if (status == FAT_OK) {
+        return FAT_ERR_EXISTS;
+    }
+    if (status != FAT_ERR_NOT_FOUND) {
+        return status;
+    }
+    // 中身の無いファイルとして，新しいエントリを書き込む
+    entry->attr = ATTR_ARCHIVE;
+    entry->name_case = fat_name_case(text);
+    entry->cluster = 0;
+    entry->size = 0;
+    return fat_add_entry(entry);
+}
+
+// 新しいディレクトリの先頭セクタとしてfat_sectorへ用意中のセクタの，offsetの位置に`.`か`..`のエントリを書く
+// dotsには名前の'.'の数(`.`は1，`..`は2)を，clusterにはエントリが指すディレクトリの開始クラスタを渡す
+void fat_put_dot_entry(int offset, int dots, unsigned int cluster) {
+    struct FatEntry entry;  // 書くエントリ
+
+    // 名前は'.'を並べた後ろを空白で埋める(拡張子は無い)
+    for (int i = 0; i < FAT_NAME_SIZE; i++) {
+        if (i < dots) {
+            entry.name[i] = '.';
+        } else {
+            entry.name[i] = ' ';
+        }
+    }
+    // clusterのディレクトリを指すディレクトリのエントリとして書く
+    entry.attr = ATTR_DIRECTORY;
+    entry.name_case = 0;
+    entry.cluster = cluster;
+    entry.size = 0;
+    entry.offset = offset;
+    fat_put_new_entry(&entry);
+}
+
+// 現在のディレクトリに"NAME.EXT"形式の名前textで空のディレクトリを作成する
+// 同じ名前のエントリが既にあればFAT_ERR_EXISTSを返す(大文字・小文字は区別しない)
+int fat_mkdir(char *text) {
+    struct FatEntry entry;  // 作成するディレクトリのエントリ
+    unsigned int cluster;   // 新しいディレクトリの中身を置くクラスタ
+    unsigned int parent;    // `..`のエントリに書く親ディレクトリの開始クラスタ
+    int status;             // 検索・確保・書き込みの結果
+
+    // 同じ名前が無いことを確かめる．見つからなければ走査が最後まで進み，新しいエントリを置く場所が控えられている
+    status = fat_find(text, &entry);
+    if (status == FAT_OK) {
+        return FAT_ERR_EXISTS;
+    }
+    if (status != FAT_ERR_NOT_FOUND) {
+        return status;
+    }
+    // 中身を置くクラスタを1つ確保し，0で埋めて全エントリを未使用にする
+    status = fat_alloc_cluster(0, &cluster);
+    if (status != FAT_OK) {
+        return status;
+    }
+    status = fat_clear_cluster(cluster);
+    // 0で埋め終えたfat_sectorを先頭セクタとして，`.`と`..`のエントリをこの順に並べて書き込む
+    // 親がルートディレクトリであれば，`..`には開始クラスタの代わりに0を書く決まりである
+    if (status == FAT_OK) {
+        if (fat_depth == 0) {
+            parent = 0;
+        } else {
+            parent = fat_dir_clusters[fat_depth];
+        }
+        fat_put_dot_entry(0, 1, cluster);
+        fat_put_dot_entry(DIR_ENTRY_SIZE, 2, parent);
+        if (sd_write_block(fat_cluster_sector(cluster), fat_sector) == 0) {
+            status = FAT_ERR_WRITE;
+        }
+    }
+    // 中身を用意できたら，現在のディレクトリへディレクトリのエントリを書き込む
+    if (status == FAT_OK) {
+        entry.attr = ATTR_DIRECTORY;
+        entry.name_case = fat_name_case(text);
+        entry.cluster = cluster;
+        entry.size = 0;
+        status = fat_add_entry(&entry);
+    }
+    // 途中で失敗した場合は，どのエントリからも指されないクラスタが残らないよう解放する
+    if (status != FAT_OK) {
+        fat_free_chain(cluster);
+    }
+    return status;
 }
 
 // entryのファイルの内容を，dataの先頭lengthバイトで丸ごと置き換える
@@ -1130,18 +1255,11 @@ int fat_write(struct FatEntry *entry, char *data, int length) {
     return FAT_OK;
 }
 
-// entryのファイルを削除する(長いファイル名を持てば，そのエントリもあわせて削除する)
-int fat_remove(struct FatEntry *entry) {
+// entryのファイル・ディレクトリのエントリを削除済みにし，中身のクラスタチェーンを解放する(長いファイル名を持てば，そのエントリもあわせて削除する)
+// ファイルかディレクトリかと，ディレクトリが空であることは呼び出し元が確かめる
+int fat_delete_entry(struct FatEntry *entry) {
     int status;  // エントリの削除の結果
 
-    // マウントしていなければ，エントリの位置が分からない
-    if (fat_mounted == 0) {
-        return FAT_ERR_NOT_MOUNTED;
-    }
-    // ディレクトリは中身を持つため，ファイルと同じ方法では削除しない
-    if ((entry->attr & ATTR_DIRECTORY) != 0) {
-        return FAT_ERR_IS_DIR;
-    }
     // 長いファイル名のエントリの先頭から，短い名前のエントリまでを削除済みにする
     if (entry->lfn_count != 0) {
         status = fat_mark_deleted(entry->lfn_sector, entry->lfn_offset, entry->lfn_count + 1);
@@ -1155,6 +1273,172 @@ int fat_remove(struct FatEntry *entry) {
     if (entry->cluster != 0) {
         return fat_free_chain(entry->cluster);
     }
+    return FAT_OK;
+}
+
+// entryのファイルを削除する(長いファイル名を持てば，そのエントリもあわせて削除する)
+int fat_remove(struct FatEntry *entry) {
+    // マウントしていなければ，エントリの位置が分からない
+    if (fat_mounted == 0) {
+        return FAT_ERR_NOT_MOUNTED;
+    }
+    // ディレクトリは中身を持つため，ファイルと同じ方法では削除しない
+    if ((entry->attr & ATTR_DIRECTORY) != 0) {
+        return FAT_ERR_IS_DIR;
+    }
+    return fat_delete_entry(entry);
+}
+
+// ディレクトリの走査で，エントリが1件でも渡されたら走査を打ち切らせる(ディレクトリが空かどうかを調べるため)
+int fat_stop_at_entry(struct FatEntry *entry) {
+    return 1;
+}
+
+// entryの空のディレクトリを削除する(長いファイル名を持てば，そのエントリもあわせて削除する)
+// 中身が残っていればFAT_ERR_NOT_EMPTYを返し，何もしない(`.`・`..`のエントリだけが残るディレクトリは空とみなす)
+int fat_rmdir(struct FatEntry *entry) {
+    int status;  // 中身の走査・削除の結果
+
+    // マウントしていなければ，エントリの位置が分からない
+    if (fat_mounted == 0) {
+        return FAT_ERR_NOT_MOUNTED;
+    }
+    // ファイルはディレクトリと同じ方法では削除しない
+    if ((entry->attr & ATTR_DIRECTORY) == 0) {
+        return FAT_ERR_NOT_DIR;
+    }
+    // 名前を持つディレクトリがルートディレクトリの中身を指すのは記録が壊れており，削除するとルートディレクトリを解放してしまう
+    if (entry->cluster == fat_root_cluster) {
+        return FAT_ERR_BROKEN;
+    }
+    // ディレクトリの中身を走査し，エントリが1件でも渡されれば空ではない
+    // (走査は新しいエントリを置く場所の控えを上書きするが，削除はそれを使わない)
+    status = fat_walk_dir(entry->cluster, fat_stop_at_entry);
+    if (status == FAT_STOPPED) {
+        return FAT_ERR_NOT_EMPTY;
+    }
+    if (status != FAT_OK) {
+        return status;
+    }
+    // 空であれば，ファイルと同じくエントリを削除して中身を解放する
+    return fat_delete_entry(entry);
+}
+
+// 現在のディレクトリをルートディレクトリにする
+int fat_chdir_root(void) {
+    // マウントしていなければ，ルートディレクトリの位置が分からない
+    if (fat_mounted == 0) {
+        return FAT_ERR_NOT_MOUNTED;
+    }
+    // 深さ0の段をルートディレクトリとし，パスを"/"にする
+    fat_depth = 0;
+    fat_dir_clusters[0] = fat_root_cluster;
+    fat_cwd[0] = '/';
+    fat_cwd[1] = '\0';
+    return FAT_OK;
+}
+
+// 現在のディレクトリを，親ディレクトリへ1段戻す(ルートディレクトリであれば何もしない)
+void fat_chdir_parent(void) {
+    int slash = 0;  // パスの最後の'/'の位置
+
+    // ルートディレクトリには親が無い
+    if (fat_depth == 0) {
+        return;
+    }
+    // パスの最後の'/'を探し，そこから後ろの最後の段の名前を取り除く(先頭の'/'しか無ければ，ルートディレクトリの"/"を残す)
+    for (int i = 0; fat_cwd[i] != '\0'; i++) {
+        if (fat_cwd[i] == '/') {
+            slash = i;
+        }
+    }
+    if (slash == 0) {
+        fat_cwd[1] = '\0';
+    } else {
+        fat_cwd[slash] = '\0';
+    }
+    // 開始クラスタも1段戻す
+    fat_depth--;
+}
+
+// 現在のディレクトリを，その直下にある"NAME.EXT"形式の名前textのディレクトリへ移す(大文字・小文字は区別しない)
+// textが"."であれば何もせず，".."であれば親ディレクトリへ戻る(ルートディレクトリでは何もしない)
+// 移れなかった場合は，現在のディレクトリを変えない
+int fat_chdir(char *text) {
+    struct FatEntry entry;          // 移動先のディレクトリのエントリ
+    char name[FAT_NAME_TEXT_SIZE];  // 移動先のディレクトリの表示用の名前
+    int name_length = 0;            // 移動先のディレクトリの表示用の名前の文字数
+    int length = 0;                 // 現在のディレクトリのパスの文字数
+    int separator = 0;              // パスと名前の間に挟む区切りの'/'の文字数(ルートディレクトリの"/"に続ける場合は0)
+    int status;                     // 検索の結果
+
+    // マウントしていなければ，ディレクトリの位置が分からない
+    if (fat_mounted == 0) {
+        return FAT_ERR_NOT_MOUNTED;
+    }
+    // "."は現在のディレクトリ自身のため移らない
+    if (text[0] == '.' && text[1] == '\0') {
+        return FAT_OK;
+    }
+    // ".."は，カード上の`..`のエントリを読まず，控えた親ディレクトリへ戻る
+    if (text[0] == '.' && text[1] == '.' && text[2] == '\0') {
+        fat_chdir_parent();
+        return FAT_OK;
+    }
+    // 名前から移動先のエントリを探し，ディレクトリであることを確かめる
+    status = fat_find(text, &entry);
+    if (status != FAT_OK) {
+        return status;
+    }
+    if ((entry.attr & ATTR_DIRECTORY) == 0) {
+        return FAT_ERR_NOT_DIR;
+    }
+    // データ領域の外やルートディレクトリの中身を指すのは記録が壊れている(ルートディレクトリへ移るとパスと中身が食い違う)
+    if (fat_is_valid_cluster(entry.cluster) == 0 || entry.cluster == fat_root_cluster) {
+        return FAT_ERR_BROKEN;
+    }
+    // パスへ足す名前を，lsと同じ表示用の名前に整えて文字数を数える
+    fat_format_name(&entry, name);
+    while (name[name_length] != '\0') {
+        name_length++;
+    }
+    // ルートディレクトリの"/"には名前をそのまま続け，それ以外は区切りの'/'を挟んで続ける
+    while (fat_cwd[length] != '\0') {
+        length++;
+    }
+    if (fat_depth != 0) {
+        separator = 1;
+    }
+    // ヌル終端まで収まらなければ移らない
+    if (length + separator + name_length >= FAT_PATH_SIZE) {
+        return FAT_ERR_PATH_TOO_LONG;
+    }
+    if (separator != 0) {
+        fat_cwd[length] = '/';
+    }
+    for (int i = 0; i <= name_length; i++) {
+        fat_cwd[length + separator + i] = name[i];
+    }
+    // 移動先の開始クラスタを1段深い位置に控える
+    fat_depth++;
+    fat_dir_clusters[fat_depth] = entry.cluster;
+    return FAT_OK;
+}
+
+// 現在のディレクトリの絶対パスをtextへ書き込む(textはFAT_PATH_SIZE要素以上で確保すること)
+int fat_getcwd(char *text) {
+    int i = 0;  // 写した文字数
+
+    // マウントしていなければ，現在のディレクトリは決まっていない
+    if (fat_mounted == 0) {
+        return FAT_ERR_NOT_MOUNTED;
+    }
+    // パスを写し，ヌル終端する
+    while (fat_cwd[i] != '\0') {
+        text[i] = fat_cwd[i];
+        i++;
+    }
+    text[i] = '\0';
     return FAT_OK;
 }
 
@@ -1213,7 +1497,7 @@ void fat_print_error(int status) {
         print("invalid file name\n");
         break;
     case FAT_ERR_NOT_FOUND:
-        print("no such file\n");
+        print("no such file or directory\n");
         break;
     case FAT_ERR_IS_DIR:
         print("is a directory\n");
@@ -1226,6 +1510,15 @@ void fat_print_error(int status) {
         break;
     case FAT_ERR_EXISTS:
         print("file exists\n");
+        break;
+    case FAT_ERR_NOT_DIR:
+        print("not a directory\n");
+        break;
+    case FAT_ERR_NOT_EMPTY:
+        print("directory not empty\n");
+        break;
+    case FAT_ERR_PATH_TOO_LONG:
+        print("path too long\n");
         break;
     default:
         print("unexpected error\n");
