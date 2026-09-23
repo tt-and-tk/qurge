@@ -89,6 +89,6 @@ mypc/                                  # リポジトリルート(Vivadoプロ�
 | `mypc.srcs/constrs_1/new/` | PYNQ-Z2ボードのピン制約 (top.xdc) |
 | `mypc.srcs/cpp/` | PS(ARM)側のC++プログラム(`run.cpp`が現行版)．`compile.sh`はPYNQ-Z2ボード上でビルドする際に使うスクリプト |
 | `mypc.srcs/pn/` | ROM上で動くPynesisソース(`.pn`)．`compiler`の`pn2asm.exe`でアセンブリへ，`assembler`の`asm2sv.exe`で`mypc.srcs/sources_1/new/rom_sv.sv`へ変換する(中間生成物の`.pt`は`.gitignore`対象) |
-| `mypc.srcs/sim_1/` | テストベンチ(`new/`)と，その実行スクリプト`run_cpu_tb.sh`．実行方法は「CPUのシミュレーション」を参照 |
+| `mypc.srcs/sim_1/` | テストベンチ(`new/`)と，それをコンパイル・実行するスクリプト．実行方法は「CPUのシミュレーション」を参照 |
 
 テストベンチはVivadoが自動生成するものではないため，Git管理の対象とする．
