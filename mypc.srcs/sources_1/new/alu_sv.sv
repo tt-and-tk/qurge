@@ -126,8 +126,10 @@ module alu_sv (
     // 内部レジスタ
     register_t register[REGISTER_MAX_ADDR:0] = REGISTER_INIT;
 
-    // Arduino SPIのMISOの準安定状態を消す2段のシフトレジスタ
-    (* ASYNC_REG = "TRUE" *) logic [1:0] miso_sync = 2'b00;
+    // 外部ピンからの非同期入力の準安定状態を消す2段のシフトレジスタ(添字1が後段)
+    (* ASYNC_REG = "TRUE" *) logic [1:0][3:0] btn_sync = '0;  // タクトスイッチ
+    (* ASYNC_REG = "TRUE" *) logic [1:0][1:0] sw_sync = '0;   // DIPスイッチ
+    (* ASYNC_REG = "TRUE" *) logic [1:0] miso_sync = '0;      // Arduino SPIのMISO
 
     // 実行フェーズ
     cpu_phase_enum cpu_phase = CPU_FETCH;
@@ -539,9 +541,15 @@ module alu_sv (
         stdout_tlast = 1'b1;
     end
 
-    // MISOの同期化．非同期入力の準安定状態をシフトレジスタで消してからメインの順序回路で取り込む
+    // 外部ピンからの非同期入力の同期化．準安定状態をシフトレジスタで消してからメインの順序回路で取り込む
     // メインの順序回路とブロックを分けているのは，リセット中・停止中も止めずに動かし続けるため
+    // 準安定状態を消すだけでチャタリングは除去しない
     always_ff @(posedge clk) begin
+        // タクトスイッチ
+        btn_sync <= {btn_sync[0], btn};
+        // DIPスイッチ
+        sw_sync <= {sw_sync[0], sw};
+        // Arduino SPIのMISO
         miso_sync <= {miso_sync[0], ck_miso};
     end
 
@@ -616,8 +624,9 @@ module alu_sv (
         // 命令実行
         else begin
             // IOからレジスタに値を格納する
-            register[BTN_ADDR] <= {4'b0, btn};
-            register[SW_ADDR] <= {6'b0, sw};
+            // タクトスイッチ・DIPスイッチは同期化後の値で，ピンの値が届くまでこの1段と合わせて3サイクルかかる
+            register[BTN_ADDR] <= {4'b0, btn_sync[1]};
+            register[SW_ADDR] <= {6'b0, sw_sync[1]};
             register[STDIN_DATA_ADDR] <= stdin_tdata;
             register[STDIN_SIGNAL_ADDR][2] <= stdin_tlast;
             register[STDIN_SIGNAL_ADDR][1] <= stdin_tvalid;
