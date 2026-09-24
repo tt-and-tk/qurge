@@ -463,18 +463,14 @@ int load_executable(struct FatEntry *entry) {
     }
 }
 
-// 既定のディレクトリ/binから，コマンド名と同じ名前の実行ファイルを探し，コード領域へ読み込んで呼び出す
+// 既定のディレクトリ/binから，コマンド名と同じ名前の実行ファイルを探し，コード領域へ読み込んで呼び出す(コマンド名は空でないこと)
 // 実行ファイルが見つからなければ，組み込みコマンドとも一致しなかったコマンドとして未対応のエラーにする
 void run_executable(int pos) {
     struct FatEntry dir;    // 既定のディレクトリのエントリ
     struct FatEntry entry;  // 見つかった実行ファイルのエントリ
     int status;             // FAT32の各関数の結果
 
-    // 空行とドットを含む名前は探さない(実行ファイルは拡張子の無いファイルに限り，データファイルを打ち間違いで命令として実行しないため)
-    if (cmd[0] == '\0') {
-        handle_unknown();
-        return;
-    }
+    // ドットを含む名前は探さない(実行ファイルは拡張子の無いファイルに限り，データファイルを打ち間違いで命令として実行しないため)
     for (int i = 0; cmd[i] != '\0'; i++) {
         if (cmd[i] == '.') {
             handle_unknown();
@@ -570,6 +566,9 @@ void main(void) {
         print("> ");  // 入力待ちであることを示すプロンプト
         scan(input);
         pos = extract_arg(input, 0, cmd, INPUT_SIZE);
-        dispatch(pos);
+        // コマンド名が無い行(改行だけ・空白だけの行など)は何もせず次のプロンプトへ戻る
+        if (cmd[0] != '\0') {
+            dispatch(pos);
+        }
     }
 }
