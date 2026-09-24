@@ -1,4 +1,4 @@
-// シェルのメインループ．標準入力から1行受け取り，先頭のトークンをコマンド名として解析し，対応する処理を呼び出す
+// Qosmosの起動処理とシェルのメインループ．起動時にハードウェアを初期化してOS名を表示した後，標準入力から1行受け取り，先頭のトークンをコマンド名として解析し，対応する処理を呼び出す
 #include "args.pn"
 #include "sd.pn"
 #include "fat.pn"
@@ -341,22 +341,39 @@ void handle_pwd(int pos) {
     print("\n");
 }
 
-// sdinitコマンド: SDカードを初期化し，カード上のFAT32ファイルシステムをマウントし直す
-void handle_sdinit(int pos) {
+// SDカードを初期化し，カード上のFAT32ファイルシステムをマウントする．各段階の成否を[ OK ]・[FAIL]の行で出力する
+// 起動時とsdinitコマンドで同じ手順・表示を使う
+// 戻り値: 1(マウントまで成功) / 0(失敗．ファイルシステムは外れた状態になる)
+int init_storage(void) {
     int status;  // マウントの結果
 
+    // 初期化に失敗したときに前のカードのファイルシステムを使い続けないよう，先に外しておく
+    fat_unmount();
+    // ハードウェアの初期化として，SDカードを初期化する(各段階の行はドライバが出力する)
+    if (sd_init() == 0) {
+        return 0;
+    }
+    // 初期化できたカードのファイルシステムをマウントし，その成否を出力する
+    // print_errorを使わないのは，起動時はコマンド名が入っておらず，行もprint_errorのバッファに収まらないため
+    status = fat_mount();
+    if (status != FAT_OK) {
+        print("[FAIL] FAT32: mount: ");
+        fat_print_error(status);
+        return 0;
+    }
+    print("[ OK ] FAT32: mount\n");
+    return 1;
+}
+
+// sdinitコマンド: SDカードを初期化し，カード上のFAT32ファイルシステムをマウントし直す
+void handle_sdinit(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
         return;
     }
-    // マウントし直し，失敗すればその理由を，成功すればその旨を出力する
-    status = fat_mount();
-    if (status != FAT_OK) {
-        print_fat_error(status);
-        return;
-    }
-    print("mounted\n");
+    // 起動時と同じ手順でマウントし直す(失敗も各段階の行で伝わるため，コマンド名を前置したエラーは出さない)
+    init_storage();
 }
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
@@ -516,18 +533,29 @@ void dispatch(int pos) {
     }
 }
 
-void main(void) {
-    int pos;     // コマンド名の直後の位置(引数の取り出し開始位置)
-    int status;  // 起動時のマウントの結果
+// OS名Qosmosを大きな文字(アスキーアート)で出力し，副題を添える
+void print_banner(void) {
+    // figletのstandardフォントで描いた5行と，空行を挟んだ副題を出力する(\は\\と書く)
+    print("  ___\n");
+    print(" / _ \\  ___  ___ _ __ ___   ___  ___\n");
+    print("| | | |/ _ \\/ __| '_ ` _ \\ / _ \\/ __|\n");
+    print("| |_| | (_) \\__ \\ | | | | | (_) \\__ \\\n");
+    print(" \\__\\_\\\\___/|___/_| |_| |_|\\___/|___/\n");
+    print("\n");
+    print("   order out of chaos, on Qurge\n");
+}
 
-    // カードがあればファイルシステムをマウントする．失敗してもsdinitでやり直せるよう，シェルはそのまま起動する
-    // 表示にprint_errorを使わないのは，この時点ではコマンド名が入っていないため
-    status = fat_mount();
-    if (status == FAT_OK) {
-        print("fat: mounted\n");
-    } else {
-        print("fat: ");
-        fat_print_error(status);
+void main(void) {
+    int pos;      // コマンド名の直後の位置(引数の取り出し開始位置)
+    int mounted;  // 起動時にファイルシステムをマウントできたか(0:失敗，1:成功)
+
+    // ハードウェアを初期化し，ファイルシステムをマウントする
+    mounted = init_storage();
+    // 成否によらずOS名を出力する
+    print_banner();
+    // 失敗してもsdinitでやり直せるよう，シェルはそのまま起動し，やり直し方を伝える
+    if (mounted == 0) {
+        print("Storage is not available. Insert a card and run sdinit.\n");
     }
     // 1行受け取るごとに，先頭のトークンをコマンド名として取り出して処理を呼び出す
     while (1) {
