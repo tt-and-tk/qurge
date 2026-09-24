@@ -307,7 +307,9 @@ int sd_read_block(unsigned int block, unsigned char *buf) {
 // 失敗しても表示は行わない(他の出力の途中でも呼ばれるため，失敗の伝え方は呼び出し元が決める)
 // 戻り値: 1(書き込み成功) / 0(失敗．ブロックの内容は保証されない)
 int sd_write_block(unsigned int block, unsigned char *buf) {
-    int response;  // CMD24のR1応答と，書き込んだデータへの応答
+    int response;  // CMD24・CMD13のR1応答と，書き込んだデータへの応答
+    int busy;      // ビジーの間にカードから最後に受け取ったバイト(書き終えるとMISOのアイドル値0xffになる)
+    int status;    // CMD13の応答R2の2バイト目(書き込み処理中に起きたエラーなどを表すビット)
 
     // ブロック単位の番地を使うカードだと確認できていないと誤った位置へ書くため，初期化が完了していなければ書かない
     if (sd_ready == 0) {
@@ -349,12 +351,29 @@ int sd_write_block(unsigned int block, unsigned char *buf) {
     // カードは受理したデータを書き終えるまでMISOをLowに保ち(ビジー)，書き終えるとアイドル値(0xff)へ戻す
     // 規格上の書き込み時間の上限(SDXCで500ms)を上回るだけの回数を見る(読み出しの待ちの回数が100msを上回る値であり，その5倍)
     for (int i = 0; i < 1000000; i++) {
-        if (spi_transfer(0xff) == 0xff) {
-            sd_release();
-            return 1;
+        busy = spi_transfer(0xff);
+        if (busy == 0xff) {
+            break;
         }
     }
     // 上限まで待っても書き終わらなければ失敗とする
+    if (busy != 0xff) {
+        sd_release();
+        return 0;
+    }
+
+    // データへの応答が表すのは，データを受け取った時点の結果だけである
+    // 書き込み処理中に起きたエラー(書き込み失敗・範囲外など)は，書き終えた後にCMD13の応答R2で報告される
+    // CMD13(SEND_STATUS): カードの状態の問い合わせ．CRCは無視されるためエンドビットのみを立てた値を渡す
+    response = sd_command(13, 0x00000000, 0x01);
+    // R2はR1に1バイトが続く形式で，失敗した場合も読み切らないと以降の転送がずれるため，判定より先に読む
+    status = spi_transfer(0xff);
+    // 書き込みを終えたカードを解放する
     sd_release();
-    return 0;
+    // R1・2バイト目のどちらかにビットが立っていれば失敗とする
+    // 2バイト目のbit0(card is locked)はエラーではないが，ロックされたカードには書き込めないため失敗に含める
+    if (response != 0x00 || status != 0x00) {
+        return 0;
+    }
+    return 1;
 }
