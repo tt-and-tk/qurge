@@ -68,7 +68,8 @@ unsigned char spi_transfer(char data) {
 int sd_command(int cmd_index, int arg, int crc) {
     int response;  // カードから受け取った1バイト
 
-    // 規格上，前の応答の終わりから次のコマンドまで8クロック以上(NRC)を空ける必要があるため，ダミーを1バイト送る
+    // 規格上，前の応答の終わりから次のコマンドまでは8クロック以上(NRC)を空ける必要がある
+    // その間隔としてダミーを1バイト送る
     spi_transfer(0xff);
     // コマンドフレームは6バイト固定で，先頭バイトの上位2ビット'01'がホストからの送信を表す
     spi_transfer(0x40 | cmd_index);
