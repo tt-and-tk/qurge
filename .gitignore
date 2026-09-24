@@ -1,6 +1,6 @@
 # Vivado自動生成ディレクトリ(合成・実装・IP生成のたびに再生成される)
 .Xil/
-NA/
+/NA/
 mypc.cache/
 mypc.gen/
 mypc.hw/
