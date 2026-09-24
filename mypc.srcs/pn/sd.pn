@@ -128,11 +128,9 @@ int sd_init_commands(void) {
         print(" (SD v1, unsupported)\n");
         return 0;
     }
-    if (response != 0x01) {
-        print("\n");
-        return 0;
-    }
-    // 受理された場合の応答はR7で，R1の後に届く4バイトのうち末尾2バイトが受理された電圧範囲と送ったチェックパターンのエコーバックになる
+    // v2カードはR1にエラービットが立っていてもR7で応答する
+    // R1の後に届く4バイトのうち，末尾2バイトが受理された電圧範囲と送ったチェックパターンのエコーバックになる
+    // 失敗した場合も4バイト読み切らないと以降の転送がずれるため，読み出しは先に済ませる
     echoed = 0;
     for (int i = 0; i < 4; i++) {
         received = spi_transfer(0xff);
@@ -140,12 +138,16 @@ int sd_init_commands(void) {
         print_hex(received);
         echoed = ((echoed << 8) | received) & 0xffff;  // 末尾2バイトだけを残す
     }
-    print("\n");
-    // CMD8の引数0x000001aaの下位2バイト(0x01=2.7〜3.6V，0xaa=チェックパターン)がそのまま戻らなければ，配線か電圧に問題がある
-    if (echoed != 0x01aa) {
-        print("check pattern mismatch\n");
+    if (response != 0x01) {
+        print(" (failed)\n");
         return 0;
     }
+    // CMD8の引数0x000001aaの下位2バイト(0x01=2.7〜3.6V，0xaa=チェックパターン)がそのまま戻らなければ，配線か電圧に問題がある
+    if (echoed != 0x01aa) {
+        print(" (check pattern mismatch)\n");
+        return 0;
+    }
+    print("\n");
 
     // ACMD41(SD_SEND_OP_COND): 初期化の開始指示．内部初期化中は0x01を返し続け，完了すると0x00になる
     // 完了まで最大1秒かかることが規格上許容されているため，それを上回るだけの回数を見る
