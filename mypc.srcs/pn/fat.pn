@@ -48,7 +48,7 @@
 const int FAT_OK = 0;               // 成功
 const int FAT_END = 1;              // クラスタチェーン・ファイルの終わりに達した
 const int FAT_STOPPED = 2;          // 走査のコールバックが打ち切りを求めた
-const int FAT_ERR_INIT = 3;         // SDカードを初期化できなかった
+const int FAT_ERR_INIT = 3;         // SDカードが初期化されていない
 const int FAT_ERR_READ = 4;         // カードから読み出せなかった
 const int FAT_ERR_NOT_FAT32 = 5;    // カード上にFAT32のファイルシステムが見つからない
 const int FAT_ERR_BROKEN = 6;       // クラスタチェーンやサイズの記録が壊れている
@@ -348,16 +348,21 @@ int fat_parse_bpb(unsigned int fs_start) {
     return fat_chdir_root();
 }
 
-// SDカードを初期化し，カード上のFAT32ファイルシステムをマウントする(カードを差し替えた後に呼び直せば，新しいカードをマウントし直す)
+// ファイルシステムを外す(以降の操作はマウントしていない旨の失敗になる)
+void fat_unmount(void) {
+    fat_mounted = 0;
+}
+
+// 初期化済みのSDカード上のFAT32ファイルシステムをマウントする(カードを差し替えた後は，sd_initで初期化し直してから呼び直す)
 int fat_mount(void) {
     unsigned int fs_start = 0;  // ファイルシステムの先頭セクタ番号(パーティションを持たないカードでは0)
     int type;                   // 第1パーティションの種別
 
     // 失敗したときに前のカードの情報で読まないよう，先に外しておく
-    fat_mounted = 0;
+    fat_unmount();
 
-    // カードをSPIで通信できる状態にし，セクタ番号をそのまま番地として読み出せるカード(SDHC/SDXC)であることを確かめる(途中経過は初期化の処理が表示する)
-    if (sd_init() == 0) {
+    // セクタ番号をそのまま番地として読み出せるカード(SDHC/SDXC)であることは初期化で確かめるため，初期化が済んでいなければ読まない
+    if (sd_ready == 0) {
         return FAT_ERR_INIT;
     }
 
@@ -1533,7 +1538,7 @@ void fat_print_error(int status) {
     // 戻り値ごとに決めたメッセージを出力する(想定外の値もメッセージ無しにはしない)
     switch (status) {
     case FAT_ERR_INIT:
-        print("initialization failed\n");
+        print("card not initialized\n");
         break;
     case FAT_ERR_READ:
         print("cannot read card\n");

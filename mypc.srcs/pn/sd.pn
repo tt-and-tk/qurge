@@ -30,6 +30,14 @@ void print_hex(char value) {
     print(hex_buf);
 }
 
+// 初期化に失敗した段階の行の末尾へ，判定に使った応答値を" (0x??)"の形で添えて改行する
+void print_response(char value) {
+    // 応答値を括弧で囲んで出力し，行を終える
+    print(" (");
+    print_hex(value);
+    print(")\n");
+}
+
 // SPIモード0のビットバンギングで1バイトを送信し，同時に受信した1バイトを返す
 // SPIは全二重で送信と受信が常に対になるため，受信だけしたい場合は0xffを渡すこと
 unsigned char spi_transfer(char data) {
@@ -89,7 +97,9 @@ void sd_release(void) {
     spi_transfer(0xff);
 }
 
-// 初期化のコマンド列を順に実行する(どこで失敗したのかが分かるように各段の応答を表示している)
+// 初期化のコマンド列を順に実行する
+// 段階ごとに，結果が決まった時点で成功([ OK ])か失敗([FAIL])の行を出力する(どこで失敗したのかを分かるようにするため)
+// 失敗した段階の行には理由と応答値を添え，以降の段階は実行しない
 // 呼び出す前にspi_ssを0にしてカードを選択しておくこと
 // 戻り値: 1(初期化完了) / 0(失敗)
 int sd_init_commands(void) {
@@ -106,26 +116,32 @@ int sd_init_commands(void) {
 
     // CMD0(GO_IDLE_STATE): ソフトリセット．アイドル状態へ入ればin idle stateのみが立った0x01が返る
     response = sd_command(0, 0x00000000, 0x95);
-    print("CMD0: ");
-    print_hex(response);
-    print("\n");
-    if (response != 0x01) {
+    // 無応答(0xff)はカードが差さっていない場合に起きるため，他の応答と分けて伝える
+    if (response == 0xff) {
+        print("[FAIL] SD card: reset (CMD0): no response");
+        print_response(response);
         return 0;
     }
+    if (response != 0x01) {
+        print("[FAIL] SD card: reset (CMD0): unexpected response");
+        print_response(response);
+        return 0;
+    }
+    print("[ OK ] SD card: reset (CMD0)\n");
 
     // CMD8(SEND_IF_COND): 2.7〜3.6Vで動かせるかの問い合わせ．引数下位の0xaaはエコーバックされるチェックパターン
     response = sd_command(8, 0x000001aa, 0x87);
-    print("CMD8: ");
-    print_hex(response);
     // 無応答を表す0xffはillegal commandビットも含むため，v1カードの判定より先に切り分ける
     if (response == 0xff) {
-        print(" (no response)\n");
+        print("[FAIL] SD card: voltage check (CMD8): no response");
+        print_response(response);
         return 0;
     }
     // CMD8はSD規格v2で追加されたため，v1カードはillegal command(bit2)を立てて拒否する
     // v1カードはすべてバイト単位の番地を使うSDSCであり扱わないため，R1しか返らない拒否応答の後は続く4バイトを読まずここで止める
     if ((response & 0x04) != 0) {
-        print(" (SD v1, unsupported)\n");
+        print("[FAIL] SD card: voltage check (CMD8): SD v1, unsupported");
+        print_response(response);
         return 0;
     }
     // v2カードはR1にエラービットが立っていてもR7で応答する
@@ -134,20 +150,24 @@ int sd_init_commands(void) {
     echoed = 0;
     for (int i = 0; i < 4; i++) {
         received = spi_transfer(0xff);
-        print(" ");
-        print_hex(received);
         echoed = ((echoed << 8) | received) & 0xffff;  // 末尾2バイトだけを残す
     }
     if (response != 0x01) {
-        print(" (failed)\n");
+        print("[FAIL] SD card: voltage check (CMD8): failed");
+        print_response(response);
         return 0;
     }
     // CMD8の引数0x000001aaの下位2バイト(0x01=2.7〜3.6V，0xaa=チェックパターン)がそのまま戻らなければ，配線か電圧に問題がある
+    // 判定に使ったのはR1ではなく戻ってきた2バイトのため，その2バイトを並べて添える
     if (echoed != 0x01aa) {
-        print(" (check pattern mismatch)\n");
+        print("[FAIL] SD card: voltage check (CMD8): check pattern mismatch (");
+        print_hex(echoed >> 8);
+        print(" ");
+        print_hex(echoed);
+        print(")\n");
         return 0;
     }
-    print("\n");
+    print("[ OK ] SD card: voltage check (CMD8)\n");
 
     // ACMD41(SD_SEND_OP_COND): 初期化の開始指示．内部初期化中は0x01を返し続け，完了すると0x00になる
     // 完了まで最大1秒かかることが規格上許容されているため，それを上回るだけの回数を見る
@@ -158,64 +178,61 @@ int sd_init_commands(void) {
         // CMD55が通っていないと続くコマンドは通常のCMD41として解釈されるため，前提が崩れたまま繰り返さず止める
         // カードはACMD41が完了するまでアイドル状態にあるため，in idle state(bit0)以外が立っていれば失敗とみなす
         if ((response & 0xfe) != 0) {
-            print("CMD55: ");
-            print_hex(response);
-            print("\n");
+            print("[FAIL] SD card: initialize (ACMD41): CMD55 rejected");
+            print_response(response);
             return 0;
         }
         // 引数のbit30(HCS)で大容量カード(SDHC/SDXC)を扱えるホストであることを申告する
         response = sd_command(41, 0x40000000, 0x77);
         // in idle state(bit0)以外が立っていればエラー応答か無応答であり，繰り返しても完了しないため止める
         if ((response & 0xfe) != 0) {
-            print("ACMD41: ");
-            print_hex(response);
-            print(" (failed)\n");
+            print("[FAIL] SD card: initialize (ACMD41): failed");
+            print_response(response);
             return 0;
         }
         if (response == 0x00) {
             ready = 1;
         }
     }
-    print("ACMD41: ");
-    print_hex(response);
     if (ready == 0) {
-        // 上限まで繰り返しても完了しなかった(直前に表示したのが最後に返った応答)
-        print(" (not ready)\n");
+        // 上限まで繰り返しても完了しなかった(添えるのは最後に返った応答)
+        print("[FAIL] SD card: initialize (ACMD41): not ready");
+        print_response(response);
         return 0;
     }
-    print("\n");
+    print("[ OK ] SD card: initialize (ACMD41)\n");
 
     // CMD58(READ_OCR): ブロック単位の番地を使うカード(SDHC/SDXC)かを表すCCSビットを読む
     // 応答はR3(R1に4バイトのOCRが続く)で，CCSはOCRの最上位バイトのbit6にある
     response = sd_command(58, 0x00000000, 0x01);
-    print("CMD58: ");
-    print_hex(response);
     // 失敗した場合も4バイト読み切らないと以降の転送がずれるため，読み出しは先に済ませる
     // OCRのbit31(power up status)は確認しない．ACMD41が完了を返した後であり，必ず立っているため
     ocr_high = 0;
     for (int i = 0; i < 4; i++) {
         received = spi_transfer(0xff);
-        print(" ");
-        print_hex(received);
         if (i == 0) {
             ocr_high = received;
         }
     }
     if (response != 0x00) {
-        print(" (failed)\n");
+        print("[FAIL] SD card: card type (CMD58): failed");
+        print_response(response);
         return 0;
     }
     // CCSが0のカードはバイト単位の番地を使うSDSCであり，ブロック番号をそのまま番地として渡すと誤った位置を読み書きするため扱わない
+    // 判定に使ったのはR1ではなくOCRの最上位バイトのため，そちらを添える
     if (((ocr_high >> 6) & 1) == 0) {
-        print(" (SDSC, unsupported)\n");
+        print("[FAIL] SD card: card type (CMD58): SDSC, unsupported");
+        print_response(ocr_high);
         return 0;
     }
-    print("\n");
+    print("[ OK ] SD card: card type SDHC/SDXC (CMD58)\n");
     return 1;
 }
 
 // SDカードをSPIモードへ入れ，ブロックを読み書きできる状態まで初期化する
 // ブロック単位の番地を使うカードであることの確認までを含むため，完了後はブロックの読み書きをそのまま行える
+// 初期化の各段階の成否を1行ずつ出力する(起動時のハードウェアの初期化として，経過を利用者に見せるため)
 // 戻り値: 1(初期化完了) / 0(失敗)
 int sd_init(void) {
     int ready;  // 初期化コマンド列の結果
