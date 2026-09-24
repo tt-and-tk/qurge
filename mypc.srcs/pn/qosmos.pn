@@ -343,7 +343,6 @@ void handle_pwd(int pos) {
 }
 
 // SDカードを初期化し，カード上のFAT32ファイルシステムをマウントする．各段階の成否を[ OK ]・[FAIL]の行で出力する
-// 起動時とsdinitコマンドで同じ手順・表示を使う
 // 戻り値: 1(マウントまで成功) / 0(失敗．ファイルシステムは外れた状態になる)
 int init_storage(void) {
     int status;  // マウントの結果
@@ -366,15 +365,42 @@ int init_storage(void) {
     return 1;
 }
 
-// sdinitコマンド: SDカードを初期化し，カード上のFAT32ファイルシステムをマウントし直す
-void handle_sdinit(int pos) {
+// OS名Qosmosを大きな文字(アスキーアート)で出力し，副題を添える
+void print_banner(void) {
+    // figletのstandardフォントで描いた5行と，空行を挟んだ副題を出力する
+    print("  ___\n");
+    print(" / _ \\  ___  ___ _ __ ___   ___  ___\n");
+    print("| | | |/ _ \\/ __| '_ ` _ \\ / _ \\/ __|\n");
+    print("| |_| | (_) \\__ \\ | | | | | (_) \\__ \\\n");
+    print(" \\__\\_\\\\___/|___/_| |_| |_|\\___/|___/\n");
+    print("\n");
+    print("   order out of chaos, on Qurge\n");
+}
+
+// OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，OS名を出力する
+// 電源投入時とrebootコマンドで同じ手順・表示を使う
+void boot(void) {
+    int mounted;  // ファイルシステムをマウントできたか(0:失敗，1:成功)
+
+    // ハードウェアを初期化し，ファイルシステムをマウントする
+    mounted = init_storage();
+    // 成否によらずOS名を出力する
+    print_banner();
+    // 失敗してもrebootでやり直せるよう，シェルはそのまま起動し，やり直し方を伝える
+    if (mounted == 0) {
+        print("Storage is not available. Insert a card and run reboot.\n");
+    }
+}
+
+// rebootコマンド: OSを再起動する(電源投入時と同じ起動処理をやり直す)
+void handle_reboot(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
         return;
     }
-    // 起動時と同じ手順でマウントし直す(失敗も各段階の行で伝わるため，コマンド名を前置したエラーは出さない)
-    init_storage();
+    // 起動処理をやり直す(失敗も各段階の行で伝わるため，コマンド名を前置したエラーは出さない)
+    boot();
 }
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
@@ -397,7 +423,7 @@ void handle_help(int pos) {
     print("rmdir\n");
     print("cd\n");
     print("pwd\n");
-    print("sdinit\n");
+    print("reboot\n");
 }
 
 // 未対応コマンドのエラーメッセージを表示する
@@ -527,37 +553,18 @@ void dispatch(int pos) {
         handle_cd(pos);
     } else if (streq(cmd, "pwd")) {
         handle_pwd(pos);
-    } else if (streq(cmd, "sdinit")) {
-        handle_sdinit(pos);
+    } else if (streq(cmd, "reboot")) {
+        handle_reboot(pos);
     } else {
         run_executable(pos);
     }
 }
 
-// OS名Qosmosを大きな文字(アスキーアート)で出力し，副題を添える
-void print_banner(void) {
-    // figletのstandardフォントで描いた5行と，空行を挟んだ副題を出力する
-    print("  ___\n");
-    print(" / _ \\  ___  ___ _ __ ___   ___  ___\n");
-    print("| | | |/ _ \\/ __| '_ ` _ \\ / _ \\/ __|\n");
-    print("| |_| | (_) \\__ \\ | | | | | (_) \\__ \\\n");
-    print(" \\__\\_\\\\___/|___/_| |_| |_|\\___/|___/\n");
-    print("\n");
-    print("   order out of chaos, on Qurge\n");
-}
-
 void main(void) {
-    int pos;      // コマンド名の直後の位置(引数の取り出し開始位置)
-    int mounted;  // 起動時にファイルシステムをマウントできたか(0:失敗，1:成功)
+    int pos;  // コマンド名の直後の位置(引数の取り出し開始位置)
 
-    // ハードウェアを初期化し，ファイルシステムをマウントする
-    mounted = init_storage();
-    // 成否によらずOS名を出力する
-    print_banner();
-    // 失敗してもsdinitでやり直せるよう，シェルはそのまま起動し，やり直し方を伝える
-    if (mounted == 0) {
-        print("Storage is not available. Insert a card and run sdinit.\n");
-    }
+    // OSを起動する
+    boot();
     // 1行受け取るごとに，先頭のトークンをコマンド名として取り出して処理を呼び出す
     while (1) {
         print("> ");  // 入力待ちであることを示すプロンプト
