@@ -5,6 +5,10 @@
 
 const int INPUT_SIZE = 64;          // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
 const int ERROR_MESSAGE_SIZE = 32;  // エラーメッセージを出力する一時バッファの要素数
+const int CODE_ADDRESS = 0x8000;    // コード領域の先頭番地(実行ファイルの読み込み先)
+const int CODE_SIZE = 0x8000;       // コード領域のバイト数(読み込める実行ファイルの大きさの上限)
+const int CODE_PC = 0x4000;         // コード領域の先頭の命令を指すPC(実行ファイルの入口)
+const int INSTRUCTION_SIZE = 8;     // 1命令のバイト数(実行ファイルの大きさはこの倍数になる)
 
 char input[INPUT_SIZE];  // 1行分の入力バッファ
 char cmd[INPUT_SIZE];    // 入力の先頭トークン(コマンド名)
@@ -384,10 +388,103 @@ void handle_unknown(void) {
     print_error("unknown command\n");
 }
 
+// 実行ファイルentryの内容を，コード領域の先頭から書き写す(大きさは検査済みのものを渡すこと)
+int load_executable(struct FatEntry *entry) {
+    struct FatFile file;                               // 読み出し中の実行ファイルの位置
+    int length;                                        // 読み込んだセクタのうち内容にあたるバイト数
+    int status;                                        // FAT32の各関数の結果
+    unsigned int *src = (unsigned int *)fat_sector;    // 読み込んだセクタを4バイト単位で読む位置
+    unsigned int *dst = (unsigned int *)CODE_ADDRESS;  // 次に書き込むコード領域の位置
+
+    // 実行ファイルを先頭から読み出せるよう開く
+    status = fat_open(entry, &file);
+    if (status != FAT_OK) {
+        return status;
+    }
+    // 1セクタずつ読み込み，全て読み終えるまで書き写す
+    while (1) {
+        // 次の1セクタを読み込む．全て読み終えていれば書き写し終えている
+        status = fat_read(&file, &length);
+        if (status == FAT_END) {
+            return FAT_OK;
+        }
+        if (status != FAT_OK) {
+            return status;
+        }
+        // 内容を4バイト単位で書き写す(大きさが命令のバイト数の倍数のため，最後のセクタの内容も4バイト単位で割り切れる．1バイトずつ写すより命令数が少ない)
+        for (int i = 0; i < (length >> 2); i++) {
+            *dst = src[i];
+            dst++;
+        }
+    }
+}
+
+// 既定のディレクトリ/binから，コマンド名と同じ名前の実行ファイルを探し，コード領域へ読み込んで呼び出す
+// 実行ファイルが見つからなければ，組み込みコマンドとも一致しなかったコマンドとして未対応のエラーにする
+void run_executable(int pos) {
+    struct FatEntry dir;    // 既定のディレクトリのエントリ
+    struct FatEntry entry;  // 見つかった実行ファイルのエントリ
+    int status;             // FAT32の各関数の結果
+
+    // 空行とドットを含む名前は探さない(実行ファイルは拡張子の無いファイルに限り，データファイルを打ち間違いで命令として実行しないため)
+    if (cmd[0] == '\0') {
+        handle_unknown();
+        return;
+    }
+    for (int i = 0; cmd[i] != '\0'; i++) {
+        if (cmd[i] == '.') {
+            handle_unknown();
+            return;
+        }
+    }
+    // 現在のディレクトリによらず，ルートディレクトリ直下の既定のディレクトリから探す
+    status = fat_find_in(fat_root_cluster, "bin", &dir);
+    // 既定の名前がディレクトリでなければ，既定のディレクトリが無いものとして扱う
+    if (status == FAT_OK && (dir.attr & ATTR_DIRECTORY) == 0) {
+        status = FAT_ERR_NOT_FOUND;
+    }
+    if (status == FAT_OK) {
+        status = fat_find_in(dir.cluster, cmd, &entry);
+    }
+    // 既定のディレクトリか実行ファイルが無いか，名前がファイル名の規則に合わなければ，未対応のコマンドとして扱う
+    if (status == FAT_ERR_NOT_FOUND || status == FAT_ERR_BAD_NAME) {
+        handle_unknown();
+        return;
+    }
+    // それ以外の失敗(マウントしていない場合を含む)は，その理由を出力する
+    if (status != FAT_OK) {
+        print_fat_error(status);
+        return;
+    }
+    // ディレクトリは実行できない
+    if ((entry.attr & ATTR_DIRECTORY) != 0) {
+        print_fat_error(FAT_ERR_IS_DIR);
+        return;
+    }
+    // 命令を1つ以上含み，コード領域に収まり，命令のバイト数で割り切れる大きさでなければ実行しない(命令のバイト数は2のべき乗のため，除算を避けて下位ビットで判定する)
+    if (entry.size == 0 || entry.size > CODE_SIZE || (entry.size & (INSTRUCTION_SIZE - 1)) != 0) {
+        print_error("invalid executable\n");
+        return;
+    }
+    // 引数を渡す仕組みが無いため，引数が指定されていれば実行しない(実行できるものを見つけてから検査し，打ち間違いの名前に引数の誤りを出さない)
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return;
+    }
+    // コード領域へ読み込み，失敗すればその理由を出力する
+    status = load_executable(&entry);
+    if (status != FAT_OK) {
+        print_fat_error(status);
+        return;
+    }
+    // 入口の命令を呼び出す．実行ファイルがRETで戻れば，そのままプロンプトへ戻る
+    ((void (*)(void))CODE_PC)();
+}
+
 // グローバル配列cmdの内容に応じた処理を呼び出す(streqは配列変数のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
 // 引数の取り出し対象は1行分の入力を保持するinputで固定のため，コマンド側へは位置だけを渡す
 void dispatch(int pos) {
-    // コマンド名と一致する処理を呼び，どれとも一致しなければ未対応として扱う
+    // コマンド名と一致する処理を呼び，どれとも一致しなければ既定のディレクトリの実行ファイルを探す
     if (streq(cmd, "echo")) {
         handle_echo(pos);
     } else if (streq(cmd, "help")) {
@@ -415,7 +512,7 @@ void dispatch(int pos) {
     } else if (streq(cmd, "sdinit")) {
         handle_sdinit(pos);
     } else {
-        handle_unknown();
+        run_executable(pos);
     }
 }
 

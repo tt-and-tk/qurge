@@ -728,9 +728,9 @@ int fat_match_entry(struct FatEntry *entry) {
     return 1;
 }
 
-// 現在のディレクトリから"NAME.EXT"形式の名前textのエントリを探し，foundへ書き込む(大文字・小文字は区別しない)
-// 見つからなかった場合は，現在のディレクトリを最後まで走査した結果として，新しいエントリを置く場所が控えられている
-int fat_find(char *text, struct FatEntry *found) {
+// 開始クラスタがdir_clusterのディレクトリから"NAME.EXT"形式の名前textのエントリを探し，foundへ書き込む(大文字・小文字は区別しない)
+// 見つからなかった場合は，そのディレクトリを最後まで走査した結果として，新しいエントリを置く場所が控えられている
+int fat_find_in(unsigned int dir_cluster, char *text, struct FatEntry *found) {
     int status;  // 名前の変換・走査の結果
 
     // エントリ上の名前と比べられるよう，探す名前を8.3形式へ変換する
@@ -738,9 +738,9 @@ int fat_find(char *text, struct FatEntry *found) {
     if (status != FAT_OK) {
         return status;
     }
-    // 一致したエントリの書き込み先を渡してから，現在のディレクトリを走査する
+    // 一致したエントリの書き込み先を渡してから，指定されたディレクトリを走査する
     fat_find_result = found;
-    status = fat_walk(fat_match_entry);
+    status = fat_walk_dir(dir_cluster, fat_match_entry);
     // 最後まで走査して打ち切られなかったのは，一致するエントリが無かったとき
     if (status == FAT_OK) {
         return FAT_ERR_NOT_FOUND;
@@ -751,6 +751,12 @@ int fat_find(char *text, struct FatEntry *found) {
     }
     // それ以外は走査自体の失敗をそのまま返す
     return status;
+}
+
+// 現在のディレクトリから"NAME.EXT"形式の名前textのエントリを，fat_find_inと同じ決まりで探す
+int fat_find(char *text, struct FatEntry *found) {
+    // 現在のディレクトリの開始クラスタを指定して探す
+    return fat_find_in(fat_dir_clusters[fat_depth], text, found);
 }
 
 // entryのファイルを先頭から読み出せるようfileを設定する
