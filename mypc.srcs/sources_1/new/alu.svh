@@ -23,7 +23,7 @@ package alu_p;
         IO_TYPE   // 標準入出力系
     } type_enum;
     typedef enum logic[2:0] {    // CPUの実行フェーズ(フェッチや実行などを別のクロックに分ける)
-        CPU_FETCH_SELECT,   // 命令の取得の前段階．PCに応じて取得元(ROMまたはメインメモリのコード領域)を選び，読み出しを始める
+        CPU_FETCH_SELECT,   // 命令の取得の前段階．PCに応じて取得元(ROMまたはメインメモリの後半)を選び，読み出しを始める
         CPU_FETCH_ROM,      // ROMの読み出し結果が確定した命令を取り込む
         CPU_FETCH_RAM,      // メインメモリから，命令を1ワードずつ2回に分けて読み出して取り込む
         CPU_CHECK,          // 命令を実行可能かどうかチェックする
@@ -199,7 +199,7 @@ package alu_p;
     // 命令のデコード時点で分かる情報(命令種別・func・レジスタ番地)から，その命令が実行可能かを
     // 判定する．
     function util_p::bool_t is_instruction_executable(
-        logic             pc_valid,  // 命令を，命令を置ける番地(ROMの範囲内またはコード領域)から取得できたか
+        logic             pc_valid,  // 命令を，命令を置ける番地(ROMの範囲内またはメモリの後半)から取得できたか
         machine_p::type_t m_type,
         machine_p::func_t func,
         machine_p::addr_t rs1,

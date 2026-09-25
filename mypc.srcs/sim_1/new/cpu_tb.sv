@@ -10,7 +10,7 @@
 // - 正常終了: 命令列の末尾に置いた，自分自身へジャンプし続ける命令の実行に入ること(仕様上のプログラムの終わり方)
 // - 停止: CPUが実行できない命令や不正な値を検出して実行を止めること(仕様はhalt.md)
 // - 先読み: CPUが複数サイクルかかる命令を実行している間に，次の命令をROMから取得しておくこと
-// - コード領域: メインメモリの後半．PCのうちROMの命令数の上限に続く範囲が，ここに置いた命令に対応する(仕様はrom.md)
+// - メインメモリの後半: PCのうちROMの命令数の上限に続く範囲が，ここに置いた命令に対応する(仕様はrom.md)．命令列を置いた部分をコード領域と呼ぶ
 // - フォワーディング: 先読みした命令が，直前の命令がそのサイクルに書き込む値をレジスタを経由せずに受け取ること
 //////////////////////////////////////////////////////////////////////////////////
 
@@ -237,14 +237,14 @@ module cpu_tb;
 
     typedef machine_t machine_queue_t[$];  // 命令列
 
-    localparam int CODE_AREA_PC = rom_p::CODE_AREA_PC_BASE;  // コード領域の先頭の命令に対応するPC
+    localparam int CODE_AREA_PC = rom_p::CODE_AREA_PC_BASE;  // メモリの後半の先頭の命令に対応するPC
 
-    // コード領域の先頭からindex番目の命令を置くメインメモリの番地を返す
+    // メモリの後半の先頭からindex番目の命令を置くメインメモリの番地を返す
     function automatic int code_area_address(input int index);
         return ram_p::CODE_AREA_BASE + index * 8;
     endfunction
 
-    // 命令をコード領域のindex番目へWMで書き込む命令列を作る．下位ワード(イミディエイトデータ)を小さい番地へ，
+    // 命令をメモリの後半のindex番目へWMで書き込む命令列を作る．下位ワード(イミディエイトデータ)を小さい番地へ，
     // 上位ワード(命令語)をその4バイト後へ書く．書き込む値の受け渡しにr15を使う
     function automatic machine_queue_t store_code(input int index, input machine_t instruction);
         return '{movi(15, instruction[31:0]),  wm(4'hf, 6'h00, 15, im(code_area_address(index))),
@@ -259,7 +259,7 @@ module cpu_tb;
     register_t      regs[0:REGISTER_MAX_ADDR];        // 直前の実行を終えた時点のレジスタの値
     int             end_pc;                           // 正常終了を表す命令の番地
     machine_queue_t code_area;                        // 実行前にコード領域へ直接置く命令列
-    int             code_area_index = 0;              // code_areaを置き始める，コード領域の先頭からの命令の順番
+    int             code_area_index = 0;              // code_areaを置き始める，メモリの後半の先頭からの命令の順番
     machine_queue_t rom_tail;                         // 実行前にROMの末尾(最後の命令をROMの命令数の上限の直前の番地に揃える位置)へ置く命令列
 
     // CPUの現在のレジスタの値を，実行を終えた時点の値として写し取る
@@ -289,7 +289,7 @@ module cpu_tb;
         endcase
     endfunction
 
-    // 命令列をコード領域のindex番目から直接書き込む．各命令の下位のバイトほど小さい番地に置く
+    // 命令列をメモリの後半のindex番目から直接書き込む．各命令の下位のバイトほど小さい番地に置く
     function automatic void put_code_area(input int index, input machine_queue_t instructions);
         // 1命令ずつ，8バイトを下位のバイトから順に書き込む
         foreach (instructions[i])
@@ -297,7 +297,7 @@ module cpu_tb;
                 set_ram_byte(code_area_address(index + i) + b, instructions[i][b * 8 +: 8]);
     endfunction
 
-    // 命令列をROMの先頭へ，code_area・rom_tailの命令列をそれぞれコード領域・ROMの末尾へ書き込み，
+    // 命令列をROMの先頭へ，code_area・rom_tailの命令列をそれぞれメモリの後半・ROMの末尾へ書き込み，
     // リセットしてから，正常終了・停止・打ち切りのいずれかに至るまで実行する．
     // 実行の終わり方と，終えた時点のレジスタの値を残す．停止した場合のレジスタの値は，停止した命令が
     // 実行された時点のもの(初期値へ戻る前)になる．
@@ -317,7 +317,7 @@ module cpu_tb;
         // リセット中に，メインメモリを消す(残す指定がなければ)
         if (!keep_ram)
             clear_ram();
-        // リセット中に，コード領域へ置く命令列を書き込む(メモリを消した後に書くため，消す処理より後に置く)
+        // リセット中に，メモリの後半へ置く命令列を書き込む(メモリを消した後に書くため，消す処理より後に置く)
         put_code_area(code_area_index, code_area);
         // リセット中に，命令列をROMへ書き込む
         rom.load(instructions);
@@ -380,7 +380,7 @@ module cpu_tb;
     endfunction
 
     // 前のテストケースを合否の件数へ数え，新しいテストケースを始める．
-    // 標準入出力の相手は入力なし・待ちなしの状態に，コード領域・ROMの末尾へ置く命令列は空に戻す
+    // 標準入出力の相手は入力なし・待ちなしの状態に，メモリの後半・ROMの末尾へ置く命令列は空に戻す
     function automatic void begin_test(input string name);
         // 前のテストケースを数える
         finish_test();
@@ -392,7 +392,7 @@ module cpu_tb;
         stdin_queue.delete();
         stdin_delay  = 0;
         stdout_delay = 0;
-        // コード領域・ROMの末尾へ置く命令列を空にする
+        // メモリの後半・ROMの末尾へ置く命令列を空にする
         code_area.delete();
         code_area_index = 0;
         rom_tail.delete();
@@ -851,25 +851,25 @@ module cpu_tb;
         expect_mem32(32'h7ffc, 32'd3);
         expect_mem32(32'h8000 - 13 * 4, 32'd8);
 
-        // 何も積んでいないスタックでRETする(戻り先を読む番地がコード領域の先頭になる)
+        // 何も積んでいないスタックでRETする(戻り先を読む番地がメモリの後半の先頭になる)
         `BEGIN_TEST("空のスタックでのRETは停止する");
         run('{nop(), ret()});
         // RETの番地で停止し，SPは元のまま
         expect_halt(1);
         expect_reg(SP_ADDR, 32'h8000);
 
-        // SPを0x8004にしてから関数を呼ぶ(戻り先の積み先がコード領域の先頭になる)
-        `BEGIN_TEST("スタックの積み先がコード領域に入るCALLは書き込まずに停止する");
+        // SPを0x8004にしてから関数を呼ぶ(戻り先の積み先がメモリの後半の先頭になる)
+        `BEGIN_TEST("スタックの積み先がメモリの後半に入るCALLは書き込まずに停止する");
         run('{movi(SP_ADDR, 32'h8004), call(6'h00, im(0))});
-        // CALLの番地で停止し，SPもコード領域も書き換わらない
+        // CALLの番地で停止し，SPもメモリの後半も書き換わらない
         expect_halt(1);
         expect_reg(SP_ADDR, 32'h8004);
         expect_mem32(32'h8000, 32'd0);
 
-        // SPを0x8000のまま，SPからの相対位置でコード領域の先頭を読み書きする
-        `BEGIN_TEST("SPからの相対位置でコード領域を読み書きするRMR/WMRは停止しない");
+        // SPを0x8000のまま，SPからの相対位置でメモリの後半の先頭を読み書きする
+        `BEGIN_TEST("SPからの相対位置でメモリの後半を読み書きするRMR/WMRは停止しない");
         run('{movi(1, 32'h1234_5678), wmr(4'hf, SP_ADDR, 1, im(0)), rmr(4'hf, SP_ADDR, 2, im(0))});
-        // 正常終了し，コード領域の先頭が読み書きされる
+        // 正常終了し，メモリの後半の先頭が読み書きされる
         expect_end();
         expect_mem32(32'h8000, 32'h1234_5678);
         expect_reg(2, 32'h1234_5678);
@@ -1305,12 +1305,12 @@ module cpu_tb;
         expect_mem32(32'h100, 32'd2);
     endtask
 
-    // コード領域(メインメモリ)に置いた命令の実行
+    // メインメモリの後半に置いた命令の実行
     task automatic test_code_area();
         machine_queue_t body;  // ROMへ書き込む命令列
 
-        // コード領域の0番目にr1への代入を，1番目にRETを，ROM上の命令がWMで書き込んでからCALLで呼び，戻った後のSPを読む
-        `BEGIN_TEST("WMでコード領域へ書いた命令をCALLで実行し，RETで戻る");
+        // メモリの後半の0番目にr1への代入を，1番目にRETを，ROM上の命令がWMで書き込んでからCALLで呼び，戻った後のSPを読む
+        `BEGIN_TEST("WMでメモリの後半へ書いた命令をCALLで実行し，RETで戻る");
         body = {store_code(0, movi(1, 32'h1234)), store_code(1, ret())};
         body.push_back(call(6'h00, im(CODE_AREA_PC)));
         body.push_back(movr(5, SP_ADDR));
@@ -1379,26 +1379,26 @@ module cpu_tb;
         expect_mem32(32'h7ff8, CODE_AREA_PC + 1);
 
         // ROMの最後の番地に1サイクルで終わる命令を置き，そこへジャンプする
-        `BEGIN_TEST("ROMの最後の番地の命令の次はコード領域の先頭へ進む");
+        `BEGIN_TEST("ROMの最後の番地の命令の次はメモリの後半の先頭へ進む");
         rom_tail = '{movi(1, 32'd1)};
         code_area = '{movi(2, 32'd2), jmp(6'h00, im(32'd1))};
         run('{jmp(6'h00, im(CODE_AREA_PC - 1))});
-        // ROMの最後の命令とコード領域の先頭の命令が順に実行される
+        // ROMの最後の命令とメモリの後半の先頭の命令が順に実行される
         expect_end();
         expect_reg(1, 32'd1);
         expect_reg(2, 32'd2);
 
         // ROMの最後の番地に複数サイクルかかるRMを置き，そこへジャンプする．RMの実行中に次の番地を先読みしない経路を通る
-        `BEGIN_TEST("複数サイクルかかるROMの最後の命令の次もコード領域の先頭へ進む");
+        `BEGIN_TEST("複数サイクルかかるROMの最後の命令の次もメモリの後半の先頭へ進む");
         rom_tail = '{rm(4'hf, 6'h00, 1, im(32'h100))};
         code_area = '{add(1, 1, 2), jmp(6'h00, im(32'd3))};
         run('{movi(3, 32'h55), wm(4'hf, 6'h00, 3, im(32'h100)), jmp(6'h00, im(CODE_AREA_PC - 1))});
-        // RMで読んだ値をコード領域の先頭の命令が使える
+        // RMで読んだ値をメモリの後半の先頭の命令が使える
         expect_end();
         expect_reg(2, 32'haa);
 
-        // コード領域の最後の位置に1サイクルで終わる命令を置き，そこへジャンプする
-        `BEGIN_TEST("コード領域の最後の命令の次へ進むと停止する");
+        // メモリの後半の最後の位置に1サイクルで終わる命令を置き，そこへジャンプする
+        `BEGIN_TEST("メモリの後半の最後の命令の次へ進むと停止する");
         code_area_index = rom_p::CODE_AREA_PC_NUM - 1;
         code_area = '{movi(1, 32'd1)};
         run('{jmp(6'h00, im(CODE_AREA_PC + rom_p::CODE_AREA_PC_NUM - 1))});
@@ -1406,8 +1406,8 @@ module cpu_tb;
         expect_halt(CODE_AREA_PC + rom_p::CODE_AREA_PC_NUM);
         expect_reg(1, 32'd1);
 
-        // コード領域の最後の位置に複数サイクルかかるWMを置き，そこへジャンプする
-        `BEGIN_TEST("複数サイクルかかるコード領域の最後の命令の次へ進むと停止する");
+        // メモリの後半の最後の位置に複数サイクルかかるWMを置き，そこへジャンプする
+        `BEGIN_TEST("複数サイクルかかるメモリの後半の最後の命令の次へ進むと停止する");
         code_area_index = rom_p::CODE_AREA_PC_NUM - 1;
         code_area = '{wm(4'hf, 6'h00, 1, im(32'h100))};
         run('{movi(1, 32'd7), jmp(6'h00, im(CODE_AREA_PC + rom_p::CODE_AREA_PC_NUM - 1))});
@@ -1415,7 +1415,7 @@ module cpu_tb;
         expect_halt(CODE_AREA_PC + rom_p::CODE_AREA_PC_NUM);
         expect_mem32(32'h100, 32'd7);
 
-        // コード領域の1番目にN系で未定義のfuncを持つ命令を置き，コード領域の先頭へジャンプする
+        // メモリの後半の1番目にN系で未定義のfuncを持つ命令を置き，メモリの後半の先頭へジャンプする
         `BEGIN_TEST("コード領域の実行できない命令はそのPCで停止する");
         code_area = '{nop(), raw(3'h0, 6'h01, 0, 0, 0, NO_IMM)};
         run('{jmp(6'h00, im(CODE_AREA_PC))});
