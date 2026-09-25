@@ -102,7 +102,7 @@ int extract_only_arg(int pos, char *arg) {
 }
 
 // echoコマンド: コマンド名以降の引数部分をそのまま出力する
-// 以降のコマンドの処理は，いずれも終了状態(EXIT_SUCCESSかEXIT_FAILURE)を返す
+// 以降の組み込みコマンドの処理は，いずれも終了状態を返す(保持している値をそのまま返すstatusを除き，EXIT_SUCCESSかEXIT_FAILURE)
 int handle_echo(int pos) {
     char args[INPUT_SIZE];  // コマンド名を除いた引数部分
     // コマンド名より後ろを丸ごと取り出し，改行を付けて出力する
