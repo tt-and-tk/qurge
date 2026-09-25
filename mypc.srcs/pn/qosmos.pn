@@ -471,7 +471,8 @@ void run_executable(void) {
     struct FatEntry dir;    // 既定のディレクトリのエントリ
     struct FatEntry entry;  // 見つかった実行ファイルのエントリ
     int status;             // FAT32の各関数の結果
-    char line[INPUT_SIZE];  // argvの各文字列の置き場とする入力行の写し(実行中だけ要るため，グローバル変数ではなくスタックに置く)
+    // argvの配列と各文字列は実行中だけ要るため，グローバル変数ではなくスタックに置く
+    char line[INPUT_SIZE];  // argvの各文字列の置き場とする入力行の写し
     char *argv[ARGV_SIZE];  // 実行ファイルへ渡す，コマンド名と各引数の先頭
     int argc;               // argvに記録したコマンド名と引数の数
 
