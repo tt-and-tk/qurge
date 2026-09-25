@@ -40,6 +40,31 @@ void extract_text_arg(char *buf, int pos, char *arg, int arg_size) {
     arg[i] = '\0';
 }
 
+// bufを半角空白で区切り，各引数の先頭の位置をargvへ順に記録して，記録した数を返す
+// 区切りの空白をヌル文字に置き換えてその場で各引数を終端するため，bufの内容は書き換わる．記録した引数の直後の要素にはnullptrを置く
+// argvへはargv_size-1個まで記録して打ち切る．入力行の要素数の半分+1で確保すれば打ち切りは起きない
+int split_args(char *buf, char **argv, int argv_size) {
+    int count = 0;                  // 記録した引数の数
+    int pos = skip_spaces(buf, 0);  // 次の引数の先頭の位置
+    // 行末に達するか記録できる数に達するまで，引数を1つずつ記録する
+    while (buf[pos] != '\0' && count < argv_size - 1) {
+        argv[count] = &buf[pos];
+        count = count + 1;
+        // 引数の直後(次の空白かヌル終端)まで進める
+        while (buf[pos] != ' ' && buf[pos] != '\0') {
+            pos = pos + 1;
+        }
+        // 空白で終わっていれば，ヌル文字に置き換えて引数を終端し，続く空白を読み飛ばす
+        if (buf[pos] == ' ') {
+            buf[pos] = '\0';
+            pos = skip_spaces(buf, pos + 1);
+        }
+    }
+    // 引数の並びの終わりを示す
+    argv[count] = nullptr;
+    return count;
+}
+
 // bufのpos文字目以降に引数が残っていれば1，残っていなければ0を返す
 int has_extra_args(char *buf, int pos) {
     // 先頭の空白を読み飛ばす

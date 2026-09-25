@@ -10,6 +10,7 @@ const int CODE_ADDRESS = 0x8000;    // メモリの後半の先頭番地(実行�
 const int CODE_SIZE = 0x8000;       // メモリの後半のバイト数(読み込める実行ファイルの大きさの上限)
 const int CODE_PC = 0x4000;         // メモリの後半の先頭の命令を指すPC(実行ファイルの入口)
 const int INSTRUCTION_SIZE = 8;     // 1命令のバイト数(実行ファイルの大きさはこの倍数になる)
+const int ARGV_SIZE = INPUT_SIZE / 2 + 1;  // 実行ファイルへ渡すargvの要素数(1行から取り出せる引数の最大数と，末尾のnullptrの分)
 
 char input[INPUT_SIZE];  // 1行分の入力バッファ
 char cmd[INPUT_SIZE];    // 入力の先頭トークン(コマンド名)
@@ -464,11 +465,15 @@ int load_executable(struct FatEntry *entry) {
 }
 
 // 既定のディレクトリ/binから，コマンド名と同じ名前の実行ファイルを探し，メモリの後半へ読み込んで呼び出す(コマンド名は空でないこと)
+// 実行ファイルには，コマンド名とそれに続く引数を入力行から取り出し，argc・argvとして渡す
 // 実行ファイルが見つからなければ，組み込みコマンドとも一致しなかったコマンドとして未対応のエラーにする
-void run_executable(int pos) {
+void run_executable(void) {
     struct FatEntry dir;    // 既定のディレクトリのエントリ
     struct FatEntry entry;  // 見つかった実行ファイルのエントリ
     int status;             // FAT32の各関数の結果
+    char line[INPUT_SIZE];  // argvの各文字列の置き場とする入力行の写し(実行中だけ要るため，グローバル変数ではなくスタックに置く)
+    char *argv[ARGV_SIZE];  // 実行ファイルへ渡す，コマンド名と各引数の先頭
+    int argc;               // argvに記録したコマンド名と引数の数
 
     // ドットを含む名前は探さない(実行ファイルは拡張子の無いファイルに限り，データファイルを打ち間違いで命令として実行しないため)
     for (int i = 0; cmd[i] != '\0'; i++) {
@@ -506,19 +511,18 @@ void run_executable(int pos) {
         print_error("invalid executable\n");
         return;
     }
-    // 引数を渡す仕組みが無いため，引数が指定されていれば実行しない(実行できるものを見つけてから検査し，打ち間違いの名前に引数の誤りを出さない)
-    if (has_extra_args(input, pos)) {
-        print_error("too many arguments\n");
-        return;
-    }
     // メモリの後半へ読み込み，失敗すればその理由を出力する
     status = load_executable(&entry);
     if (status != FAT_OK) {
         print_fat_error(status);
         return;
     }
-    // 入口の命令を呼び出す．実行ファイルがRETで戻れば，そのままプロンプトへ戻る
-    ((void (*)(void))CODE_PC)();
+    // 入力行をスタック上へ写してから空白で区切り，コマンド名と各引数をargvへ並べる
+    strcopy(line, input);
+    argc = split_args(line, argv, ARGV_SIZE);
+    // 入口の命令を，通常の関数と同じ呼び出し規約でargc・argvを渡して呼び出す．実行ファイルがRETで戻れば，そのままプロンプトへ戻る
+    // 戻り値はRAXで受け取れるが，シェルは使わない
+    ((int (*)(int, char **))CODE_PC)(argc, argv);
 }
 
 // グローバル配列cmdの内容に応じた処理を呼び出す(streqは配列変数のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
@@ -552,7 +556,7 @@ void dispatch(int pos) {
     } else if (streq(cmd, "reboot")) {
         handle_reboot(pos);
     } else {
-        run_executable(pos);
+        run_executable();
     }
 }
 
