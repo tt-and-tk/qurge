@@ -471,7 +471,6 @@ void run_executable(void) {
     struct FatEntry dir;    // 既定のディレクトリのエントリ
     struct FatEntry entry;  // 見つかった実行ファイルのエントリ
     int status;             // FAT32の各関数の結果
-    // argvの配列と各文字列は実行中だけ要るため，グローバル変数ではなくスタックに置く
     char line[INPUT_SIZE];  // argvの各文字列の置き場とする入力行の写し
     char *argv[ARGV_SIZE];  // 実行ファイルへ渡す，コマンド名と各引数の先頭
     int argc;               // argvに記録したコマンド名と引数の数
@@ -518,7 +517,7 @@ void run_executable(void) {
         print_fat_error(status);
         return;
     }
-    // 入力行をスタック上へ写してから空白で区切り，コマンド名と各引数をargvへ並べる
+    // 入力行を写してから空白で区切り，コマンド名と各引数をargvへ並べる
     strcopy(line, input);
     argc = split_args(line, argv, ARGV_SIZE);
     // 入口の命令を，通常の関数と同じ呼び出し規約でargc・argvを渡して呼び出す．実行ファイルがRETで戻れば，そのままプロンプトへ戻る
