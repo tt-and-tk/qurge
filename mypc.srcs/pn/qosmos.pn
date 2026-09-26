@@ -11,9 +11,13 @@ const int CODE_SIZE = 0x8000;       // メモリの後半のバイト数(読み�
 const int CODE_PC = 0x4000;         // メモリの後半の先頭の命令を指すPC(実行ファイルの入口)
 const int INSTRUCTION_SIZE = 8;     // 1命令のバイト数(実行ファイルの大きさはこの倍数になる)
 const int ARGV_SIZE = INPUT_SIZE / 2 + 1;  // 実行ファイルへ渡すargvの要素数(1行から取り出せる引数の最大数と，末尾のnullptrの分)
+const int DECIMAL_TEXT_SIZE = 12;   // 10進数を出力する一時バッファの要素数(intで最も長い"-2147483648"とヌル終端の分)
+const int EXIT_SUCCESS = 0;         // 組み込みコマンドが成功した場合の終了状態
+const int EXIT_FAILURE = 1;         // 組み込みコマンドがエラーになった場合と，実行ファイルを実行できなかった場合の終了状態
 
 char input[INPUT_SIZE];  // 1行分の入力バッファ
 char cmd[INPUT_SIZE];    // 入力の先頭トークン(コマンド名)
+int exit_status = 0;     // 直前のコマンドの終了状態(起動直後はまだコマンドを実行していないため成功と同じ0)
 
 // エラーメッセージの前置き"<コマンド名>: "を出力する(どのコマンドが出したエラーかが分かるようにするため)
 void print_error_head(void) {
@@ -35,6 +39,40 @@ void print_error(char *msg) {
     // 前置きに続けてメッセージを出力する
     print_error_head();
     print(msg_buf);
+}
+
+// valueを符号付きの10進数で出力する(改行は付けない)
+void print_decimal(int value) {
+    char text[DECIMAL_TEXT_SIZE];             // 出力する文字列
+    char reversed[DECIMAL_TEXT_SIZE];         // 数字を下の桁から順に並べたもの
+    unsigned int rest = (unsigned int)value;  // まだ数字にしていない上位の桁の値
+    int count = 0;                            // reversedに並べた桁数
+    int length = 0;                           // textに書いた文字数
+
+    // 負の数は符号を書き，符号なしのまま反転して絶対値にする(intの最小値を符号付きで反転すると桁あふれするため)
+    if (value < 0) {
+        text[length] = '-';
+        length++;
+        rest = 0 - rest;
+    }
+    // 下の桁から1桁ずつ数字にする(値が0でも1桁は出力するため，判定は1桁作った後に行う)
+    while (1) {
+        reversed[count] = '0' + rest % 10;
+        count++;
+        rest = rest / 10;
+        if (rest == 0) {
+            break;
+        }
+    }
+    // 上の桁から順になるよう並べ直す
+    while (count > 0) {
+        count--;
+        text[length] = reversed[count];
+        length++;
+    }
+    // 終端して出力する
+    text[length] = '\0';
+    print(text);
 }
 
 // FAT32の各関数が返した失敗を，実行中のコマンドのエラーとして出力する
@@ -64,12 +102,14 @@ int extract_only_arg(int pos, char *arg) {
 }
 
 // echoコマンド: コマンド名以降の引数部分をそのまま出力する
-void handle_echo(int pos) {
+// 以降の組み込みコマンドの処理は，いずれも終了状態を返す(保持している値をそのまま返すstatusを除き，EXIT_SUCCESSかEXIT_FAILURE)
+int handle_echo(int pos) {
     char args[INPUT_SIZE];  // コマンド名を除いた引数部分
     // コマンド名より後ろを丸ごと取り出し，改行を付けて出力する
     extract_text_arg(input, pos, args, INPUT_SIZE);
     print(args);
     print("\n");
+    return EXIT_SUCCESS;
 }
 
 // ディレクトリの走査で，エントリの名前を1行出力する(ディレクトリは末尾に'/'を付けて区別する)
@@ -90,23 +130,25 @@ int print_entry(struct FatEntry *entry) {
 }
 
 // lsコマンド: 現在のディレクトリにあるファイル・ディレクトリの名前を順に出力する
-void handle_ls(int pos) {
+int handle_ls(int pos) {
     int status;  // 走査の結果
 
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
-        return;
+        return EXIT_FAILURE;
     }
     // 現在のディレクトリを走査して各エントリの名前を出力し，走査に失敗すればその理由を出力する
     status = fat_walk(print_entry);
     if (status != FAT_OK) {
         print_fat_error(status);
+        return EXIT_FAILURE;
     }
+    return EXIT_SUCCESS;
 }
 
 // catコマンド: 引数のファイル名に対応するファイルの内容を出力する
-void handle_cat(int pos) {
+int handle_cat(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(読み出すファイル名)
     struct FatEntry entry;  // 見つかったファイルのエントリ
     struct FatFile file;    // 読み出し中のファイルの位置
@@ -116,7 +158,7 @@ void handle_cat(int pos) {
 
     // コマンド名(cat)の直後の引数をファイル名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
     if (extract_only_arg(pos, name) == 0) {
-        return;
+        return EXIT_FAILURE;
     }
 
     // ファイル名から対象のエントリを探して開く
@@ -126,7 +168,7 @@ void handle_cat(int pos) {
     }
     if (status != FAT_OK) {
         print_fat_error(status);
-        return;
+        return EXIT_FAILURE;
     }
 
     // 1セクタずつ読み込んで出力する
@@ -143,7 +185,7 @@ void handle_cat(int pos) {
                 print("\n");
             }
             print_fat_error(status);
-            return;
+            return EXIT_FAILURE;
         }
         // 末尾に改行を補うかどうか判断できるよう，内容の最後の文字を控える
         last = fat_sector[length - 1];
@@ -157,27 +199,30 @@ void handle_cat(int pos) {
     if (last != '\n') {
         print("\n");
     }
+    return EXIT_SUCCESS;
 }
 
 // touchコマンド: 引数のファイル名で，内容が空のファイルを作成する
-void handle_touch(int pos) {
+int handle_touch(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(作成するファイル名)
     struct FatEntry entry;  // 作成したファイルのエントリ
     int status;             // 作成の結果
 
     // コマンド名(touch)の直後の引数をファイル名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
     if (extract_only_arg(pos, name) == 0) {
-        return;
+        return EXIT_FAILURE;
     }
     // ファイルを作成し，失敗すればその理由を出力する(同名のファイルが既にある場合も失敗になる)
     status = fat_create(name, &entry);
     if (status != FAT_OK) {
         print_fat_error(status);
+        return EXIT_FAILURE;
     }
+    return EXIT_SUCCESS;
 }
 
 // writeコマンド: 引数の先頭をファイル名，残りを内容として，ファイルの内容を丸ごと置き換える(ファイルが無ければ作成する)
-void handle_write(int pos) {
+int handle_write(int pos) {
     char name[INPUT_SIZE];     // 先頭の引数(書き込むファイル名)
     char content[INPUT_SIZE];  // ファイル名を除いた残り(書き込む内容)
     struct FatEntry entry;     // 書き込むファイルのエントリ
@@ -189,7 +234,7 @@ void handle_write(int pos) {
     // ファイル名が指定されていなければ何もしない
     if (name[0] == '\0') {
         print_error("missing argument\n");
-        return;
+        return EXIT_FAILURE;
     }
     // ファイル名以降の引数部分を丸ごと書き込む内容として取り出し，その長さを数える
     extract_text_arg(input, pos, content, INPUT_SIZE);
@@ -211,18 +256,20 @@ void handle_write(int pos) {
     // どこかで失敗していれば，その理由を出力する
     if (status != FAT_OK) {
         print_fat_error(status);
+        return EXIT_FAILURE;
     }
+    return EXIT_SUCCESS;
 }
 
 // rmコマンド: 引数のファイル名に対応するファイルを削除する
-void handle_rm(int pos) {
+int handle_rm(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(削除するファイル名)
     struct FatEntry entry;  // 削除するファイルのエントリ
     int status;             // 検索・削除の結果
 
     // コマンド名(rm)の直後の引数をファイル名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
     if (extract_only_arg(pos, name) == 0) {
-        return;
+        return EXIT_FAILURE;
     }
     // ファイル名から対象のエントリを探して削除し，失敗すればその理由を出力する
     status = fat_find(name, &entry);
@@ -231,11 +278,13 @@ void handle_rm(int pos) {
     }
     if (status != FAT_OK) {
         print_fat_error(status);
+        return EXIT_FAILURE;
     }
+    return EXIT_SUCCESS;
 }
 
 // mvコマンド: 引数の先頭を旧ファイル名，次を新ファイル名として名前を変更する
-void handle_mv(int pos) {
+int handle_mv(int pos) {
     char old_name[INPUT_SIZE];  // 先頭の引数(旧ファイル名)
     char new_name[INPUT_SIZE];  // 次の引数(新ファイル名)
     struct FatEntry entry;      // 名前を変更するエントリ
@@ -247,12 +296,12 @@ void handle_mv(int pos) {
     // 新ファイル名が無ければ引数が足りないため何もしない(旧ファイル名だけを指定した場合と，引数を1つも指定しない場合の両方が当てはまる)
     if (new_name[0] == '\0') {
         print_error("missing argument\n");
-        return;
+        return EXIT_FAILURE;
     }
     // 新ファイル名の後に余分な引数があれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
-        return;
+        return EXIT_FAILURE;
     }
     // 旧ファイル名から対象のエントリを探して名前を変更し，失敗すればその理由を出力する
     status = fat_find(old_name, &entry);
@@ -261,34 +310,38 @@ void handle_mv(int pos) {
     }
     if (status != FAT_OK) {
         print_fat_error(status);
+        return EXIT_FAILURE;
     }
+    return EXIT_SUCCESS;
 }
 
 // mkdirコマンド: 引数の名前で，空のディレクトリを作成する
-void handle_mkdir(int pos) {
+int handle_mkdir(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(作成するディレクトリ名)
     int status;             // 作成の結果
 
     // コマンド名(mkdir)の直後の引数をディレクトリ名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
     if (extract_only_arg(pos, name) == 0) {
-        return;
+        return EXIT_FAILURE;
     }
     // ディレクトリを作成し，失敗すればその理由を出力する(同名のファイル・ディレクトリが既にある場合も失敗になる)
     status = fat_mkdir(name);
     if (status != FAT_OK) {
         print_fat_error(status);
+        return EXIT_FAILURE;
     }
+    return EXIT_SUCCESS;
 }
 
 // rmdirコマンド: 引数の名前に対応する空のディレクトリを削除する
-void handle_rmdir(int pos) {
+int handle_rmdir(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(削除するディレクトリ名)
     struct FatEntry entry;  // 削除するディレクトリのエントリ
     int status;             // 検索・削除の結果
 
     // コマンド名(rmdir)の直後の引数をディレクトリ名として取り出す．引数が無いか余分な引数があれば，取り出す処理がエラーを出力するため何もせず終える
     if (extract_only_arg(pos, name) == 0) {
-        return;
+        return EXIT_FAILURE;
     }
     // ディレクトリ名から対象のエントリを探して削除し，失敗すればその理由を出力する(中身が残っている場合も失敗になる)
     status = fat_find(name, &entry);
@@ -297,11 +350,13 @@ void handle_rmdir(int pos) {
     }
     if (status != FAT_OK) {
         print_fat_error(status);
+        return EXIT_FAILURE;
     }
+    return EXIT_SUCCESS;
 }
 
 // cdコマンド: 引数の名前のディレクトリへ現在のディレクトリを移す．引数が無ければルートディレクトリへ移す
-void handle_cd(int pos) {
+int handle_cd(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(移動先のディレクトリ名)
     int status;             // 移動の結果
 
@@ -310,7 +365,7 @@ void handle_cd(int pos) {
     // 移動先の後に余分な引数があれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
-        return;
+        return EXIT_FAILURE;
     }
     // 引数が無ければルートディレクトリへ，あればそのディレクトリへ移り，失敗すればその理由を出力する
     if (name[0] == '\0') {
@@ -320,27 +375,30 @@ void handle_cd(int pos) {
     }
     if (status != FAT_OK) {
         print_fat_error(status);
+        return EXIT_FAILURE;
     }
+    return EXIT_SUCCESS;
 }
 
 // pwdコマンド: 現在のディレクトリの絶対パスを出力する
-void handle_pwd(int pos) {
+int handle_pwd(int pos) {
     char path[FAT_PATH_SIZE];  // 現在のディレクトリの絶対パス
     int status;                // パスの取得の結果
 
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
-        return;
+        return EXIT_FAILURE;
     }
     // パスを取り出して1行で出力し，失敗すればその理由を出力する
     status = fat_getcwd(path);
     if (status != FAT_OK) {
         print_fat_error(status);
-        return;
+        return EXIT_FAILURE;
     }
     print(path);
     print("\n");
+    return EXIT_SUCCESS;
 }
 
 // SDカードを初期化し，カード上のFAT32ファイルシステムをマウントする．各段階の成否を[ OK ]・[FAIL]の行で出力する
@@ -379,8 +437,8 @@ void print_banner(void) {
 }
 
 // OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，OS名を出力する
-// 呼ぶたびにハードウェアの初期化からやり直すため，再起動にもそのまま使える
-void boot(void) {
+// 呼ぶたびにハードウェアの初期化からやり直すため，再起動にもそのまま使える．マウントまで成功すればEXIT_SUCCESS，失敗すればEXIT_FAILUREを返す
+int boot(void) {
     int mounted;  // ファイルシステムをマウントできたか(0:失敗，1:成功)
 
     // ハードウェアを初期化し，ファイルシステムをマウントする
@@ -390,30 +448,33 @@ void boot(void) {
     // 失敗してもrebootでやり直せるよう，シェルはそのまま起動し，やり直し方を伝える
     if (mounted == 0) {
         print("Storage is not available. Insert a card and run reboot.\n");
+        return EXIT_FAILURE;
     }
+    return EXIT_SUCCESS;
 }
 
 // rebootコマンド: OSを再起動する(電源投入時と同じ起動処理をやり直す)
-void handle_reboot(int pos) {
+int handle_reboot(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
-        return;
+        return EXIT_FAILURE;
     }
     // 起動処理をやり直す(失敗も各段階の行で伝わるため，コマンド名を前置したエラーは出さない)
-    boot();
+    return boot();
 }
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
-void handle_help(int pos) {
+int handle_help(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
-        return;
+        return EXIT_FAILURE;
     }
     // シェルが受け付けるコマンド名を1行ずつ出力する
     print("echo\n");
     print("help\n");
+    print("status\n");
     print("ls\n");
     print("cat\n");
     print("touch\n");
@@ -425,6 +486,21 @@ void handle_help(int pos) {
     print("cd\n");
     print("pwd\n");
     print("reboot\n");
+    return EXIT_SUCCESS;
+}
+
+// statusコマンド: 直前のコマンドの終了状態を10進数で出力する
+// 何度実行しても同じ値を確かめられるよう，引数の誤りも含め，保持している終了状態をそのまま返して値を変えない
+int handle_status(int pos) {
+    // 引数を取らないコマンドのため，引数が指定されていれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return exit_status;
+    }
+    // 終了状態を1行で出力する
+    print_decimal(exit_status);
+    print("\n");
+    return exit_status;
 }
 
 // 未対応コマンドのエラーメッセージを表示する
@@ -467,7 +543,8 @@ int load_executable(struct FatEntry *entry) {
 // 既定のディレクトリ/binから，コマンド名と同じ名前の実行ファイルを探し，メモリの後半へ読み込んで呼び出す(コマンド名は空でないこと)
 // 実行ファイルには，コマンド名とそれに続く引数を入力行から取り出し，argc・argvとして渡す
 // 実行ファイルが見つからなければ，組み込みコマンドとも一致しなかったコマンドとして未対応のエラーにする
-void run_executable(void) {
+// 戻り値: 実行ファイルの戻り値 / EXIT_FAILURE(実行ファイルを実行できなかった)
+int run_executable(void) {
     struct FatEntry dir;    // 既定のディレクトリのエントリ
     struct FatEntry entry;  // 見つかった実行ファイルのエントリ
     int status;             // FAT32の各関数の結果
@@ -479,7 +556,7 @@ void run_executable(void) {
     for (int i = 0; cmd[i] != '\0'; i++) {
         if (cmd[i] == '.') {
             handle_unknown();
-            return;
+            return EXIT_FAILURE;
         }
     }
     // 現在のディレクトリによらず，ルートディレクトリ直下の既定のディレクトリから探す
@@ -494,76 +571,76 @@ void run_executable(void) {
     // 既定のディレクトリか実行ファイルが無いか，名前がファイル名の規則に合わなければ，未対応のコマンドとして扱う
     if (status == FAT_ERR_NOT_FOUND || status == FAT_ERR_BAD_NAME) {
         handle_unknown();
-        return;
+        return EXIT_FAILURE;
     }
     // それ以外の失敗(マウントしていない場合を含む)は，その理由を出力する
     if (status != FAT_OK) {
         print_fat_error(status);
-        return;
+        return EXIT_FAILURE;
     }
     // ディレクトリは実行できない
     if ((entry.attr & ATTR_DIRECTORY) != 0) {
         print_fat_error(FAT_ERR_IS_DIR);
-        return;
+        return EXIT_FAILURE;
     }
     // 命令を1つ以上含み，メモリの後半に収まり，命令のバイト数で割り切れる大きさでなければ実行しない(命令のバイト数は2のべき乗のため，除算を避けて下位ビットで判定する)
     if (entry.size == 0 || entry.size > CODE_SIZE || (entry.size & (INSTRUCTION_SIZE - 1)) != 0) {
         print_error("invalid executable\n");
-        return;
+        return EXIT_FAILURE;
     }
     // メモリの後半へ読み込み，失敗すればその理由を出力する
     status = load_executable(&entry);
     if (status != FAT_OK) {
         print_fat_error(status);
-        return;
+        return EXIT_FAILURE;
     }
     // 入力行を写してから空白で区切り，コマンド名と各引数をargvへ並べる
     strcopy(line, input);
     argc = split_args(line, argv, ARGV_SIZE);
-    // 入口の命令を，通常の関数と同じ呼び出し規約でargc・argvを渡して呼び出す．実行ファイルがRETで戻れば，そのままプロンプトへ戻る
-    // 戻り値はRAXで受け取れるが，シェルは使わない
-    ((int (*)(int, char **))CODE_PC)(argc, argv);
+    // 入口の命令を，通常の関数と同じ呼び出し規約でargc・argvを渡して呼び出す．実行ファイルがRETで戻れば，RAXで返された値をそのまま返す
+    return ((int (*)(int, char **))CODE_PC)(argc, argv);
 }
 
-// グローバル配列cmdの内容に応じた処理を呼び出す(streqは配列変数のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
+// グローバル配列cmdの内容に応じた処理を呼び出し，その終了状態を返す(streqは配列変数のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
 // 引数の取り出し対象は1行分の入力を保持するinputで固定のため，コマンド側へは位置だけを渡す
-void dispatch(int pos) {
+int dispatch(int pos) {
     // コマンド名と一致する処理を呼び，どれとも一致しなければ既定のディレクトリの実行ファイルを探す
     if (streq(cmd, "echo")) {
-        handle_echo(pos);
+        return handle_echo(pos);
     } else if (streq(cmd, "help")) {
-        handle_help(pos);
+        return handle_help(pos);
+    } else if (streq(cmd, "status")) {
+        return handle_status(pos);
     } else if (streq(cmd, "ls")) {
-        handle_ls(pos);
+        return handle_ls(pos);
     } else if (streq(cmd, "cat")) {
-        handle_cat(pos);
+        return handle_cat(pos);
     } else if (streq(cmd, "touch")) {
-        handle_touch(pos);
+        return handle_touch(pos);
     } else if (streq(cmd, "write")) {
-        handle_write(pos);
+        return handle_write(pos);
     } else if (streq(cmd, "rm")) {
-        handle_rm(pos);
+        return handle_rm(pos);
     } else if (streq(cmd, "mv")) {
-        handle_mv(pos);
+        return handle_mv(pos);
     } else if (streq(cmd, "mkdir")) {
-        handle_mkdir(pos);
+        return handle_mkdir(pos);
     } else if (streq(cmd, "rmdir")) {
-        handle_rmdir(pos);
+        return handle_rmdir(pos);
     } else if (streq(cmd, "cd")) {
-        handle_cd(pos);
+        return handle_cd(pos);
     } else if (streq(cmd, "pwd")) {
-        handle_pwd(pos);
+        return handle_pwd(pos);
     } else if (streq(cmd, "reboot")) {
-        handle_reboot(pos);
-    } else {
-        run_executable();
+        return handle_reboot(pos);
     }
+    return run_executable();
 }
 
 void main(void) {
     int pos;  // コマンド名の直後の位置(引数の取り出し開始位置)
 
-    // OSを起動する
+    // OSを起動する(まだコマンドを実行していないため，起動の成否は終了状態に含めない)
     boot();
     // 1行受け取るごとに，先頭のトークンをコマンド名として取り出して処理を呼び出す
     while (1) {
@@ -572,7 +649,8 @@ void main(void) {
         pos = extract_arg(input, 0, cmd, INPUT_SIZE);
         // コマンド名が無い行(改行だけ・空白だけの行など)は何もせず次のプロンプトへ戻る
         if (cmd[0] != '\0') {
-            dispatch(pos);
+            // 処理の終了状態を，statusコマンドで確かめられるよう次のコマンドまで保持する(RAXは次のコマンドまでに書き換わるため)
+            exit_status = dispatch(pos);
         }
     }
 }
