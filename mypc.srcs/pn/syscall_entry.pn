@@ -1,0 +1,16 @@
+// システムコールの受付関数．実行ファイルから番号と引数を受け取り，番号に対応するOSの機能を実行する
+// シェルは実行ファイルを呼び出す直前に，この関数の番地をシステムコールの入口へ書き込む
+#pragma once
+#include "lib/syscall_number.pn"
+
+// 番号numberのシステムコールを引数a〜dで実行し，その結果を返す(戻り値: 0以上は成功，負の値はエラー)
+// 画面には何も出力しない(エラーを表示するかどうかは，呼び出した実行ファイルが決めるため)
+int syscall_entry(int number, int a, int b, int c, int d) {
+    // 番号に対応する機能を実行する
+    switch (number) {
+        case SYS_VERSION:
+            return SYSCALL_VERSION;
+    }
+    // どの番号とも一致しなければ，未定義の番号としてエラーを返す
+    return SYSCALL_ERR_UNKNOWN;
+}

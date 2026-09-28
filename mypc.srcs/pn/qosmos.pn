@@ -3,12 +3,13 @@
 #include "args.pn"
 #include "sd.pn"
 #include "fat.pn"
+#include "syscall_entry.pn"
 
 const int INPUT_SIZE = 64;          // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
 const int ERROR_MESSAGE_SIZE = 32;  // エラーメッセージを出力する一時バッファの要素数
 const int CODE_ADDRESS = 0x8000;    // メモリの後半の先頭番地(実行ファイルの読み込み先)
-const int CODE_SIZE = 0x8000;       // メモリの後半のバイト数(読み込める実行ファイルの大きさの上限)
-const int CODE_PC = 0x4000;         // メモリの後半の先頭の命令を指すPC(実行ファイルの入口)
+const int CODE_SIZE = SYSCALL_ENTRY_ADDRESS - CODE_ADDRESS;  // 読み込める実行ファイルの大きさの上限(メモリの後半のうち，末尾のシステムコールの入口より手前のバイト数)
+const int CODE_PC = 0x4000;         // メモリの後半の先頭の命令を指すPC(実行ファイルを呼び出す先)
 const int INSTRUCTION_SIZE = 8;     // 1命令のバイト数(実行ファイルの大きさはこの倍数になる)
 const int ARGV_SIZE = INPUT_SIZE / 2 + 1;  // 実行ファイルへ渡すargvの要素数(1行から取り出せる引数の最大数と，末尾のnullptrの分)
 const int DECIMAL_TEXT_SIZE = 12;   // 10進数を出力する一時バッファの要素数(intで最も長い"-2147483648"とヌル終端の分)
@@ -583,7 +584,7 @@ int run_executable(void) {
         print_fat_error(FAT_ERR_IS_DIR);
         return EXIT_FAILURE;
     }
-    // 命令を1つ以上含み，メモリの後半に収まり，命令のバイト数で割り切れる大きさでなければ実行しない(命令のバイト数は2のべき乗のため，除算を避けて下位ビットで判定する)
+    // 命令を1つ以上含み，メモリの後半のシステムコールの入口より手前に収まり，命令のバイト数で割り切れる大きさでなければ実行しない(命令のバイト数は2のべき乗のため，除算を避けて下位ビットで判定する)
     if (entry.size == 0 || entry.size > CODE_SIZE || (entry.size & (INSTRUCTION_SIZE - 1)) != 0) {
         print_error("invalid executable\n");
         return EXIT_FAILURE;
@@ -597,7 +598,10 @@ int run_executable(void) {
     // 入力行を写してから空白で区切り，コマンド名と各引数をargvへ並べる
     strcopy(line, input);
     argc = split_args(line, argv, ARGV_SIZE);
-    // 入口の命令を，通常の関数と同じ呼び出し規約でargc・argvを渡して呼び出す．実行ファイルがRETで戻れば，RAXで返された値をそのまま返す
+    // 実行ファイルがシステムコールを呼べるよう，受付関数の番地をシステムコールの入口へ書き込む
+    // (以前に実行した実行ファイルが入口を書き換えていても元に戻すため，起動時に1回だけではなく呼び出すたびに書く)
+    *(int *)SYSCALL_ENTRY_ADDRESS = (int)syscall_entry;
+    // 実行ファイルの先頭の命令を，通常の関数と同じ呼び出し規約でargc・argvを渡して呼び出す．実行ファイルがRETで戻れば，RAXで返された値をそのまま返す
     return ((int (*)(int, char **))CODE_PC)(argc, argv);
 }
 

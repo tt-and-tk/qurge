@@ -1,0 +1,9 @@
+// Qosmosのシステムコールの取り決め(入口の番地・各機能の番号・戻り値)．シェルの受付関数と，実行ファイル向けのライブラリの両方が取り込む
+// システムコールは，シェルが入口へ書き込んだ受付関数を，機能の番号と引数4つを渡して呼び出す．戻り値は0以上が成功，負の値がエラーを表す
+#pragma once
+
+const int SYSCALL_ENTRY_ADDRESS = 0xFFFC;  // 受付関数の番地(関数の先頭の命令を指すPC)が書き込まれるメモリの番地(メモリの後半の末尾のワード)
+const int SYSCALL_VERSION = 1;             // 使えるシステムコールの範囲を表す版番号(システムコールを追加するたびに1増やす)
+const int SYSCALL_ERR_UNKNOWN = -1;        // 未定義の番号を渡した場合の戻り値
+
+const int SYS_VERSION = 0;                 // 番号: 版番号SYSCALL_VERSIONを返す
