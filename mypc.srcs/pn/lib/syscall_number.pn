@@ -4,7 +4,7 @@
 #pragma once
 
 const int SYSCALL_ENTRY_ADDRESS = 0xFFFC;  // 入口の番地(メモリの後半の末尾のワード)
-const int SYSCALL_VERSION = 1;             // 使えるシステムコールの範囲を表す版番号(システムコールを追加したり，既存のシステムコールの引数・戻り値の意味を変えたりするたびに1増やす)
+const int SYSCALL_VERSION = 1;             // 使えるシステムコールの範囲を表す版番号(増やす条件は仕様書qosmos.mdの「システムコール」を参照)
 const int SYSCALL_ERR_UNKNOWN = -1;        // 未定義の番号を渡した場合の戻り値
 
 const int SYS_VERSION = 0;                 // 番号: 版番号SYSCALL_VERSIONを返す
