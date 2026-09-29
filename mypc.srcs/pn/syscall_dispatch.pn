@@ -8,6 +8,8 @@
 int syscall_dispatch(int number, int a, int b, int c, int d) {
     // 番号に対応する機能を実行する
     switch (number) {
+        // 版番号を返す．システムコールを呼び出す仕組みを動作確認するために用意した，最小のシステムコール
+        // (実行ファイルが，使えるシステムコールの範囲を確かめる手段も兼ねる)
         case SYS_VERSION:
             return SYSCALL_VERSION;
     }
