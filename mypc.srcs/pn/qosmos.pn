@@ -3,7 +3,7 @@
 #include "args.pn"
 #include "sd.pn"
 #include "fat.pn"
-#include "syscall_entry.pn"
+#include "syscall_dispatch.pn"
 
 const int INPUT_SIZE = 64;          // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
 const int ERROR_MESSAGE_SIZE = 32;  // エラーメッセージを出力する一時バッファの要素数
@@ -600,7 +600,7 @@ int run_executable(void) {
     argc = split_args(line, argv, ARGV_SIZE);
     // 実行ファイルがシステムコールを呼べるよう，受付関数の番地をシステムコールの入口へ書き込む
     // (起動時に1回だけ書くのではなく呼び出すたびに書くのは，以前に実行した実行ファイルが入口を書き換えていても元に戻すため)
-    *(int *)SYSCALL_ENTRY_ADDRESS = (int)syscall_entry;
+    *(int *)SYSCALL_ENTRY_ADDRESS = (int)syscall_dispatch;
     // 実行ファイルの先頭の命令を，通常の関数と同じ呼び出し規約でargc・argvを渡して呼び出す．実行ファイルがRETで戻れば，RAXで返された値をそのまま返す
     return ((int (*)(int, char **))CODE_PC)(argc, argv);
 }
