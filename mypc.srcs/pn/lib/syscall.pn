@@ -11,7 +11,7 @@ int syscall(int number, int a, int b, int c, int d) {
     return ((int (*)(int, int, int, int, int))*(int *)SYSCALL_ENTRY_ADDRESS)(number, a, b, c, d);
 }
 
-// 実行中のQosmosで使えるシステムコールの範囲を表す版番号を返す
+// 番号0(SYS_VERSION)のシステムコールを名前で呼び出し，実行中のQosmosで使えるシステムコールの範囲を表す版番号を返す
 int qosmos_version(void) {
     return syscall(SYS_VERSION, 0, 0, 0, 0);
 }
