@@ -1,0 +1,17 @@
+// Qosmosの実行ファイルからOSの機能(システムコール)を呼び出すライブラリ．実行ファイルのソースから取り込んで使う
+#pragma once
+#include "syscall_number.pn"
+
+// システムコールを呼び出すための共通の関数．番号numberのシステムコールを引数a〜dを渡して呼び出し，その戻り値を返す
+// (使わない引数には0を渡し，ポインタはintへキャストして渡す)
+// 各システムコールは，下記の名前付きの関数からこの関数を通して呼ぶ．番号を直接指定したい場合はこの関数を使う
+int syscall(int number, int a, int b, int c, int d) {
+    // シェルが入口へ書き込んだ受付関数の番地を読み，その関数を通常の関数と同じ呼び出し規約で呼び出す
+    // (関数ポインタへのポインタは宣言できないため，番地をintとして読んでから関数ポインタへキャストする)
+    return ((int (*)(int, int, int, int, int))*(int *)SYSCALL_ENTRY_ADDRESS)(number, a, b, c, d);
+}
+
+// 番号0(SYS_VERSION)のシステムコールを名前で呼び出し，実行中のQosmosで使えるシステムコールの範囲を表す版番号を返す
+int qosmos_version(void) {
+    return syscall(SYS_VERSION, 0, 0, 0, 0);
+}
