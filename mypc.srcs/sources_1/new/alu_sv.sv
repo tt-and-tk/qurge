@@ -670,8 +670,7 @@ module alu_sv (
             ram_write.mask <= 0;
             ram_write.valid <= 0;
 
-            // レジスタ(標準入出力の信号線を写し取るものも含む．リセット中・停止中は写し取りを
-            // 行わないため，初期化しないと停止した時点の値がそのまま残る)
+            // レジスタ
             register <= REGISTER_INIT;
 
             // 実行できない命令を検出して停止した状態は，外部からのリセットが
@@ -690,14 +689,6 @@ module alu_sv (
             // タクトスイッチ・DIPスイッチは同期化後の値で，ピンの値が届くまでこの1段と合わせて3サイクルかかる
             register[BTN_ADDR] <= {4'b0, btn_sync[1]};
             register[SW_ADDR] <= {6'b0, sw_sync[1]};
-            register[STDIN_DATA_ADDR] <= stdin_tdata;
-            register[STDIN_SIGNAL_ADDR][2] <= stdin_tlast;
-            register[STDIN_SIGNAL_ADDR][1] <= stdin_tvalid;
-            register[STDIN_SIGNAL_ADDR][0] <= stdin_tready;
-            register[STDOUT_DATA_ADDR] <= stdout_tdata;
-            register[STDOUT_SIGNAL_ADDR][2] <= stdout_tlast;
-            register[STDOUT_SIGNAL_ADDR][1] <= stdout_tvalid;
-            register[STDOUT_SIGNAL_ADDR][0] <= stdout_tready;
             // Arduino SPIのMISOビットのみ外部ピンを毎サイクル取り込む(SCK・MOSI・SSビットは
             // CPUの書き込みをそのまま保持し，このブロックでは触れない)
             // 取り込むのは同期化後の値で，ピンの値が届くまでこの1段と合わせて3サイクルかかる
