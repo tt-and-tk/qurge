@@ -1,4 +1,5 @@
 // Qosmosの実行ファイルからOSの機能(システムコール)を呼び出すライブラリ．実行ファイルのソースから取り込んで使う
+// 各関数の戻り値は，0以上が成功，負の値がエラー(値の意味はsyscall_number.pnのSYSCALL_ERR_*)を表す
 #pragma once
 #include "syscall_number.pn"
 
@@ -11,7 +12,21 @@ int syscall(int number, int a, int b, int c, int d) {
     return ((int (*)(int, int, int, int, int))*(int *)SYSCALL_ENTRY_ADDRESS)(number, a, b, c, d);
 }
 
-// 番号0(SYS_VERSION)のシステムコールを名前で呼び出し，実行中のQosmosで使えるシステムコールの範囲を表す版番号を返す
-int qosmos_version(void) {
-    return syscall(SYS_VERSION, 0, 0, 0, 0);
+// 現在のディレクトリにある名前nameのファイルの大きさ(バイト数)を返す
+int file_size(char *name) {
+    // 番号SYS_FILE_SIZEのシステムコールを呼び出す
+    return syscall(SYS_FILE_SIZE, (int)name, 0, 0, 0);
+}
+
+// 現在のディレクトリにある名前nameのファイルの内容を，sizeバイトの配列bufへ丸ごと読み込み，そのバイト数を返す(ヌル終端は付けない)
+// 内容がsizeバイトを超えれば何も読み込まずにSYSCALL_ERR_TOO_LARGEを返す．大きな読み込み先は，スタックを使い切らないようグローバル変数に置く
+int file_read(char *name, char *buf, int size) {
+    // 番号SYS_FILE_READのシステムコールを呼び出す
+    return syscall(SYS_FILE_READ, (int)name, (int)buf, size, 0);
+}
+
+// 現在のディレクトリにある名前nameのファイルの内容を，dataの先頭lengthバイトで丸ごと置き換え，0を返す(ファイルが無ければ作成する)
+int file_write(char *name, char *data, int length) {
+    // 番号SYS_FILE_WRITEのシステムコールを呼び出す
+    return syscall(SYS_FILE_WRITE, (int)name, (int)data, length, 0);
 }

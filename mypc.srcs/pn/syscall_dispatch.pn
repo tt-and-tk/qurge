@@ -1,17 +1,102 @@
 // システムコールの受付関数．実行ファイルから番号と引数を受け取り，番号に対応するOSの機能(各システムコールの処理)へ振り分ける
 // シェルは実行ファイルを呼び出す直前に，この関数の番地をシステムコールの入口へ書き込む
 #pragma once
+#include "fat.pn"
 #include "lib/syscall_number.pn"
+
+// FAT32の各関数が返した失敗を，実行ファイルへ返すエラーの値に変換する
+// 実行ファイルへはFAT32の内部の区別を見せず，実行ファイルが対処を変えうる種類だけに分けて返す
+int syscall_fat_error(int status) {
+    // 失敗の理由ごとに対応する値を返す
+    switch (status) {
+        case FAT_ERR_TOO_LARGE:
+            return SYSCALL_ERR_TOO_LARGE;
+        case FAT_ERR_NOT_FOUND:
+            return SYSCALL_ERR_NOT_FOUND;
+        case FAT_ERR_IS_DIR:
+            return SYSCALL_ERR_IS_DIR;
+        case FAT_ERR_BAD_NAME:
+            return SYSCALL_ERR_BAD_NAME;
+        case FAT_ERR_FULL:
+            return SYSCALL_ERR_FULL;
+    }
+    // 残りはマウントしていない・読み書きできない・記録が壊れているなど，SDカードを使えない場合にまとめる(想定外の値も成功と誤解されないようここに含める)
+    return SYSCALL_ERR_IO;
+}
+
+// 名前aのファイルの大きさ(バイト数)を返す
+int syscall_file_size(int a) {
+    char *name = (char *)a;  // ファイル名
+    struct FatEntry entry;   // 見つかったファイルのエントリ
+    int status;              // 検索の結果
+
+    // 名前を読めなければ探せない
+    if (name == nullptr) {
+        return SYSCALL_ERR_INVALID;
+    }
+    // 名前からファイルを探す
+    status = fat_find_file(name, &entry);
+    if (status != FAT_OK) {
+        return syscall_fat_error(status);
+    }
+    // 負の値はエラーを表すため，intで正の値として表せない大きさは返せない
+    if ((int)entry.size < 0) {
+        return SYSCALL_ERR_TOO_LARGE;
+    }
+    return entry.size;
+}
+
+// 名前aのファイルの内容を，番地bからcバイトの読み込み先へ丸ごと読み込み，そのバイト数を返す
+int syscall_file_read(int a, int b, int c) {
+    char *name = (char *)a;  // ファイル名
+    char *buf = (char *)b;   // 読み込み先
+    int length;              // 読み込んだバイト数
+    int status;              // 読み込みの結果
+
+    // 名前・読み込み先を読み書きできないか，読み込み先の大きさが負であれば読み込めない
+    if (name == nullptr || buf == nullptr || c < 0) {
+        return SYSCALL_ERR_INVALID;
+    }
+    // 内容を丸ごと読み込む
+    status = fat_read_file(name, buf, c, &length);
+    if (status != FAT_OK) {
+        return syscall_fat_error(status);
+    }
+    return length;
+}
+
+// 名前aのファイルの内容を，番地bからのcバイトで丸ごと置き換え(無ければ作成し)，0を返す
+int syscall_file_write(int a, int b, int c) {
+    char *name = (char *)a;  // ファイル名
+    char *data = (char *)b;  // 書き込む内容
+    int status;              // 書き込みの結果
+
+    // 名前・内容を読めないか，内容のバイト数が負であれば書き込めない
+    if (name == nullptr || data == nullptr || c < 0) {
+        return SYSCALL_ERR_INVALID;
+    }
+    // 内容を丸ごと置き換える
+    status = fat_write_file(name, data, c);
+    if (status != FAT_OK) {
+        return syscall_fat_error(status);
+    }
+    return 0;
+}
 
 // 番号numberのシステムコールの処理を引数a〜dで実行し，その結果を返す(戻り値: 0以上は成功，負の値はエラー)
 // 画面には何も出力しない(エラーを表示するかどうかは，呼び出した実行ファイルが決めるため)
 int syscall_dispatch(int number, int a, int b, int c, int d) {
     // 番号に対応する機能を実行する
     switch (number) {
-        // 版番号を返す．システムコールを呼び出す仕組みを動作確認するために用意した，最小のシステムコール
-        // (実行ファイルが，使えるシステムコールの範囲を確かめる手段も兼ねる)
-        case SYS_VERSION:
-            return SYSCALL_VERSION;
+        // ファイルの大きさを返す
+        case SYS_FILE_SIZE:
+            return syscall_file_size(a);
+        // ファイルの内容を丸ごと読み込む
+        case SYS_FILE_READ:
+            return syscall_file_read(a, b, c);
+        // ファイルの内容を丸ごと書き込む
+        case SYS_FILE_WRITE:
+            return syscall_file_write(a, b, c);
     }
     // どの番号とも一致しなければ，未定義の番号としてエラーを返す
     return SYSCALL_ERR_UNKNOWN;

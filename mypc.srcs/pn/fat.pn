@@ -62,6 +62,7 @@ const int FAT_ERR_EXISTS = 13;      // 指定した名前のエントリが既�
 const int FAT_ERR_NOT_DIR = 14;     // ディレクトリに対する操作(移動・削除)を，ファイルに行おうとした
 const int FAT_ERR_NOT_EMPTY = 15;   // 削除しようとしたディレクトリに，ファイル・ディレクトリが残っている
 const int FAT_ERR_PATH_TOO_LONG = 16;  // 移動すると，現在のディレクトリのパスが保持できる長さを超える
+const int FAT_ERR_TOO_LARGE = 17;   // ファイルの内容が読み込み先に収まらない
 
 // MBR(ブロック0)の形式
 const int MBR_PARTITION_OFFSET = 0x1be;  // 第1パーティションエントリの位置
@@ -764,6 +765,19 @@ int fat_find(char *text, struct FatEntry *found) {
     return fat_find_in(fat_dir_clusters[fat_depth], text, found);
 }
 
+// 現在のディレクトリから"NAME.EXT"形式の名前textのファイルを，fat_findと同じ決まりで探す(ディレクトリが見つかった場合はFAT_ERR_IS_DIRを返す)
+int fat_find_file(char *text, struct FatEntry *found) {
+    int status;  // 検索の結果
+
+    // 名前でエントリを探す
+    status = fat_find(text, found);
+    // 見つかったのがディレクトリであれば，ファイルとして扱えない
+    if (status == FAT_OK && (found->attr & ATTR_DIRECTORY) != 0) {
+        return FAT_ERR_IS_DIR;
+    }
+    return status;
+}
+
 // entryのファイルを先頭から読み出せるようfileを設定する
 int fat_open(struct FatEntry *entry, struct FatFile *file) {
     // マウントしていなければ，クラスタの位置が分からない
@@ -827,6 +841,48 @@ int fat_read(struct FatFile *file, int *length) {
     // 読んだ分を読み残しから差し引く
     file->remaining -= *length;
     return FAT_OK;
+}
+
+// 現在のディレクトリにある"NAME.EXT"形式の名前textのファイルの内容を，bufへ丸ごと書き写し，そのバイト数をlengthへ返す(ヌル終端は付けない)
+// 内容がsizeバイトを超えればFAT_ERR_TOO_LARGEを返し，bufへは何も書かない．読み出しの途中で失敗した場合は，bufに書き写した内容が途中のまま残る
+int fat_read_file(char *text, char *buf, unsigned int size, int *length) {
+    struct FatEntry entry;  // 読み出すファイルのエントリ
+    struct FatFile file;    // 読み出し中のファイルの位置
+    int sector_length;      // 読み込んだセクタのうち内容にあたるバイト数
+    int status;             // FAT32の各関数の結果
+    int copied = 0;         // bufへ書き写したバイト数
+
+    // 名前からファイルを探す
+    status = fat_find_file(text, &entry);
+    if (status != FAT_OK) {
+        return status;
+    }
+    // 途中まで書き写してから収まらないと分かることの無いよう，読み始める前に大きさを確かめる
+    if (entry.size > size) {
+        return FAT_ERR_TOO_LARGE;
+    }
+    // 先頭から読み出せるよう開く
+    status = fat_open(&entry, &file);
+    if (status != FAT_OK) {
+        return status;
+    }
+    // 1セクタずつ読み込み，全て読み終えるまで書き写す
+    while (1) {
+        // 次の1セクタを読み込む．全て読み終えていれば書き写し終えている
+        status = fat_read(&file, &sector_length);
+        if (status == FAT_END) {
+            *length = copied;
+            return FAT_OK;
+        }
+        if (status != FAT_OK) {
+            return status;
+        }
+        // 内容を1バイトずつ書き写す(bufは4バイト境界にそろうとは限らないため，4バイト単位では写さない)
+        for (int i = 0; i < sector_length; i++) {
+            buf[copied] = fat_sector[i];
+            copied++;
+        }
+    }
 }
 
 // FSInfoセクタの空きクラスタ数を，「不明」を表す値に書き換える．FATを書き換える前に呼ぶ
@@ -1308,6 +1364,26 @@ int fat_write(struct FatEntry *entry, char *data, int length) {
     return FAT_OK;
 }
 
+// 現在のディレクトリにある"NAME.EXT"形式の名前textのファイルの内容を，dataの先頭lengthバイトで丸ごと置き換える(ファイルが無ければ作成する)
+// 既にあるファイルは，失敗しても元の内容のまま残る．新しく作成したファイルは，内容の書き込みに失敗すると空のまま残る
+int fat_write_file(char *text, char *data, int length) {
+    struct FatEntry entry;  // 書き込むファイルのエントリ
+    int status;             // 作成・書き込みの結果
+
+    // 書き込み先のファイルを決める．無ければ空のファイルを作成し，同名のファイルが既にあればそれを使う
+    // 作成の処理は，同名のファイルがあれば作成せずにそのエントリを返してFAT_ERR_EXISTSを返すため，その場合も書き込み先が決まったものとして扱う
+    // (名前での検索を別に行うと，作成の処理が同じ名前を探すためにディレクトリをもう一度走査することになるため，作成の処理に任せる)
+    status = fat_create(text, &entry);
+    if (status == FAT_ERR_EXISTS) {
+        status = FAT_OK;
+    }
+    // 書き込み先が決まったときだけ，その内容を丸ごと置き換える(同名のディレクトリであれば，置き換える処理が失敗を返す)
+    if (status == FAT_OK) {
+        status = fat_write(&entry, data, length);
+    }
+    return status;
+}
+
 // entryのファイル・ディレクトリのエントリを削除済みにし，中身のクラスタチェーンを解放する(長いファイル名を持てば，そのエントリもあわせて削除する)
 // ファイルかディレクトリかと，ディレクトリが空であることは呼び出し元が確かめる
 int fat_delete_entry(struct FatEntry *entry) {
@@ -1578,6 +1654,9 @@ void fat_print_error(int status) {
         break;
     case FAT_ERR_PATH_TOO_LONG:
         print("path too long\n");
+        break;
+    case FAT_ERR_TOO_LARGE:
+        print("file too large\n");
         break;
     default:
         print("unexpected error\n");
