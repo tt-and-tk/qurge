@@ -100,17 +100,8 @@ package alu_p;
         // GPIO
         else if (6'h2d <= addr && addr <= 6'h30)
             is_readable = util_p::FALSE;
-        // 標準入力(データ)
-        else if (addr == 6'h31)
-            is_readable = util_p::TRUE;
-        // 標準入力(信号)
-        else if (addr == 6'h32)
-            is_readable = util_p::FALSE;
-        // 標準出力(データ)
-        else if (addr == 6'h33)
-            is_readable = util_p::FALSE;
-        // 標準出力(信号)
-        else if (addr == 6'h34)
+        // 空き
+        else if (6'h31 <= addr && addr <= 6'h34)
             is_readable = util_p::FALSE;
         // 定義されていない
         else
@@ -179,17 +170,8 @@ package alu_p;
         // GPIO
         else if (6'h2d <= addr && addr <= 6'h30)
             is_writable = util_p::TRUE;
-        // 標準入力(データ)
-        else if (addr == 6'h31)
-            is_writable = util_p::FALSE;
-        // 標準入力(信号)
-        else if (addr == 6'h32)
-            is_writable = util_p::FALSE;
-        // 標準出力(データ)
-        else if (addr == 6'h33)
-            is_writable = util_p::TRUE;
-        // 標準出力(信号)
-        else if (addr == 6'h34)
+        // 空き
+        else if (6'h31 <= addr && addr <= 6'h34)
             is_writable = util_p::FALSE;
         // 定義されていない
         else

@@ -1089,7 +1089,7 @@ module cpu_tb;
     // 仕様(register.md)の表に基づき，その番地のレジスタを命令のオペランドとして読めるかを返す
     function automatic bit spec_readable(input addr_t addr);
         case (addr) inside
-            [6'h00:6'h10], [6'h1c:6'h21], 6'h29, 6'h2a, 6'h31: return 1'b1;
+            [6'h00:6'h10], [6'h1c:6'h21], 6'h29, 6'h2a: return 1'b1;
             default: return 1'b0;
         endcase
     endfunction
@@ -1097,7 +1097,7 @@ module cpu_tb;
     // 仕様(register.md)の表に基づき，その番地のレジスタを命令のオペランドとして書けるかを返す
     function automatic bit spec_writable(input addr_t addr);
         case (addr) inside
-            [6'h00:6'h10], 6'h1d, 6'h1e, [6'h22:6'h28], 6'h2a, [6'h2d:6'h30], 6'h33: return 1'b1;
+            [6'h00:6'h10], 6'h1d, 6'h1e, [6'h22:6'h28], 6'h2a, [6'h2d:6'h30]: return 1'b1;
             default: return 1'b0;
         endcase
     endfunction
