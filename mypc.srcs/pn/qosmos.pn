@@ -226,9 +226,8 @@ int handle_touch(int pos) {
 int handle_write(int pos) {
     char name[INPUT_SIZE];     // 先頭の引数(書き込むファイル名)
     char content[INPUT_SIZE];  // ファイル名を除いた残り(書き込む内容)
-    struct FatEntry entry;     // 書き込むファイルのエントリ
     int length = 0;            // 書き込む内容のバイト数
-    int status;                // 検索・作成・書き込みの結果
+    int status;                // 書き込みの結果
 
     // コマンド名(write)の直後の引数をファイル名として取り出す
     pos = extract_arg(input, pos, name, INPUT_SIZE);
@@ -243,18 +242,8 @@ int handle_write(int pos) {
         length++;
     }
 
-    // 書き込み先のファイルを決める．無ければ空のファイルを作成し，同名のファイルが既にあればそれを使う
-    // 作成の処理は，同名のファイルがあれば作成せずにそのエントリを返してFAT_ERR_EXISTSを返すため，その場合も書き込み先が決まったものとして扱う
-    // (名前での検索を別に行うと，作成の処理が同じ名前を探すためにディレクトリをもう一度走査することになるため，作成の処理に任せる)
-    status = fat_create(name, &entry);
-    if (status == FAT_ERR_EXISTS) {
-        status = FAT_OK;
-    }
-    // 書き込み先が決まったときだけ，その内容を丸ごと置き換える
-    if (status == FAT_OK) {
-        status = fat_write(&entry, content, length);
-    }
-    // どこかで失敗していれば，その理由を出力する
+    // ファイルの内容を丸ごと置き換え(無ければ作成し)，失敗すればその理由を出力する
+    status = fat_write_file(name, content, length);
     if (status != FAT_OK) {
         print_fat_error(status);
         return EXIT_FAILURE;

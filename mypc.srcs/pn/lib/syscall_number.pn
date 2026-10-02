@@ -4,7 +4,18 @@
 #pragma once
 
 const int SYSCALL_ENTRY_ADDRESS = 0xFFFC;  // 入口の番地(メモリの後半の末尾のワード)
-const int SYSCALL_VERSION = 1;             // 使えるシステムコールの範囲を表す版番号(増やす条件は仕様書qosmos.mdの「システムコール」を参照)
-const int SYSCALL_ERR_UNKNOWN = -1;        // 未定義の番号を渡した場合の戻り値
 
-const int SYS_VERSION = 0;                 // 番号: 版番号SYSCALL_VERSIONを返す
+// 各機能の番号．名前はいずれも，シェルの現在のディレクトリの直下にあるファイルの"NAME.EXT"形式の名前(パスは指定できない)
+const int SYS_FILE_SIZE = 0;   // ファイルの大きさ(バイト数)を返す(a: 名前)
+const int SYS_FILE_READ = 1;   // ファイルの内容を丸ごと読み込み，そのバイト数を返す(a: 名前，b: 読み込み先，c: 読み込み先のバイト数)
+const int SYS_FILE_WRITE = 2;  // ファイルの内容を丸ごと置き換え，0を返す．ファイルが無ければ作成する(a: 名前，b: 書き込む内容，c: そのバイト数)
+
+// エラーを表す戻り値
+const int SYSCALL_ERR_UNKNOWN = -1;    // 未定義の番号を渡した
+const int SYSCALL_ERR_INVALID = -2;    // 引数の値が不正(番地にnullptr，負のバイト数を渡した)
+const int SYSCALL_ERR_TOO_LARGE = -3;  // ファイルが読み込み先に収まらないか，大きさがintで表せない
+const int SYSCALL_ERR_NOT_FOUND = -4;  // 指定した名前のファイルが無い
+const int SYSCALL_ERR_IS_DIR = -5;     // 指定した名前がディレクトリを指す
+const int SYSCALL_ERR_BAD_NAME = -6;   // 名前が8.3形式に収まらないか，名前に使えない文字を含む
+const int SYSCALL_ERR_FULL = -7;       // SDカードに空きが無い
+const int SYSCALL_ERR_IO = -8;         // SDカードを読み書きできないか，ファイルシステムの記録が壊れている
