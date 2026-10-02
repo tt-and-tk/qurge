@@ -100,7 +100,7 @@ package alu_p;
         // GPIO
         else if (6'h2d <= addr && addr <= 6'h30)
             is_readable = util_p::FALSE;
-        // 標準入出力(SCAN・PRINT命令が信号線を直接扱い，レジスタは使わない)
+        // 空き
         else if (6'h31 <= addr && addr <= 6'h34)
             is_readable = util_p::FALSE;
         // 定義されていない
@@ -170,7 +170,7 @@ package alu_p;
         // GPIO
         else if (6'h2d <= addr && addr <= 6'h30)
             is_writable = util_p::TRUE;
-        // 標準入出力(SCAN・PRINT命令が信号線を直接扱い，レジスタは使わない)
+        // 空き
         else if (6'h31 <= addr && addr <= 6'h34)
             is_writable = util_p::FALSE;
         // 定義されていない
