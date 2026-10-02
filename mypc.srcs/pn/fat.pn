@@ -765,12 +765,12 @@ int fat_find(char *text, struct FatEntry *found) {
     return fat_find_in(fat_dir_clusters[fat_depth], text, found);
 }
 
-// 現在のディレクトリから"NAME.EXT"形式の名前textのファイルを，fat_findと同じ決まりで探す(ディレクトリが見つかった場合はFAT_ERR_IS_DIRを返す)
-int fat_find_file(char *text, struct FatEntry *found) {
+// 現在のディレクトリから"NAME.EXT"形式のファイル名file_nameのファイルを，fat_findと同じ決まりで探す(ディレクトリが見つかった場合はFAT_ERR_IS_DIRを返す)
+int fat_find_file(char *file_name, struct FatEntry *found) {
     int status;  // 検索の結果
 
     // 名前でエントリを探す
-    status = fat_find(text, found);
+    status = fat_find(file_name, found);
     // 見つかったのがディレクトリであれば，ファイルとして扱えない
     if (status == FAT_OK && (found->attr & ATTR_DIRECTORY) != 0) {
         return FAT_ERR_IS_DIR;
@@ -843,9 +843,9 @@ int fat_read(struct FatFile *file, int *length) {
     return FAT_OK;
 }
 
-// 現在のディレクトリにある"NAME.EXT"形式の名前textのファイルの内容を，bufへ丸ごと書き写し，そのバイト数をlengthへ返す(ヌル終端は付けない)
+// 現在のディレクトリにある"NAME.EXT"形式のファイル名file_nameのファイルの内容を，bufへ丸ごと書き写し，そのバイト数をlengthへ返す(ヌル終端は付けない)
 // 内容がsizeバイトを超えればFAT_ERR_TOO_LARGEを返し，bufへは何も書かない．読み出しの途中で失敗した場合は，bufに書き写した内容が途中のまま残る
-int fat_read_file(char *text, char *buf, unsigned int size, int *length) {
+int fat_read_file(char *file_name, char *buf, unsigned int size, int *length) {
     struct FatEntry entry;  // 読み出すファイルのエントリ
     struct FatFile file;    // 読み出し中のファイルの位置
     int sector_length;      // 読み込んだセクタのうち内容にあたるバイト数
@@ -853,7 +853,7 @@ int fat_read_file(char *text, char *buf, unsigned int size, int *length) {
     int copied = 0;         // bufへ書き写したバイト数
 
     // 名前からファイルを探す
-    status = fat_find_file(text, &entry);
+    status = fat_find_file(file_name, &entry);
     if (status != FAT_OK) {
         return status;
     }
@@ -1364,16 +1364,16 @@ int fat_write(struct FatEntry *entry, char *data, int length) {
     return FAT_OK;
 }
 
-// 現在のディレクトリにある"NAME.EXT"形式の名前textのファイルの内容を，dataの先頭lengthバイトで丸ごと置き換える(ファイルが無ければ作成する)
+// 現在のディレクトリにある"NAME.EXT"形式のファイル名file_nameのファイルの内容を，dataの先頭lengthバイトで丸ごと置き換える(ファイルが無ければ作成する)
 // 既にあるファイルは，失敗しても元の内容のまま残る．新しく作成したファイルは，内容の書き込みに失敗すると空のまま残る
-int fat_write_file(char *text, char *data, int length) {
+int fat_write_file(char *file_name, char *data, int length) {
     struct FatEntry entry;  // 書き込むファイルのエントリ
     int status;             // 作成・書き込みの結果
 
     // 書き込み先のファイルを決める．無ければ空のファイルを作成し，同名のファイルが既にあればそれを使う
     // 作成の処理は，同名のファイルがあれば作成せずにそのエントリを返してFAT_ERR_EXISTSを返すため，その場合も書き込み先が決まったものとして扱う
     // (名前での検索を別に行うと，作成の処理が同じ名前を探すためにディレクトリをもう一度走査することになるため，作成の処理に任せる)
-    status = fat_create(text, &entry);
+    status = fat_create(file_name, &entry);
     if (status == FAT_ERR_EXISTS) {
         status = FAT_OK;
     }
