@@ -1586,6 +1586,13 @@ module cpu_tb;
         expect_end();
         expect_cycles(base + 12);
 
+        // r1への代入の後に，次の番地へのJMPを3個並べた命令列を実行する
+        `BEGIN_TEST("JMPは飛び先が次の番地でも取得し直すため4サイクルかかる");
+        run('{movi(1, 32'd1), jmp(6'h00, im(2)), jmp(6'h00, im(3)), jmp(6'h00, im(4))});
+        // 3命令ぶんの4倍のサイクル数だけ多くかかる
+        expect_end();
+        expect_cycles(base + 12);
+
         // 成立する分岐の直後に，N系で未定義のfuncを持つ命令を置き，分岐でそれを飛び越える
         `BEGIN_TEST("成立した分岐で飛び越えた実行できない命令では停止しない");
         run('{eq(0, 0, im(2)), raw(3'h0, 6'h01, 0, 0, 0, NO_IMM), movi(1, 32'd1)});
