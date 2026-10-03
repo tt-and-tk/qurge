@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 GitHubリポジトリ名: `tt-and-tk/qurge`．
 
-PYNQ-Z2(Zynq-7000)上に実装する自作CPUと，それを動かすソフトウェア群(アセンブラ・コンパイラ)からなる自作PCプロジェクトの一部．プロジェクト全体は以下の独立したGitHubリポジトリで構成される．
+PYNQ-Z2(Zynq-7000)上に実装する自作CPUと，それを動かすソフトウェア群(アセンブラ・コンパイラ)からなる自作パソコンのプロジェクトPynthesisの一部．Pynthesisは以下の独立したGitHubリポジトリで構成される．
 
 | リポジトリ(GitHub) | ディレクトリ(`pc/`配下) | 役割 |
 |:-|:-|:-|
@@ -48,7 +48,7 @@ CPUの命令の動作は，合成せずVivado付属のシミュレータで検�
 
 ## PS側(ARM/C++)のビルド・書き込み方法
 
-`mypc.srcs/cpp/`配下のC++プログラムは，PC側でのクロスコンパイルは行わず，**PYNQ-Z2ボード上のLinux環境で直接ビルド・実行する**．
+`mypc.srcs/cpp/`配下のC++プログラムは，開発用のパソコンでのクロスコンパイルは行わず，**PYNQ-Z2ボード上のLinux環境で直接ビルド・実行する**．
 
 1. ボード上の任意の作業ディレクトリへ，`mypc.srcs/cpp/`配下のファイル(`run.cpp`・`compile.sh`)と，Vivadoが生成したビットストリームを転送する
 2. その作業ディレクトリの直下に`bit/`ディレクトリを作成し，ビットストリームを`bit/top_wrapper.bit`として配置する(`run.cpp`が実行時のカレントディレクトリからの相対パス`./bit/top_wrapper.bit`でこれを参照するため)
