@@ -1574,6 +1574,19 @@ module cpu_tb;
         // 停止せずに飛び先の命令が実行される
         expect_end();
         expect_reg(1, 32'd1);
+
+        // JMPの直後に，N系で未定義のfuncを持つ命令を置き，JMPでそれを飛び越える
+        `BEGIN_TEST("JMPで飛び越えた実行できない命令では停止しない");
+        run('{jmp(6'h00, im(2)), raw(3'h0, 6'h01, 0, 0, 0, NO_IMM), movi(1, 32'd1)});
+        // 停止せずに飛び先の命令が実行される
+        expect_end();
+        expect_reg(1, 32'd1);
+
+        // 成立しない分岐の直後に，N系で未定義のfuncを持つ命令を置く
+        `BEGIN_TEST("成立しない分岐の直後の実行できない命令では停止する");
+        run('{ne(0, 0, im(2)), raw(3'h0, 6'h01, 0, 0, 0, NO_IMM), movi(1, 32'd1)});
+        // 分岐の次の命令の番地で停止する
+        expect_halt(1);
     endtask
 
     initial begin
