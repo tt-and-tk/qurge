@@ -85,9 +85,9 @@ package alu_p;
         // I2C
         else if (addr == 6'h27)
             is_readable = util_p::FALSE;
-        // AR_RST
+        // 空き
         else if (addr == 6'h29)
-            is_readable = util_p::TRUE;
+            is_readable = util_p::FALSE;
         // SPI
         else if (addr == 6'h2a)
             is_readable = util_p::TRUE;
@@ -155,7 +155,7 @@ package alu_p;
         // I2C
         else if (addr == 6'h27)
             is_writable = util_p::TRUE;
-        // AR_RST
+        // 空き
         else if (addr == 6'h29)
             is_writable = util_p::FALSE;
         // SPI
