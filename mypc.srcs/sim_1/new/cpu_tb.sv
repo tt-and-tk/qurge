@@ -1457,6 +1457,17 @@ module cpu_tb;
         expect_end();
         expect_reg(2, 32'haa);
 
+        // ROMの最後の3番地にDIVと2つの代入を置き，そこへジャンプする．DIVの実行中に後の2命令を取得し終え，
+        // 命令キューに命令を残したままROMの範囲を出る
+        `BEGIN_TEST("命令キューに命令を残したままROMの範囲を出てもメモリの後半の先頭へ進む");
+        rom_tail = '{div(1, 2, 3, NO_IMM), movi(4, 32'd4), movi(5, 32'd5)};
+        code_area = '{add(4, 5, 6), jmp(6'h00, im(32'd3))};
+        run('{movi(1, 32'd9), movi(2, 32'd4), jmp(6'h00, im(CODE_AREA_PC - 3))});
+        // ROMの最後の3命令がすべて実行されてから，メモリの後半の先頭の命令が実行される
+        expect_end();
+        expect_reg(3, 32'd2);
+        expect_reg(6, 32'd9);
+
         // メモリの後半の最後の位置に1サイクルで終わる命令を置き，そこへジャンプする
         `BEGIN_TEST("メモリの後半の最後の命令の次へ進むと停止する");
         code_area_index = rom_p::CODE_AREA_PC_NUM - 1;
