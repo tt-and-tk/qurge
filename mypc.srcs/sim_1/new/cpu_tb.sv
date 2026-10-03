@@ -1481,6 +1481,14 @@ module cpu_tb;
         run('{jmp(6'h00, im(CODE_AREA_PC))});
         // その命令のPCで停止する
         expect_halt(CODE_AREA_PC + 1);
+
+        // コード領域の0〜3番目の命令で，直後の4番目(初めはNOP)をr1への代入に書き換えてから実行する
+        `BEGIN_TEST("コード領域の命令が直後の命令を書き換えると書き換えた命令が実行される");
+        code_area = {store_code(4, movi(1, 32'h55)), nop(), ret()};
+        run('{call(6'h00, im(CODE_AREA_PC))});
+        // 書き換えた後の代入が実行される
+        expect_end();
+        expect_reg(1, 32'h55);
     endtask
 
     // 命令を重ねて実行するパイプラインの所要サイクル数と，直前の命令の結果の受け取り
