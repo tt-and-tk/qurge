@@ -1519,8 +1519,10 @@ module cpu_tb;
         expect_reg(11, 32'd11);
         expect_cycles(base + 10);
 
-        // r1への代入の後に，直前の結果を2倍するADDを10個並べた命令列を実行する
+        // r1への代入だけの命令列と，その後に直前の結果を2倍するADDを10個並べた命令列を実行する
         `BEGIN_TEST("直前の1サイクル命令の結果を使う命令も1命令1サイクルで実行される");
+        run('{movi(1, 32'd1)});
+        base = cycles;
         body = '{movi(1, 32'd1)};
         repeat (10) body.push_back(add(1, 1, 1));
         run(body);
@@ -1590,15 +1592,19 @@ module cpu_tb;
         expect_end();
         expect_cycles(base + 3);
 
-        // r1への代入の後に，次の番地へ分岐する成立する分岐を3個並べた命令列を実行する
+        // r1への代入だけの命令列と，その後に次の番地へ分岐する成立する分岐を3個並べた命令列を実行する
         `BEGIN_TEST("成立する分岐は飛び先から取得し直すため4サイクルかかる");
+        run('{movi(1, 32'd1)});
+        base = cycles;
         run('{movi(1, 32'd1), eq(0, 0, im(1)), eq(0, 0, im(1)), eq(0, 0, im(1))});
         // 3命令ぶんの4倍のサイクル数だけ多くかかる
         expect_end();
         expect_cycles(base + 12);
 
-        // r1への代入の後に，次の番地へのJMPを3個並べた命令列を実行する
+        // r1への代入だけの命令列と，その後に次の番地へのJMPを3個並べた命令列を実行する
         `BEGIN_TEST("JMPは飛び先が次の番地でも取得し直すため4サイクルかかる");
+        run('{movi(1, 32'd1)});
+        base = cycles;
         run('{movi(1, 32'd1), jmp(6'h00, im(2)), jmp(6'h00, im(3)), jmp(6'h00, im(4))});
         // 3命令ぶんの4倍のサイクル数だけ多くかかる
         expect_end();
