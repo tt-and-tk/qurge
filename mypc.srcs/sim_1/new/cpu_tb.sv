@@ -1273,6 +1273,16 @@ module cpu_tb;
         expect_reg(1, 32'b1110);
         expect_reg(2, 32'b1110);
 
+        // MISOピンを1にした状態で，SPIのレジスタへ書き込んだ直後の命令で，第2オペランドとして読み出す
+        `BEGIN_TEST("SPIのレジスタへ書き込んだ直後の命令が第2オペランドで読んでもMISOの値を読める");
+        ck_miso = 1'b1;
+        run('{movi(SPI_ADDR, 32'b0110), or_(0, SPI_ADDR, 1)});
+        // 後のテストケースへ影響しないよう，MISOピンを0へ戻す
+        ck_miso = 1'b0;
+        // ビット3がMISOの1，ほかのビットが書き込んだ値になる
+        expect_end();
+        expect_reg(1, 32'b1110);
+
         // MISOピンを1にした状態で，メモリから読んだ値をRMでSPIのレジスタへ書き込み，直後の命令で読み出す
         `BEGIN_TEST("SPIのレジスタへRMで書き込んだ直後の命令もMISOの値を読める");
         ck_miso = 1'b1;
