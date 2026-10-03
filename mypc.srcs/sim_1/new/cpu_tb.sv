@@ -9,9 +9,10 @@
 // - テストケース: 1つの命令列を実行し，その結果を期待値と比較する単位．合否はテストケースごとに数える
 // - 正常終了: 命令列の末尾に置いた，自分自身へジャンプし続ける命令の実行に入ること(仕様上のプログラムの終わり方)
 // - 停止: CPUが実行できない命令や不正な値を検出して実行を止めること(仕様はhalt.md)
-// - 先読み: CPUが複数サイクルかかる命令を実行している間に，次の命令をROMから取得しておくこと
+// - 先読み: CPUが命令を実行している間に，次の命令をROMから取得しておくこと
 // - メインメモリの後半: PCのうちROMの命令数の上限に続く範囲が，ここに置いた命令に対応する(仕様はrom.md)．命令列を置いた部分をコード領域と呼ぶ
-// - フォワーディング: 先読みした命令が，直前の命令がそのサイクルに書き込む値をレジスタを経由せずに受け取ること
+// - フォワーディング: 直前の命令がレジスタへ書き込む値を，次の命令がレジスタを経由せずに受け取ること
+// - 所要サイクル数: リセットを解除してから，正常終了または停止に至るまでのサイクル数
 //////////////////////////////////////////////////////////////////////////////////
 
 
@@ -256,6 +257,7 @@ module cpu_tb;
     typedef enum {ENDED, HALTED, TIMED_OUT} outcome_enum;  // 実行の終わり方(正常終了・停止・打ち切り)
 
     outcome_enum    outcome;                          // 直前の実行の終わり方
+    int             cycles;                           // 直前の実行の所要サイクル数
     register_t      regs[0:REGISTER_MAX_ADDR];        // 直前の実行を終えた時点のレジスタの値
     int             end_pc;                           // 正常終了を表す命令の番地
     machine_queue_t code_area;                        // 実行前にコード領域へ直接置く命令列
@@ -335,6 +337,8 @@ module cpu_tb;
             // クロックの立ち上がりで更新された値が確定するのを待つ
             @(posedge clk);
             #1;
+            // ここまでに経たサイクル数を，所要サイクル数として控える
+            cycles = cycle + 1;
             // 停止した．仕様上は停止と同時にレジスタが初期値へ戻るが，CPUは停止を検出した次のクロックで
             // 戻すため，このサイクルのうちに採取すれば停止した番地と書き換えの有無を確かめられる．
             // 停止と同じクロックで初期値へ戻す実装に変えた場合は，この採取方法を見直す必要がある
@@ -343,7 +347,7 @@ module cpu_tb;
                 break;
             end
             // 正常終了を表す命令の実行に入った
-            if (append_end && dut.alu_sv_0.register[PC_ADDR] == end_pc && dut.alu_sv_0.cpu_phase == CPU_EXECUTE) begin
+            if (append_end && dut.alu_sv_0.register[PC_ADDR] == end_pc && dut.alu_sv_0.ex_valid) begin
                 outcome = ENDED;
                 break;
             end
@@ -458,6 +462,12 @@ module cpu_tb;
     function automatic void expect_output(input logic [31:0] values[$]);
         if (stdout_log != values)
             fail($sformatf("標準出力: 期待値%p，実際%p", values, stdout_log));
+    endfunction
+
+    // 直前の実行の所要サイクル数を確かめる
+    function automatic void expect_cycles(input int value);
+        if (cycles != value)
+            fail($sformatf("所要サイクル数: 期待値%0d，実際%0d", value, cycles));
     endfunction
 
     // ===== テストケース =====
@@ -851,6 +861,13 @@ module cpu_tb;
         expect_mem32(32'h7ffc, 32'd3);
         expect_mem32(32'h8000 - 13 * 4, 32'd8);
 
+        // 次の番地(1番地)を関数として呼び，呼んだ先の命令でSPを読む
+        `BEGIN_TEST("次の番地を呼ぶCALLの直後の命令は下げた後のSPを読む");
+        run('{call(6'h00, im(1)), movr(1, SP_ADDR)});
+        // 戻り先を積んで4減ったSPが読める
+        expect_end();
+        expect_reg(1, 32'h7ffc);
+
         // 何も積んでいないスタックでRETする(戻り先を読む番地がメモリの後半の先頭になる)
         `BEGIN_TEST("空のスタックでのRETは停止する");
         run('{nop(), ret()});
@@ -1048,8 +1065,7 @@ module cpu_tb;
         expect_reg(2, 32'h42);
         expect_reg(3, 32'h83);
 
-        // 既に届いている2つの入力を受け取り，その和を求める．SCANの実行が2サイクルで終わり，
-        // 次の命令の先読みが間に合わない経路を通る
+        // 既に届いている2つの入力を受け取り，その和を求める．SCANの実行が2サイクルで終わる場合を確かめる
         `BEGIN_TEST("SCANは既に届いている入力を受け取る");
         stdin_queue = '{32'h41, 32'h42};
         stdin_delay = 0;
@@ -1069,8 +1085,7 @@ module cpu_tb;
         expect_output('{32'h41, 32'h43});
         expect_reg(2, 32'd1);
 
-        // すぐに受け取る相手へ，即値とr1の値を出力する．PRINTの実行が2サイクルで終わり，
-        // 次の命令の先読みが間に合わない経路を通る
+        // すぐに受け取る相手へ，即値とr1の値を出力する．PRINTの実行が2サイクルで終わる場合を確かめる
         `BEGIN_TEST("PRINTはすぐに受け取られる場合も即値・レジスタの値を出力する");
         stdout_delay = 0;
         run('{movi(1, 32'h43), print(6'h00, im(32'h41)), print(1, NO_IMM), movi(2, 32'd1)});
@@ -1239,6 +1254,34 @@ module cpu_tb;
         // ビット3がMISOの1，ビット0がSSの初期値1になる
         expect_end();
         expect_reg(1, 32'b1001);
+
+        // MISOピンを0にした状態で，ビット3を1にした値をSPIのレジスタへ書き込んでから読み出す
+        `BEGIN_TEST("SPIのレジスタへの書き込みではMISOのビットが変わらない");
+        run('{movi(SPI_ADDR, 32'b1001), movr(1, SPI_ADDR)});
+        // ビット3は書き込んだ1ではなくMISOの0になり，ほかのビットは書き込んだ値になる
+        expect_end();
+        expect_reg(1, 32'b0001);
+
+        // MISOピンを1にした状態で，SPIのレジスタへ書き込んだ直後と2つ後の命令で読み出す
+        `BEGIN_TEST("SPIのレジスタへMOVで書き込んだ直後と2つ後の命令もMISOの値を読める");
+        ck_miso = 1'b1;
+        run('{movi(SPI_ADDR, 32'b0110), movr(1, SPI_ADDR), movr(2, SPI_ADDR)});
+        // 後のテストケースへ影響しないよう，MISOピンを0へ戻す
+        ck_miso = 1'b0;
+        // どちらもビット3がMISOの1，ほかのビットが書き込んだ値になる
+        expect_end();
+        expect_reg(1, 32'b1110);
+        expect_reg(2, 32'b1110);
+
+        // MISOピンを1にした状態で，メモリから読んだ値をRMでSPIのレジスタへ書き込み，直後の命令で読み出す
+        `BEGIN_TEST("SPIのレジスタへRMで書き込んだ直後の命令もMISOの値を読める");
+        ck_miso = 1'b1;
+        run('{movi(1, 32'b0100), wm(4'hf, 6'h00, 1, im(32'h100)), rm(4'hf, 6'h00, SPI_ADDR, im(32'h100)), movr(2, SPI_ADDR)});
+        // 後のテストケースへ影響しないよう，MISOピンを0へ戻す
+        ck_miso = 1'b0;
+        // ビット3がMISOの1，ほかのビットがメモリから読んだ値になる
+        expect_end();
+        expect_reg(2, 32'b1100);
     endtask
 
     // 命令の種類によらない停止の条件と，停止後の挙動
@@ -1257,6 +1300,13 @@ module cpu_tb;
         expect_halt(3);
         expect_reg(3, 32'd2);
         expect_reg(4, 32'd0);
+
+        // 0除算で停止するDIVの後に，r3への代入を置く
+        `BEGIN_TEST("実行中に停止した命令の後の命令は実行されない");
+        run('{movi(1, 32'd7), div(1, 0, 2, NO_IMM), movi(3, 32'd1)});
+        // DIVの番地で停止し，後の命令の書き込み先は書き換わらない
+        expect_halt(1);
+        expect_reg(3, 32'd0);
 
         // 正常終了を表す命令を付けずに，2つの命令だけを実行する
         `BEGIN_TEST("ROMの最後の命令の次へ進むと停止する");
@@ -1423,6 +1473,109 @@ module cpu_tb;
         expect_halt(CODE_AREA_PC + 1);
     endtask
 
+    // 命令を重ねて実行するパイプラインの所要サイクル数と，直前の命令の結果の受け取り
+    task automatic test_pipeline();
+        int             base;  // 比べる基準とする実行の所要サイクル数
+        machine_queue_t body;  // ROMへ書き込む命令列
+
+        // r1への代入だけの命令列と，その後に依存関係のない1サイクル命令を10個並べた命令列を実行する
+        `BEGIN_TEST("依存関係のない1サイクル命令は1命令1サイクルで実行される");
+        run('{movi(1, 32'd1)});
+        base = cycles;
+        run('{movi(1, 32'd1), movi(2, 32'd2), add(0, 0, 3), sll(0, 0, 4, im(1)), movi(5, 32'd5), or_(0, 0, 6),
+              movi(7, 32'd7), xor_(0, 0, 8), movi(9, 32'd9), not_(0, 10), movi(11, 32'd11)});
+        // 並べた10命令ぶんのサイクル数だけ多くかかる
+        expect_end();
+        expect_reg(10, 32'hffff_ffff);
+        expect_reg(11, 32'd11);
+        expect_cycles(base + 10);
+
+        // r1への代入の後に，直前の結果を2倍するADDを10個並べた命令列を実行する
+        `BEGIN_TEST("直前の1サイクル命令の結果を使う命令も1命令1サイクルで実行される");
+        body = '{movi(1, 32'd1)};
+        repeat (10) body.push_back(add(1, 1, 1));
+        run(body);
+        // 1を10回2倍した値になり，並べた10命令ぶんのサイクル数だけ多くかかる
+        expect_end();
+        expect_reg(1, 32'd1024);
+        expect_cycles(base + 10);
+
+        // r1へ代入し，1つ命令を挟んでからr1を2倍する
+        `BEGIN_TEST("2つ前の命令の結果を読める");
+        run('{movi(1, 32'd7), nop(), add(1, 1, 2)});
+        // 代入した値の2倍になる
+        expect_end();
+        expect_reg(2, 32'd14);
+
+        // ADDで作った値を，直後のWMの書き込むデータ・RMRの番地の基準・PRINTの出力する値に使う
+        `BEGIN_TEST("1サイクル命令の結果を直後のWM・RMR・PRINTが使える");
+        run('{movi(1, 32'd5), add(1, 1, 2), wm(4'hf, 6'h00, 2, im(32'h100)),
+              movi(3, 32'h80), add(3, 3, 4), rmr(4'hf, 4, 5, im(32'd0)),
+              add(1, 1, 6), print(6, NO_IMM)});
+        // 0x100番地へ10が書かれ，それを読み戻せ，10が出力される
+        expect_end();
+        expect_mem32(32'h100, 32'd10);
+        expect_reg(5, 32'd10);
+        expect_output('{32'd10});
+
+        // ADDで作った値を，直後のSLLのシフト量と，直後の分岐のrs1・rs2に使う
+        `BEGIN_TEST("1サイクル命令の結果を直後の命令がシフト量・分岐の比較に使える");
+        run('{movi(1, 32'd5), movi(6, 32'd1), add(6, 6, 7), sll(1, 7, 8, NO_IMM),
+              movi(10, 32'd10), add(1, 1, 9), eq(9, 10, im(2)), movi(11, 32'd1),
+              add(1, 1, 12), eq(10, 12, im(2)), movi(13, 32'd1)});
+        // 5を2ビットシフトした20になり，どちらの分岐も成立して代入を飛び越える
+        expect_end();
+        expect_reg(8, 32'd20);
+        expect_reg(11, 32'd0);
+        expect_reg(13, 32'd0);
+
+        // ADDで作った4番地へ直後のJMPで飛び，ADDで作った8番地の関数を直後のCALLで呼ぶ
+        `BEGIN_TEST("1サイクル命令の結果を直後のJMP・CALLが飛び先に使える");
+        run('{movi(1, 32'd2), add(1, 1, 3), jmp(3, NO_IMM), movi(2, 32'd1),
+              movi(5, 32'd4), add(5, 5, 6), call(6, NO_IMM), jmp(6'h00, im(10)),
+              movi(7, 32'd1), ret()});
+        // JMPはr2への代入を飛び越え，CALLは関数を実行して戻り先7を積む
+        expect_end();
+        expect_reg(2, 32'd0);
+        expect_reg(7, 32'd1);
+        expect_reg(SP_ADDR, 32'h8000);
+        expect_mem32(32'h7ffc, 32'd7);
+
+        // 実行に数十サイクルかかるDIVだけの命令列と，その後に1サイクル命令を5個並べた命令列を実行する
+        `BEGIN_TEST("長く待つ命令の後も1サイクル命令は1命令1サイクルで実行される");
+        run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, NO_IMM)});
+        base = cycles;
+        run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, NO_IMM),
+              movi(4, 32'd4), movi(5, 32'd5), movi(6, 32'd6), movi(7, 32'd7), movi(8, 32'd8)});
+        // 並べた5命令ぶんのサイクル数だけ多くかかる
+        expect_end();
+        expect_reg(8, 32'd8);
+        expect_cycles(base + 5);
+
+        // r1への代入だけの命令列と，その後に成立しない分岐を3個並べた命令列を実行する
+        `BEGIN_TEST("成立しない分岐は1サイクルで実行される");
+        run('{movi(1, 32'd1)});
+        base = cycles;
+        run('{movi(1, 32'd1), ne(0, 0, im(5)), ne(0, 0, im(5)), ne(0, 0, im(5))});
+        // 並べた3命令ぶんのサイクル数だけ多くかかる
+        expect_end();
+        expect_cycles(base + 3);
+
+        // r1への代入の後に，次の番地へ分岐する成立する分岐を3個並べた命令列を実行する
+        `BEGIN_TEST("成立する分岐は飛び先から取得し直すため4サイクルかかる");
+        run('{movi(1, 32'd1), eq(0, 0, im(1)), eq(0, 0, im(1)), eq(0, 0, im(1))});
+        // 3命令ぶんの4倍のサイクル数だけ多くかかる
+        expect_end();
+        expect_cycles(base + 12);
+
+        // 成立する分岐の直後に，N系で未定義のfuncを持つ命令を置き，分岐でそれを飛び越える
+        `BEGIN_TEST("成立した分岐で飛び越えた実行できない命令では停止しない");
+        run('{eq(0, 0, im(2)), raw(3'h0, 6'h01, 0, 0, 0, NO_IMM), movi(1, 32'd1)});
+        // 停止せずに飛び先の命令が実行される
+        expect_end();
+        expect_reg(1, 32'd1);
+    endtask
+
     initial begin
         // 命令の種類ごとのテストケースを実行する
         test_n_type();
@@ -1439,6 +1592,7 @@ module cpu_tb;
         test_pins();
         test_common();
         test_code_area();
+        test_pipeline();
         // 最後のテストケースを数える
         finish_test();
 

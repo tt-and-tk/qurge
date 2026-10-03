@@ -22,13 +22,6 @@ package alu_p;
         M_TYPE,   // メモリ系
         IO_TYPE   // 標準入出力系
     } type_enum;
-    typedef enum logic[2:0] {    // CPUの実行フェーズ(フェッチや実行などを別のクロックに分ける)
-        CPU_FETCH_SELECT,   // 命令の取得の前段階．PCに応じて取得元(ROMまたはメインメモリの後半)を選び，読み出しを始める
-        CPU_FETCH_ROM,      // ROMの読み出し結果が確定した命令を取り込む
-        CPU_FETCH_RAM,      // メインメモリから，命令を1ワードずつ2回に分けて読み出して取り込む
-        CPU_CHECK,          // 命令を実行可能かどうかチェックする
-        CPU_EXECUTE         // 命令実行
-    } cpu_phase_enum;
 
     // 変数型
     typedef logic [31:0] register_t;   // レジスタサイズ
