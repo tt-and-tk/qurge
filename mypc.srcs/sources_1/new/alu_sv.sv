@@ -903,13 +903,24 @@ module alu_sv (
                     // 代入する余りが残るため，商を優先すると次の命令が読む値とレジスタの中身が
                     // 食い違ってしまう．
                     // プログラムカウンタは書き込み先レジスタの指定を経由せずに更新されるため，渡す命令の番地をそのまま使う．
-                    rs1_val_r <= (command_next.rs1 == PC_ADDR) ? queue_pc[0]
+                    rs1_val_r <=
+                        // 読み出すのがプログラムカウンタなら，渡す命令自身の番地
+                        (command_next.rs1 == PC_ADDR) ? queue_pc[0]
+                        // 割り算がこのサイクルに余りを書き込む番地なら，その余り
                         : (remainder_write_valid && remainder_write_addr == command_next.rs1) ? remainder_write_value
+                        // 複数サイクル命令がこのサイクルに結果を書き込む番地なら，その結果
                         : (late_write_valid      && late_write_addr      == command_next.rs1) ? late_write_value
+                        // それ以外は，レジスタから読んだ値
                         : register[command_next.rs1];
-                    rs2_val_r <= (command_next.rs2 == PC_ADDR) ? queue_pc[0]
+                    // 第2オペランドも，第1オペランドと同じ優先順で選ぶ
+                    rs2_val_r <=
+                        // 読み出すのがプログラムカウンタなら，渡す命令自身の番地
+                        (command_next.rs2 == PC_ADDR) ? queue_pc[0]
+                        // 割り算がこのサイクルに余りを書き込む番地なら，その余り
                         : (remainder_write_valid && remainder_write_addr == command_next.rs2) ? remainder_write_value
+                        // 複数サイクル命令がこのサイクルに結果を書き込む番地なら，その結果
                         : (late_write_valid      && late_write_addr      == command_next.rs2) ? late_write_value
+                        // それ以外は，レジスタから読んだ値
                         : register[command_next.rs2];
                     // 読み出しアドレスが，このサイクルに完了する1サイクル命令の書き込み先と重なる場合は，実行段の入口で
                     // その結果(このサイクルにalu_result_rへ入る値)を使う．プログラムカウンタは書き込み先にならないため重ならない
