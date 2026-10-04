@@ -268,7 +268,7 @@ module cpu_tb;
     function automatic void take_snapshot();
         for (int i = 0; i <= REGISTER_MAX_ADDR; i++)
             regs[i] = dut.alu_sv_0.register[i];
-        // PCはレジスタ配列ではなく，実行段の命令の番地を保持するex_pcから写し取る(停止を検出したサイクルには停止した番地になる)
+        // PCはレジスタ配列ではなく，実行段の命令の番地を保持するex_pcから写し取る(実行段で停止した場合は停止した番地になる)
         regs[PC_ADDR] = dut.alu_sv_0.ex_pc;
     endfunction
 
@@ -309,6 +309,8 @@ module cpu_tb;
     // 前の実行でメモリへ書いた値を残す場合は3番目の引数を1にする
     task automatic run(input machine_t body[$], input bit append_end = 1'b1, input bit keep_ram = 1'b0);
         machine_t instructions[$] = body;  // ROMへ書き込む命令列
+        bit       unreachable_halt;        // このサイクルに，命令を置けない番地へ進んだことで停止するか
+        int       unreachable_pc;          // その停止で停止する番地
 
         // 命令列の直後の番地を正常終了を表す命令の番地とし，そこに自分自身へジャンプする命令を置く
         end_pc = body.size();
@@ -336,6 +338,10 @@ module cpu_tb;
 
         // 停止・正常終了・打ち切りのいずれかに至るまで1サイクルずつ進める
         for (int cycle = 0; ; cycle++) begin
+            // ROMにもメモリの後半にも命令を置けない番地へ進んで停止する場合は，CPUがその番地をどこにも残さないため，
+            // 停止する前のこのサイクルのうちに，停止するかとその番地(取得用のプログラムカウンタ)を控える
+            unreachable_halt = dut.alu_sv_0.pipeline_drained && !dut.alu_sv_0.pc_in_code_area;
+            unreachable_pc   = dut.alu_sv_0.fetch_pc;
             // クロックの立ち上がりで更新された値が確定するのを待つ
             @(posedge clk);
             #1;
@@ -362,6 +368,9 @@ module cpu_tb;
 
         // 実行を終えた時点のレジスタの値を写し取る
         take_snapshot();
+        // 命令を置けない番地へ進んで停止した場合は，控えておいたその番地を停止した番地とする
+        if (outcome == HALTED && unreachable_halt)
+            regs[PC_ADDR] = unreachable_pc;
     endtask
 
     // ===== 合否の判定 =====
