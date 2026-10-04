@@ -268,6 +268,8 @@ module cpu_tb;
     function automatic void take_snapshot();
         for (int i = 0; i <= REGISTER_MAX_ADDR; i++)
             regs[i] = dut.alu_sv_0.register[i];
+        // PCはレジスタ配列ではなく，実行段の命令の番地(停止した場合は停止した番地)を保持するex_pcから写し取る
+        regs[PC_ADDR] = dut.alu_sv_0.ex_pc;
     endfunction
 
     // メインメモリをすべて0にする
@@ -347,7 +349,7 @@ module cpu_tb;
                 break;
             end
             // 正常終了を表す命令の実行に入った
-            if (append_end && dut.alu_sv_0.register[PC_ADDR] == end_pc && dut.alu_sv_0.ex_occupied) begin
+            if (append_end && dut.alu_sv_0.ex_pc == end_pc && dut.alu_sv_0.ex_occupied) begin
                 outcome = ENDED;
                 break;
             end

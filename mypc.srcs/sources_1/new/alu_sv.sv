@@ -132,7 +132,8 @@ module alu_sv (
         default:  '0
     };
 
-    // 内部レジスタ．プログラムカウンタ(PC_ADDR)は，実行段の命令の番地を保持する
+    // 内部レジスタ．プログラムカウンタの番地(PC_ADDR)の要素は使わない．命令がプログラムカウンタを読み出すと，
+    // 確認段でその命令自身の番地に差し替え，実行段の命令の番地は専用のex_pcで保持するため
     register_t register[REGISTER_MAX_ADDR:0] = REGISTER_INIT;
 
     // 外部ピンからの非同期入力の準安定状態を消す2段のシフトレジスタ(添字1が後段)
@@ -222,6 +223,9 @@ module alu_sv (
     // 書き換えず，最後に実行した命令の値を保持したままにする．実行段の値から求める組み合わせ回路の結果は，
     // このフラグが1の間だけ使い，0の間は求められた値を使わない
     logic ex_occupied = 1'b0;
+    // 実行段の命令の番地．分岐の飛び先とCALLの戻り先を求めるのに使う．ROMにもメモリの後半にも命令を置けない番地へ
+    // 進んで停止した場合は，その番地を停止した番地として保持する
+    register_t ex_pc = '0;
     // 実行段の命令の機械語．ex_occupiedが0の間は前回実行した命令の値が残ったままで，意味を持たない
     machine_p::machine_t current_instruction = nop();
 
@@ -411,12 +415,12 @@ module alu_sv (
     // 分岐・ジャンプを行わない命令の次の番地(現在の番地の直後)．オペランドの値に依存せず
     // プログラムカウンタだけから求まる
     register_t sequential_pc;
-    assign sequential_pc = register[PC_ADDR] + 1;
+    assign sequential_pc = ex_pc + 1;
 
     // 実行段の命令の次に実行する命令の番地．参照してよいのは実行段に命令がある間だけ．
     // それ以外では，命令タイプと，比較と飛び先の指定に使う値が直前に実行した命令のものが残っているだけで，結果に意味がない．
     register_t next_pc;
-    assign next_pc = is_branch_taken ? register[PC_ADDR] + imm_r[31:0]  // 比較結果がtrueの分岐は指定されたぶん離れた番地へ
+    assign next_pc = is_branch_taken ? ex_pc + imm_r[31:0]              // 比較結果がtrueの分岐は指定されたぶん離れた番地へ
                    : is_jumping      ? jump_target                      // 移動する命令は指定された飛び先へ
                    : sequential_pc;                                     // それ以外は次の番地へ進む
 
@@ -745,6 +749,7 @@ module alu_sv (
             fetching_upper_word <= 1'b0;
             ram_fetch_lower_r <= '0;
             ex_occupied <= 1'b0;
+            ex_pc <= '0;
             current_instruction <= nop();
             rs1_val_r <= '0;
             rs2_val_r <= '0;
@@ -1293,16 +1298,13 @@ module alu_sv (
 
             // ===== 実行段: 実行段の命令の番地 =====
 
-            // 分岐が成立した場合とジャンプ系の命令の完了時は飛び先，確認段から命令を受け取る場合はその命令の番地にする．
+            // 確認段から命令を受け取る場合はその命令の番地にする(実行できず停止する命令でも，停止した番地として同じく保持する)．
             // ROMにもメモリの後半にも命令を置けない番地へ進んで停止する場合は，その番地を停止した番地とする
-            if (ex_redirects) begin
-                register[PC_ADDR] <= next_pc;
-            end
-            else if (dispatch) begin
-                register[PC_ADDR] <= queue_pc[0];
+            if (dispatch) begin
+                ex_pc <= queue_pc[0];
             end
             else if (pipeline_drained && !pc_in_code_area) begin
-                register[PC_ADDR] <= fetch_pc;
+                ex_pc <= fetch_pc;
             end
 
             // ===== IOからレジスタへの取り込み =====
