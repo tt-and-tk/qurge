@@ -150,10 +150,21 @@ module alu_sv (
 
     // ===== 取得段: ROMからの命令の取得 =====
 
-    // 次にROMへ出す番地(次に取得する命令のプログラムカウンタ)．
+    // 順番どおりに取得していく場合に，次にROMへ出す番地．
     // プログラムカウンタはROMの外(メモリの後半など)も指すため，ROMへ渡せる幅(pc_bus_t)ではなく，
-    // 命令から読み出せるプログラムカウンタと同じ32ビットのregister_tで持つ
-    register_t fetch_pc = '0;
+    // 命令から読み出せるプログラムカウンタと同じ32ビットのregister_tで持つ(以下の番地も同様)
+    register_t fetch_next_pc = '0;
+    // 前のサイクルに実行段が分岐・ジャンプで後の命令を捨てたか．捨てた次のサイクルに飛び先から取得し直す
+    logic redirect_pending = 1'b0;
+    // 前のサイクルに実行段が求めた飛び先．redirect_pendingが1のときだけ意味を持つ
+    register_t redirect_pc = '0;
+
+    // このサイクルにROMへ出す番地(次に取得する命令のプログラムカウンタ)．取得し直すサイクルは飛び先，それ以外は順番どおりの番地．
+    // 飛び先を求めたサイクルにfetch_next_pcへ直接入れないのは，fetch_next_pcがROMの番地入力へ配るために多数複製され，
+    // 分岐の比較結果から全ての複製までの経路が1クロックに収まらないため．1サイクル遅らせて控えたレジスタから選べば，
+    // ROMの番地入力の手前はレジスタの値の選択だけになり，取得し直す番地をROMへ出すサイクルは変わらない
+    register_t fetch_pc;
+    assign fetch_pc = redirect_pending ? redirect_pc : fetch_next_pc;
     // 前のサイクルにROMへ番地を出したか．出していれば，このサイクルにその結果がROMから出てくる
     logic fetch_pending = 1'b0;
     // 前のサイクルにROMへ出した番地
@@ -739,7 +750,9 @@ module alu_sv (
         // リセット
         if (!resetn || is_halted) begin
             // 取得段・命令キュー・実行段をリセット
-            fetch_pc <= '0;
+            fetch_next_pc <= '0;
+            redirect_pending <= 1'b0;
+            redirect_pc <= '0;
             fetch_pending <= 1'b0;
             fetch_pending_pc <= '0;
             queue_instruction <= '{default: nop()};
@@ -820,14 +833,14 @@ module alu_sv (
             if (fetch_request) begin
                 fetch_pending_pc <= fetch_pc;
             end
-            // 取得用のプログラムカウンタを，分岐・ジャンプで取得し直す場合は飛び先へ，
-            // ROMへ番地を出したかメインメモリから命令を取り込み終えた場合は次の番地へ進める．
+            // 順番どおりに取得する番地を，ROMへ番地を出したかメインメモリから命令を取り込み終えた場合は，このサイクルに
+            // 取得した番地(取得し直すサイクルなら飛び先)の次へ進める．
             // 取得段は取得した命令が分岐・ジャンプかを調べず，常に順番どおりの次の番地を取得していく．
-            // 飛び先が確定するのは実行段で，そのサイクルに飛び先へ置き換える．
-            // 進めない場合も0を足して毎サイクル代入し，値を保つ分岐を書かない．値を保つ分岐があると，合成で
-            // クロックイネーブルが作られ，分岐の比較結果から，ROMの番地を配るために複製された多数のfetch_pcの
-            // クロックイネーブルまでの経路にLUTが2段増え，1クロックに収まらないため
-            fetch_pc <= ex_redirects ? next_pc : fetch_pc + register_t'(fetch_request || ram_fetch_done);
+            // 飛び先が確定するのは実行段で，飛び先を控えて次のサイクルに置き換える(fetch_pcを参照)
+            fetch_next_pc <= fetch_pc + register_t'(fetch_request || ram_fetch_done);
+            // 実行段が分岐・ジャンプで後の命令を捨てるかと，その飛び先を控える
+            redirect_pending <= ex_redirects;
+            redirect_pc <= next_pc;
 
             // ===== 取得段: メモリの後半からの命令の取得 =====
 
