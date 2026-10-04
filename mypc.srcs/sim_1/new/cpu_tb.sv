@@ -1642,8 +1642,16 @@ module cpu_tb;
         expect_mem32(32'h7ffc, 32'd2);
         expect_cycles(base - 3);
 
+        // 呼んだ関数の先頭ですぐにRETで戻る
+        `BEGIN_TEST("即値のCALLの飛び先の先頭がRETでも復帰する");
+        run('{call(6'h00, im(3)), movi(1, 32'd1), jmp(6'h00, im(4)), ret()});
+        // 戻り先の代入が実行され，SPが元に戻る
+        expect_end();
+        expect_reg(1, 32'd1);
+        expect_reg(SP_ADDR, 32'h8000);
+
         // 呼んだ関数の先頭でCALLを，その関数の先頭でSPを読み，RETを2回続けて戻る
-        `BEGIN_TEST("即値のCALLの飛び先の先頭がCALL・RETでも呼び出し・復帰する");
+        `BEGIN_TEST("即値のCALLの飛び先の先頭がCALLでも呼び出し・復帰する");
         run('{call(6'h00, im(3)), movi(1, 32'd1), jmp(6'h00, im(7)),
               call(6'h00, im(5)), ret(), movr(2, SP_ADDR), ret()});
         // 2段呼び出した中でSPが8減っており，2段戻ってSPが元に戻る
