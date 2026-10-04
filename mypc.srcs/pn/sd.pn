@@ -114,7 +114,6 @@ int sd_init_commands(void) {
     int received;  // R1の後に届く4バイト(R1自体は含まない)を1バイトずつ受け取る変数
     int echoed;    // R7の末尾2バイト(受理された電圧範囲とチェックパターン)
     int ocr_high;  // R3のOCRの最上位バイト(CCSビットを含む)
-    int ready;     // ACMD41が完了を返したか(0:未完了，1:完了)
 
     // CMD0(GO_IDLE_STATE): ソフトリセット．アイドル状態へ入ればin idle stateのみが立った0x01が返る
     response = sd_command(0, 0x00000000, 0x95);
@@ -173,8 +172,7 @@ int sd_init_commands(void) {
 
     // ACMD41(SD_SEND_OP_COND): 初期化の開始指示．内部初期化中は0x01を返し続け，完了すると0x00になる
     // 完了まで最大1秒かかることが規格上許容されているため，それを上回るだけの回数を見る
-    ready = 0;
-    for (int i = 0; i < 50000 && ready == 0; i++) {
+    for (int i = 0; i < 50000; i++) {
         // ACMDはCMDとは別の命令セットで，CMD55の直後の1コマンドだけがそちらとして解釈される
         response = sd_command(55, 0x00000000, 0x65);
         // CMD55が通っていないと続くコマンドは通常のCMD41として解釈されるため，前提が崩れたまま繰り返さず止める
@@ -192,12 +190,14 @@ int sd_init_commands(void) {
             print_response(response);
             return 0;
         }
+        // 完了(0x00)が返れば待ちを終える
         if (response == 0x00) {
-            ready = 1;
+            break;
         }
     }
-    if (ready == 0) {
-        // 上限まで繰り返しても完了しなかった(添えるのは最後に返った応答)
+    // エラー応答は本体で戻っているため，ここに来る応答は0x00か0x01だけである
+    // 0x00でなければ，上限まで繰り返しても完了しなかった(添えるのは最後に返った応答)
+    if (response != 0x00) {
         print("[FAIL] SD card: initialize (ACMD41): not ready");
         print_response(response);
         return 0;
@@ -341,10 +341,13 @@ int sd_write_block(unsigned int block, unsigned char *buf) {
 
     // カードはデータを受け取ると，下位5ビットで受理(0x05)・CRCエラー・書き込みエラーを表す応答を返す
     // 応答はMISOのアイドル値(0xff)と違ってbit4が0になるため，それが現れるまで読む(規格上は直後に返るが，余裕を見て16回まで読む)
-    response = 0xff;
-    for (int i = 0; i < 16 && (response & 0x10) != 0; i++) {
+    for (int i = 0; i < 16; i++) {
         response = spi_transfer(0xff);
+        if ((response & 0x10) == 0) {
+            break;
+        }
     }
+    // 上限まで読んでも応答が現れなければbit4が1のまま残り，受理の値と一致しないため失敗になる
     if ((response & 0x1f) != 0x05) {
         sd_release();
         return 0;
