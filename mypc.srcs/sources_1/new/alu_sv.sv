@@ -486,6 +486,10 @@ module alu_sv (
     register_t        remainder_write_value;
 
     always_comb begin
+        // 既定値として「完了せず何も書き込まない」を与え，下の場合分けで該当する命令だけが上書きする．
+        // 全ての出力に既定値を与えておくのは，場合分けで代入しない経路があると前の値を保持するラッチが作られるため．
+        // 書き込み先・値は書き込む命令でしか使わないため，その命令で最もよく使う値(rd_addr_r・除算IPの余り)を
+        // 既定値にし，場合分けでの代入を減らしている
         ex_completes          = 1'b0;
         ex_alu_write          = 1'b0;
         late_write_valid      = 1'b0;
