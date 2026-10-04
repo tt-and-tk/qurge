@@ -111,12 +111,44 @@ int sd_init_commands(void) {
     // R7: CMD8だけが返す形式で，R1に4バイトが続く
 
     int response;  // 各コマンドのR1応答
+    int busy;      // CMD0の前のビジー待ちでカードから最後に受け取ったバイト(ビジーが解けるとMISOのアイドル値0xffになる)
     int received;  // R1の後に届く4バイト(R1自体は含まない)を1バイトずつ受け取る変数
     int echoed;    // R7の末尾2バイト(受理された電圧範囲とチェックパターン)
     int ocr_high;  // R3のOCRの最上位バイト(CCSビットを含む)
 
     // CMD0(GO_IDLE_STATE): ソフトリセット．アイドル状態へ入ればin idle stateのみが立った0x01が返る
-    response = sd_command(0, 0x00000000, 0x95);
+    // 1回で通るとは限らないため，0x01が返るまで送り直す(上限の10回は一般的なドライバ(ArduinoのSdFat)にならう)
+    for (int attempt = 0; attempt < 10; attempt++) {
+        // 前回の実行がブロックの読み書きの途中で止まっていると，電源が入ったままのカードはその転送の続きにいる
+        // 1ブロックの転送(開始トークン・512バイト・CRC2バイト)を上回る520バイトを送り，残った転送を最後まで進めて終わらせる
+        // 読み出し途中のデータを応答と取り違えないよう，1回目のCMD0の前にも行う
+        // カードは選択中でないと転送を進めないため，SSはLowのまま送る
+        // SdFatはここでマルチブロック書き込みを止めるトークン(0xfd)も送るが，このドライバはマルチブロック書き込みを使わないため送らない
+        for (int i = 0; i < 520; i++) {
+            spi_transfer(0xff);
+        }
+        // 書き込みを終わらせるとカードはビジー(MISOがLow)に入り，その間はコマンドを受け付けないため，アイドル値(0xff)へ戻るまで待つ
+        // 上限はsd_write_blockのビジー待ちと同じ回数(規格上の書き込み時間の上限を上回る)
+        for (int i = 0; i < 1000000; i++) {
+            busy = spi_transfer(0xff);
+            if (busy == 0xff) {
+                break;
+            }
+        }
+        // 上限まで待っても解けなければ，MISOがLowに張り付いているとみなし，送り直しても通らないため止める
+        // ここでCMD0を送ると，sd_commandはLowを応答0x00と取り違えて失敗の理由を誤るため送らない
+        if (busy != 0xff) {
+            print("[FAIL] SD card: reset (CMD0): busy");
+            print_response(busy);
+            return 0;
+        }
+        response = sd_command(0, 0x00000000, 0x95);
+        // 0x01が返れば送り直しを終える
+        if (response == 0x01) {
+            break;
+        }
+    }
+    // 上限まで送り直しても通らなければ，最後に返った応答で失敗の理由を判定する
     // 無応答(0xff)はカードが差さっていない場合に起きるため，他の応答と分けて伝える
     if (response == 0xff) {
         print("[FAIL] SD card: reset (CMD0): no response");
