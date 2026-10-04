@@ -1307,11 +1307,12 @@ module alu_sv (
             if (remainder_write_valid) begin
                 register[remainder_write_addr] <= remainder_write_value;
             end
-            // 実行段に命令が入っているかを更新する．実行できる命令を受け取れば入り，受け取らずに命令が完了すれば空く．
-            // 分岐・ジャンプで後の命令を捨てる場合は，同じサイクルに受け取った命令も捨てるため空く
+            // 実行段に命令が入っているかを更新する
+            // 実行できる命令を受け取れば入る(分岐・ジャンプで後の命令を捨てる場合は，同じサイクルに受け取った命令も捨てるため除く)
             if (dispatch && check_executable && !ex_redirects) begin
                 ex_occupied <= 1'b1;
             end
+            // 受け取らずに命令が完了すれば空く(後の命令を捨てる場合もここに来る)
             else if (ex_completes) begin
                 ex_occupied <= 1'b0;
             end
