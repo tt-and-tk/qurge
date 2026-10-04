@@ -39,6 +39,18 @@ PYNQ-Z2(Zynq-7000)上に実装する自作CPUと，それを動かすソフト�
 - `mypc.xpr`: 開いた場所の絶対パス・各ソースの取り込み時刻・上記チェックポイントのパスを保持している．絶対パスと取り込み時刻は開くだけで書き換わる．チェックポイントのパスは，記録された場所と異なるディレクトリでチェックポイントが無い状態から合成すると，プロジェクト起点の`$PSRCDIR/...`から`$PPRDIR/..`でプロジェクトの外をたどる相対パスに書き換わる．ソースやブロックダイアグラムを変更して`mypc.xpr`を正当にコミットする場合も，これらの行だけは元の値に戻してからコミットする(開いた場所によって値が変わるため，そのまま入れるとディレクトリを移るたびに書き換わり続ける)
 - ブロックダイアグラム: 自作HDLを取り込んだブロックの`ip_revision`(`top.bd`と，そのブロックの`.xci`．`.xci`では`IPREVISION`も同じ値を持つ)は，Vivadoがそのブロックを更新するたびに変わる(値は更新した時刻とみられる)．別の場所で開いて合成すると変わり，同じ場所で開き直すだけでは変わらない．ブロックダイアグラムの差分がこれらの値だけの場合は，ファイルを編集せずgitで差分を破棄する．ブロックダイアグラムを正当に変更したコミットでは，`ip_revision`の変更もそのまま含める(`mypc.xpr`の行と違い開いた場所そのものを表す値ではなく，同じ`.xci`でポート定義が変わっているのに版番号だけ戻すと食い違った状態になるため)
 
+### QosmosのROMの生成
+
+ROMの内容(`mypc.srcs/sources_1/new/rom_sv.sv`)は，QosmosのPynesisソース(`mypc.srcs/pn/`)から生成する．Vivadoはこの変換を行わず，生成済みの`rom_sv.sv`を他のHDLソースと同じく読み込むだけである．このため，`mypc.srcs/pn/`配下を変更したら，合成の前にリポジトリ直下で次を実行して`rom_sv.sv`を生成し直す．
+
+```
+pn2mc.exe -pn mypc.srcs/pn/qosmos.pn -pt mypc.srcs/pn/qosmos.pt -sv mypc.srcs/sources_1/new/rom_sv.sv
+```
+
+`pn2mc.exe`は`compiler`リポジトリでビルドしたものを使い，起動引数は`specification`の`compiler.md`を参照する．`-sv`を省略すると`.pt`と同じ場所へ出力されVivadoが読む`rom_sv.sv`は更新されないため，省略しない．
+
+生成し直した`rom_sv.sv`に差分が出たら，`.pn`の変更と同じコミットに含める．チェックアウトした直後に変換ツールなしで合成できるよう，`rom_sv.sv`もGit管理下に置いているためである．
+
 ### CPUのシミュレーション
 
 CPUの命令の動作は，合成せずVivado付属のシミュレータで検証できる．Vivadoのbinディレクトリ(`xvlog`・`xelab`・`xsim`)にPATHを通した上で，コマンドプロンプトから`mypc.srcs\sim_1\run_cpu_tb.bat`を実行する．全テストケースが合格すれば終了コード0で終わり，不合格があればその内容を表示して0以外で終わる．引数に`gui`を付けると，実行せずに波形ビューア付きのシミュレータを開く．コンパイル結果とログは`mypc.sim/cpu_tb/`(Git管理外)に出力される．
@@ -91,5 +103,5 @@ mypc/                                  # リポジトリルート(Vivadoプロ�
 | `mypc.srcs/sources_1/new/` | カスタムCPUのHDLソース（主な作業対象） |
 | `mypc.srcs/constrs_1/new/` | PYNQ-Z2ボードのピン制約 (top.xdc) |
 | `mypc.srcs/cpp/` | PS(ARM)側のC++プログラム(`run.cpp`が現行版)．`compile.sh`はPYNQ-Z2ボード上でビルドする際に使うスクリプト |
-| `mypc.srcs/pn/` | ROM上で動くQosmosのPynesisソース(`.pn`)．入口の`qosmos.pn`を，`compiler`の`pn2asm.exe`でアセンブリへ，`assembler`の`asm2mc.exe`で`mypc.srcs/sources_1/new/rom_sv.sv`へ変換する(中間生成物の`.pt`は`.gitignore`対象)．`lib/`は，Qosmosの実行ファイルのソースが取り込むライブラリ(ROMには入らない．番号などの取り決めを置くファイルはシェルも取り込む) |
+| `mypc.srcs/pn/` | ROM上で動くQosmosのPynesisソース(`.pn`)．入口は`qosmos.pn`で，「QosmosのROMの生成」の手順で`rom_sv.sv`へ変換する．`lib/`は，Qosmosの実行ファイルのソースが取り込むライブラリ(ROMには入らない．番号などの取り決めを置くファイルはシェルも取り込む) |
 | `mypc.srcs/sim_1/` | テストベンチ(`new/`)と，それをコンパイル・実行するスクリプト．実行方法は「CPUのシミュレーション」を参照 |
