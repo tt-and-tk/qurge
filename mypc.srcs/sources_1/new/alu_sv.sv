@@ -354,15 +354,17 @@ module alu_sv (
     // このサイクルに命令キューへ命令を取り込むか
     logic queue_push;
     assign queue_push = rom_arrived || ram_arrived;
-    // 取り込む命令の機械語・プログラムカウンタ・命令を置ける番地から取得できたか．
-    // 取得できたかは，ROMから届いた命令では，ROMが命令とともに返すrom_read.valid(番地がROMに格納された命令数の
-    // 範囲内か)をそのまま使う．番地がROMへ渡せる幅に収まるかは，収まる番地しかROMへ出さない(fetch_request)ため確かめなくてよい．
-    // メインメモリから届いた命令は，メモリの後半を指す番地でしか取得しないため，常に取得できたものとする
+    // 取り込む命令の機械語・プログラムカウンタ・命令を置ける番地から取得できたか
     machine_p::machine_t push_instruction;
     register_t           push_pc;
     logic                push_pc_valid;
+    // 機械語は，ROMから届いた命令ではROMの出力，メインメモリから届いた命令では届いた上位ワードと控えておいた下位ワード
     assign push_instruction = rom_arrived ? rom_read.machine : {ram_read.data, ram_fetch_lower_r};
+    // プログラムカウンタは，ROMから届いた命令では番地を出したときに控えた番地，メインメモリから届いた命令では取得用のプログラムカウンタ
     assign push_pc          = rom_arrived ? rom_arrived_pc : fetch_pc;
+    // 取得できたかは，ROMから届いた命令では，ROMが命令とともに返すrom_read.valid(番地がROMに格納された命令数の範囲内か)を使う．
+    // 番地がROMへ渡せる幅に収まるかは，収まる番地しかROMへ出さない(fetch_request)ため確かめなくてよい．
+    // メインメモリから届いた命令は，メモリの後半を指す番地でしか取得しないため，常に取得できたものとする
     assign push_pc_valid    = rom_arrived ? rom_read.valid   : 1'b1;
 
     // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
