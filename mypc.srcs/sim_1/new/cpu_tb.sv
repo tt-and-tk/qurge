@@ -268,7 +268,7 @@ module cpu_tb;
     function automatic void take_snapshot();
         for (int i = 0; i <= REGISTER_MAX_ADDR; i++)
             regs[i] = dut.alu_sv_0.register[i];
-        // PCはレジスタ配列ではなく，実行段の命令の番地(停止した場合は停止した番地)を保持するex_pcから写し取る
+        // PCはレジスタ配列ではなく，実行段の命令の番地を保持するex_pcから写し取る(停止を検出したサイクルには停止した番地になる)
         regs[PC_ADDR] = dut.alu_sv_0.ex_pc;
     endfunction
 
