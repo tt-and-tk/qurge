@@ -41,7 +41,7 @@ PYNQ-Z2(Zynq-7000)上に実装する自作CPUと，それを動かすソフト�
 
 ### QosmosのROMの生成
 
-ROMの内容(`mypc.srcs/sources_1/new/rom_sv.sv`)は，QosmosのPynesisソース(`mypc.srcs/pn/`)から生成する．直接編集しても次の生成で上書きされるため，変更は`.pn`に対して行う．Vivadoはこの変換を行わず，生成済みの`rom_sv.sv`を他のHDLソースと同じく読み込むだけである．このため，`mypc.srcs/pn/`配下を変更したら，合成の前にリポジトリ直下で次を実行して`rom_sv.sv`を生成し直す．
+ROMの内容(`mypc.srcs/sources_1/new/rom_sv.sv`)は，QosmosのPynesisソース(`mypc.srcs/pn/`)から生成する．直接編集しても次の生成で上書きされるため，変更は`.pn`に対して行う．Vivadoはこの変換を行わず，生成済みの`rom_sv.sv`を他のHDLソースと同じく読み込むだけである．このため，`mypc.srcs/pn/`配下を変更したときと，コンパイラ・アセンブラを更新して生成結果が変わりうるときは，合成の前にリポジトリ直下で次を実行して`rom_sv.sv`を生成し直す．
 
 ```
 pn2mc.exe -pn mypc.srcs/pn/qosmos.pn -pt mypc.srcs/pn/qosmos.pt -sv mypc.srcs/sources_1/new/rom_sv.sv
@@ -49,7 +49,7 @@ pn2mc.exe -pn mypc.srcs/pn/qosmos.pn -pt mypc.srcs/pn/qosmos.pt -sv mypc.srcs/so
 
 `pn2mc.exe`は`compiler`リポジトリでビルドし，そのディレクトリにPATHを通しておく．起動引数は`specification`の`compiler.md`を参照する．`-sv`を省略すると`.pt`と同じ場所へ出力されVivadoが読む`rom_sv.sv`は更新されないため，省略しない．
 
-生成し直した`rom_sv.sv`に差分が出たら，`.pn`の変更と同じコミットに含める．チェックアウトした直後に変換ツールなしで合成できるよう，`rom_sv.sv`もGit管理下に置いているためである．
+生成し直した`rom_sv.sv`に差分が出たらコミットする．`.pn`の変更によるものはその変更と同じコミットに含め，コンパイラ・アセンブラの更新によるものは単独でコミットする．チェックアウトした直後に変換ツールなしで合成できるよう，`rom_sv.sv`もGit管理下に置いているためである．
 
 ### CPUのシミュレーション
 
