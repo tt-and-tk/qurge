@@ -1634,14 +1634,124 @@ module cpu_tb;
         expect_end();
         expect_cycles(base + 12);
 
-        // r1への代入だけの命令列と，その後に次の番地へのJMPを3個並べた命令列を実行する
-        `BEGIN_TEST("JMPは飛び先が次の番地でも取得し直すため4サイクルかかる");
+        // r1への代入だけの命令列と，その後に次の番地への即値のJMPを3個並べた命令列を実行する
+        `BEGIN_TEST("即値のJMPは届いた時点で飛び先から取得するため2サイクルで実行される");
         run('{movi(1, 32'd1)});
         base = cycles;
         run('{movi(1, 32'd1), jmp(6'h00, im(2)), jmp(6'h00, im(3)), jmp(6'h00, im(4))});
-        // 3命令ぶんの4倍のサイクル数だけ多くかかる
+        // 3命令ぶんの2倍のサイクル数だけ多くかかる
         expect_end();
-        expect_cycles(base + 12);
+        expect_cycles(base + 6);
+
+        // r1への代入だけの命令列と，その後にr1が指す次の番地へのJMPを置いた命令列を実行する
+        `BEGIN_TEST("レジスタの番地へのJMPは実行段で取得し直すため4サイクルかかる");
+        run('{movi(1, 32'd2)});
+        base = cycles;
+        run('{movi(1, 32'd2), jmp(1, NO_IMM)});
+        // 1命令ぶんの4倍のサイクル数だけ多くかかる
+        expect_end();
+        expect_cycles(base + 4);
+
+        // 同じ番地の関数を，即値のCALLとレジスタの番地へのCALLでそれぞれ呼ぶ
+        `BEGIN_TEST("即値のCALLはレジスタの番地へのCALLより3サイクル早く終わる");
+        run('{movi(1, 32'd2), call(1, NO_IMM)});
+        base = cycles;
+        run('{movi(1, 32'd2), call(6'h00, im(2))});
+        // 呼び出しが正しく行われる．即値のCALLはスタックへの書き込みを待つ間に飛び先を取得し終え，
+        // 完了の次のサイクルに飛び先を実行できる．レジスタの番地へのCALLは完了後に4サイクルかかるため，3サイクル早い
+        expect_end();
+        expect_reg(SP_ADDR, 32'h7ffc);
+        expect_mem32(32'h7ffc, 32'd2);
+        expect_cycles(base - 3);
+
+        // 呼んだ関数の先頭ですぐにRETで戻る
+        `BEGIN_TEST("即値のCALLの飛び先の先頭がRETでも復帰する");
+        run('{call(6'h00, im(3)), movi(1, 32'd1), jmp(6'h00, im(4)), ret()});
+        // 戻り先の代入が実行され，SPが元に戻る
+        expect_end();
+        expect_reg(1, 32'd1);
+        expect_reg(SP_ADDR, 32'h8000);
+
+        // 呼んだ関数の先頭でCALLを，その関数の先頭でSPを読み，RETを2回続けて戻る
+        `BEGIN_TEST("即値のCALLの飛び先の先頭がCALLでも呼び出し・復帰する");
+        run('{call(6'h00, im(3)), movi(1, 32'd1), jmp(6'h00, im(7)),
+              call(6'h00, im(5)), ret(), movr(2, SP_ADDR), ret()});
+        // 2段呼び出した中でSPが8減っており，2段戻ってSPが元に戻る
+        expect_end();
+        expect_reg(1, 32'd1);
+        expect_reg(2, 32'h7ff8);
+        expect_reg(SP_ADDR, 32'h8000);
+
+        // 呼んだ関数の先頭で，SPからの相対位置のRMRで積まれた戻り先を読む
+        `BEGIN_TEST("即値のCALLの飛び先の先頭のRMRは下げた後のSPから戻り先を読む");
+        run('{call(6'h00, im(3)), movi(1, 32'd1), jmp(6'h00, im(5)), rmr(4'hf, SP_ADDR, 2, im(0)), ret()});
+        // 戻り先1が読め，戻った後の代入も実行される
+        expect_end();
+        expect_reg(1, 32'd1);
+        expect_reg(2, 32'd1);
+
+        // r1を3から1ずつ減らし，0になったら抜けるループを，末尾の後方への即値のJMPで先頭の判定へ戻して回す
+        `BEGIN_TEST("後方への即値のJMPで戻るループを繰り返してから抜ける");
+        run('{movi(1, 32'd3), movi(3, 32'd1), eq(1, 0, im(4)), sub(1, 3, 1), add(2, 3, 2), jmp(6'h00, im(2))});
+        // 3回繰り返して抜ける
+        expect_end();
+        expect_reg(1, 32'd0);
+        expect_reg(2, 32'd3);
+
+        // 即値のJMPの飛び先に，別の即値のJMPを置く
+        `BEGIN_TEST("即値のJMPの飛び先が即値のJMPでも，飛び越えた命令は実行されない");
+        run('{jmp(6'h00, im(2)), movi(1, 32'd1), jmp(6'h00, im(4)), movi(2, 32'd1), movi(3, 32'd1)});
+        // 2つの代入を飛び越え，最後の代入だけが実行される
+        expect_end();
+        expect_reg(1, 32'd0);
+        expect_reg(2, 32'd0);
+        expect_reg(3, 32'd1);
+
+        // DIVの実行中に命令キューが満杯になり，その後に届く即値のJMPで代入を飛び越える
+        `BEGIN_TEST("命令キューが満杯の間に届いた即値のJMPも飛び先へ進む");
+        run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, NO_IMM), movi(4, 32'd1), movi(5, 32'd1),
+              jmp(6'h00, im(8)), movi(6, 32'd1), movi(7, 32'd1), movi(8, 32'd1)});
+        // 商が求まり，JMPの手前までと飛び先の代入だけが実行される
+        expect_end();
+        expect_reg(3, 32'd2);
+        expect_reg(5, 32'd1);
+        expect_reg(6, 32'd0);
+        expect_reg(7, 32'd0);
+        expect_reg(8, 32'd1);
+
+        // 成立する分岐の直後に，分岐先の代入を飛び越える即値のJMPを置く(分岐の実行段より後にJMPが届く)
+        `BEGIN_TEST("成立した分岐で飛び越えた即値のJMPの飛び先へは進まない");
+        run('{eq(0, 0, im(2)), jmp(6'h00, im(3)), movi(1, 32'd1), movi(2, 32'd1)});
+        // 分岐先の代入から順に実行される
+        expect_end();
+        expect_reg(1, 32'd1);
+        expect_reg(2, 32'd1);
+
+        // 関数から戻るRETの直後に，戻り先の代入を飛び越える即値のJMPを置く
+        `BEGIN_TEST("RETで飛び越えた即値のJMPの飛び先へは進まない");
+        run('{call(6'h00, im(4)), movi(1, 32'd1), movi(2, 32'd1), jmp(6'h00, im(7)),
+              ret(), jmp(6'h00, im(2)), movi(3, 32'd1)});
+        // 戻り先の代入から順に実行され，RETの後のJMPの飛び先は実行されない
+        expect_end();
+        expect_reg(1, 32'd1);
+        expect_reg(2, 32'd1);
+        expect_reg(3, 32'd0);
+
+        // 成立する分岐の2つ後に，分岐先の代入を飛び越える即値のJMPを置く(分岐の実行段と同じサイクルにJMPが届く)
+        `BEGIN_TEST("成立した分岐の実行と同じサイクルに届いた即値のJMPの飛び先へは進まない");
+        run('{eq(0, 0, im(3)), nop(), jmp(6'h00, im(4)), movi(1, 32'd1), movi(2, 32'd1)});
+        // 分岐先の代入から順に実行される
+        expect_end();
+        expect_reg(1, 32'd1);
+        expect_reg(2, 32'd1);
+
+        // 即値のJMPの直後に，WM・PRINTを置き，JMPでそれを飛び越える
+        `BEGIN_TEST("即値のJMPで飛び越えたWM・PRINTは実行されない");
+        run('{movi(1, 32'd5), jmp(6'h00, im(4)), wm(4'hf, 6'h00, 1, im(32'h100)), print(1, NO_IMM)});
+        // メモリへの書き込みも出力も行われない
+        expect_end();
+        expect_mem32(32'h100, 32'd0);
+        expect_output('{});
 
         // 成立する分岐の直後に，N系で未定義のfuncを持つ命令を置き，分岐でそれを飛び越える
         `BEGIN_TEST("成立した分岐で飛び越えた実行できない命令では停止しない");
