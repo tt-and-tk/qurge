@@ -932,9 +932,12 @@ module alu_sv (
                     mask_r    <= command_next.mask;
                     current_instruction <= queue_instruction[0];
                 end
-                // 実行できない命令は動作を保証できないため，その番地で停止させる．ただし，実行段の命令が
-                // 分岐・ジャンプで後の命令を捨てる場合は，捨てられる命令のため停止させない
-                else if (!ex_redirects) begin
+                // 実行段の命令が分岐・ジャンプで後の命令を捨てる場合は，実行できない命令でも捨てられるため何もしない
+                else if (ex_redirects) begin
+                    ;
+                end
+                // 実行できない命令は動作を保証できないため，その番地で停止させる
+                else begin
                     is_halted <= 1'b1;
                 end
             end
