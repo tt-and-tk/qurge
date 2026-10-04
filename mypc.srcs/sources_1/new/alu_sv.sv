@@ -891,19 +891,19 @@ module alu_sv (
             // ===== 取得段: ROMからの命令の取得 =====
 
             // ROMへ番地を出したら，次のサイクルに届く命令を命令キューへ取り込めるよう番地を控える．
-            // 分岐・ジャンプで取得し直す場合と，即値のジャンプが届いた場合は，出した番地の結果を捨てるため控えない
+            // 分岐・ジャンプで取得し直す場合と，先行取得する場合は，出した番地の結果を捨てるため控えない
             rom_arrived <= fetch_request && !ex_redirects && !push_early_jump;
             if (fetch_request) begin
                 rom_arrived_pc <= fetch_pc;
             end
             // 順番どおりに取得する番地を，ROMへ番地を出したかメインメモリから命令を取り込み終えた場合は，このサイクルに
             // 取得した番地(取得し直すサイクルなら飛び先)の次へ進める．
-            // 飛び先は，実行段か即値のジャンプが届いた時点で控え，次のサイクルに置き換える(fetch_pcを参照)
+            // 飛び先は，実行段で取得し直すか先行取得すると決まった時点で控え，次のサイクルに置き換える(fetch_pcを参照)
             fetch_next_pc <= fetch_pc + register_t'(fetch_request || ram_arrived);
             // 実行段が分岐・ジャンプで後の命令を捨てるかと，その飛び先を控える
             redirect_pending <= ex_redirects;
             redirect_pc <= next_pc;
-            // 即値のジャンプが届いたかと，その飛び先を控える
+            // ROMから届いた命令を先行取得するかと，その飛び先を控える
             early_jump_pending <= push_early_jump;
             early_jump_pc <= command_arrived.imm[31:0];
 
