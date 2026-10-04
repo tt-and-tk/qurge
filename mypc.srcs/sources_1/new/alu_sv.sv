@@ -316,7 +316,17 @@ module alu_sv (
 
     // 取得用のプログラムカウンタがROMへ渡せる幅を外れ，パイプラインが空になったか
     logic pipeline_drained;
-    assign pipeline_drained = !fetch_pc_fits && !fetch_pending && queue_count == 0 && !ex_occupied && !fetching_from_ram;
+    assign pipeline_drained =
+        // 取得用のプログラムカウンタがROMへ渡せる幅を外れている(ROMへ番地を出せない)
+        !fetch_pc_fits
+        // ROMから結果を待っている命令がない
+        && !fetch_pending
+        // 命令キュー(確認段を含む)に命令がない
+        && queue_count == 0
+        // 実行段に命令がない
+        && !ex_occupied
+        // メインメモリから命令を読み出している最中でない
+        && !fetching_from_ram;
 
     // このサイクルにメインメモリから上位ワードが届き，命令が揃ったか
     logic ram_fetch_done;
