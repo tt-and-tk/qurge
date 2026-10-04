@@ -195,10 +195,13 @@ module alu_sv (
     logic [$clog2(QUEUE_DEPTH + 1)-1:0] queue_count = '0;
 
     // このサイクルにROMへ番地を出すか．前のサイクルまでのレジスタだけで決め，実行段の完了待ちなどの判定を
-    // 含めない(ROMの番地を出すまでの経路を伸ばさないため)．出した番地の結果を入れる場所が命令キューに
-    // 残るときだけ出す
+    // 含めない(ROMの番地を出すまでの経路を伸ばさないため)
     logic fetch_request;
-    assign fetch_request = fetch_pc_fits && (queue_count + rom_arrived < QUEUE_DEPTH);
+    assign fetch_request =
+        // 取得用のプログラムカウンタがROMへ渡せる幅に収まっている
+        fetch_pc_fits
+        // かつ，次のサイクルに届く命令を取り込む場所が命令キューに残る(入っている命令と，このサイクルに届いた命令を除いても空きがある)
+        && (queue_count + rom_arrived < QUEUE_DEPTH);
 
     // ===== 確認段 =====
 
@@ -650,11 +653,16 @@ module alu_sv (
          || (remainder_write_valid && remainder_write_addr == SPI_ADDR)
         );
 
-    // 確認段の命令をこのサイクルに実行段へ渡すか．実行段が空いているか，このサイクルに空く場合に渡す．
-    // 実行段の命令が分岐・ジャンプで後の命令を捨てる場合も渡す条件に含めない(渡した後に捨てる)のは，
-    // 分岐の比較結果から多数のレジスタの取り込み可否までの経路を作らないため
+    // 確認段の命令をこのサイクルに実行段へ渡すか
     logic dispatch;
-    assign dispatch = check_occupied && (!ex_occupied || ex_completes) && !spi_hazard;
+    assign dispatch =
+        // 確認段に命令が入っている
+        check_occupied
+        // かつ，実行段が空いているか，このサイクルに空く．実行段の命令が分岐・ジャンプで後の命令を捨てる場合も渡して
+        // から捨てる(捨てるかを条件に含めると，分岐の比較結果から多数のレジスタの取り込み可否までの経路ができるため)
+        && (!ex_occupied || ex_completes)
+        // かつ，AR_SPIへの書き込みが終わるのを待つ必要がない
+        && !spi_hazard;
 
     // メモリを読み書きする命令が，メモリへ要求を出す際に呼ぶタスク．番地はmem_addressを使い，
     // 読み書きしてよい範囲(mem_address_in_range)を外れる場合は，折り返した番地へアクセスせず要求を出さずに停止する
