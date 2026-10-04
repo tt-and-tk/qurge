@@ -261,7 +261,8 @@ module alu_sv (
     register_t ex_pc = '0;
     // 実行段の命令の機械語．ex_occupiedが0の間は前回実行した命令の値が残ったままで，意味を持たない
     machine_p::machine_t current_instruction = nop();
-    // 実行段の命令が，届いた時点で飛び先から取得し始めた即値のジャンプか．そうなら実行段では取得し直さない
+    // 実行段の命令が，先行取得した即値のジャンプか．命令キューの印(queue_early_jump)を，実行段へ渡すときに引き継ぐ．
+    // 先行取得した命令なら，実行段では取得し直さない
     logic ex_early_jump = 1'b0;
 
     register_t rs1_val_r = '0;        // 第1オペランドの読み出し値
