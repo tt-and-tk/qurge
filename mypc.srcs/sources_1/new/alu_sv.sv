@@ -47,6 +47,9 @@
 // 確認段で差し替えないのは，演算結果から確認段の比較・選択を経て実行段の入力に至る経路が1クロックに収まらないため．
 // 複数サイクルかかる命令の結果は，メモリ・標準入力・除算IPの出力や掛け算の結果のレジスタから出る値で経路が短いため，確認段で差し替える．
 //
+// 飛び先がイミディエイトデータで指定されたJMP・CALL(以下，即値のジャンプと書く)は，飛び先が命令だけから分かる．
+// このためROMから届いた時点で飛び先を控え，次のサイクルから飛び先を取得する．
+// それ以外の分岐・ジャンプは，実行段で行き先が決まるまで順番どおりに取得を続ける．
 // 分岐が成立した場合とジャンプ系の命令の完了時は，それより後に取得していた命令をすべて捨て，飛び先から取得し直す．
 // 分岐が成立しなかった場合は，順番どおりに取得していた命令をそのまま実行する．
 //
@@ -159,13 +162,21 @@ module alu_sv (
     logic redirect_pending = 1'b0;
     // 前のサイクルに実行段が求めた飛び先．redirect_pendingが1のときだけ意味を持つ
     register_t redirect_pc = '0;
+    // 前のサイクルにROMから即値のジャンプが届いたか．届いた次のサイクルに飛び先から取得する
+    logic early_jump_pending = 1'b0;
+    // 前のサイクルに届いた即値のジャンプの飛び先．early_jump_pendingが1のときだけ意味を持つ
+    register_t early_jump_pc = '0;
 
     // このサイクルにROMへ出す番地(次に取得する命令のプログラムカウンタ)．取得し直すサイクルは控えた飛び先，それ以外は順番どおりの番地を選ぶ．
+    // 実行段と即値のジャンプの両方の飛び先を控えている場合は，実行段を優先する．
+    // 実行段が後の命令を捨てるとき，同じサイクルに届いた即値のジャンプも捨てられるため．
     // 飛び先をfetch_next_pcへ直接入れないのは，ROMを作る多数のブロックRAMへ番地を配るためにfetch_next_pcが合成で
     // 多数複製され，分岐の比較結果から全ての複製までの経路が1クロックに収まらないため
     // (控えたレジスタから選ぶため，飛び先をROMへ出すサイクルは直接入れる場合と変わらない)
     register_t fetch_pc;
-    assign fetch_pc = redirect_pending ? redirect_pc : fetch_next_pc;
+    assign fetch_pc = redirect_pending   ? redirect_pc
+                    : early_jump_pending ? early_jump_pc
+                    : fetch_next_pc;
     // このサイクルにROMから命令が届いたか(前のサイクルにROMへ番地を出したか)
     logic rom_arrived = 1'b0;
     // ROMから届いた命令の番地(前のサイクルにROMへ出した番地)
@@ -192,6 +203,8 @@ module alu_sv (
     register_t queue_pc[QUEUE_DEPTH] = '{default: '0};
     // 命令キューの命令を，命令を置ける番地(ROMの実容量範囲内またはメモリの後半)から取得できたか
     logic queue_pc_valid[QUEUE_DEPTH] = '{default: 1'b1};
+    // 命令キューの命令が，届いた時点で飛び先から取得し始めた即値のジャンプか
+    logic queue_early_jump[QUEUE_DEPTH] = '{default: 1'b0};
     // 命令キューに入っている命令数(0〜QUEUE_DEPTH)
     logic [$clog2(QUEUE_DEPTH + 1)-1:0] queue_count = '0;
 
@@ -242,6 +255,8 @@ module alu_sv (
     register_t ex_pc = '0;
     // 実行段の命令の機械語．ex_occupiedが0の間は前回実行した命令の値が残ったままで，意味を持たない
     machine_p::machine_t current_instruction = nop();
+    // 実行段の命令が，届いた時点で飛び先から取得し始めた即値のジャンプか．そうなら実行段では取得し直さない
+    logic ex_early_jump = 1'b0;
 
     register_t rs1_val_r = '0;        // 第1オペランドの読み出し値
     register_t rs2_val_r = '0;        // 第2オペランドの読み出し値
@@ -370,6 +385,25 @@ module alu_sv (
     // ROMへ渡せる幅にもメモリの後半にも収まらない番地は，どちらからも取得せず命令が届かないため，ここでは扱わない．
     // その番地へ進んだ場合は，パイプラインが空になった時点で停止させる(pipeline_drainedを使う取得段の処理)
     assign push_pc_valid    = rom_arrived ? rom_read.valid   : 1'b1;
+
+    // ROMから届いた命令をデコードする．ROMから命令が届かないサイクルのデコード結果は意味を持たない
+    command_if command_arrived();
+    assign command_arrived.machine = rom_read.machine;
+    decoder_sv decoder_sv_arrived(
+        .command(command_arrived)
+    );
+
+    // このサイクルにROMから届いた命令が即値のジャンプか．そうなら次のサイクルから飛び先を取得する．
+    // メインメモリから届いた命令は対象にせず，実行段で取得し直す．
+    // 速くするのは毎サイクル取得するROMの命令に限り，パイプラインが空になってから1命令ずつ取得するメモリの後半の処理には手を入れない
+    logic push_early_jump;
+    assign push_early_jump =
+        // ROMから命令が届き，命令を置ける番地から取得できた
+        rom_arrived && rom_read.valid
+        // かつ，ジャンプ系のJMPかCALLである
+        && command_arrived.m_type == J_TYPE && (command_arrived.func == JMP || command_arrived.func == CALL)
+        // かつ，飛び先をイミディエイトデータで指定している
+        && command_arrived.imm[32];
 
     // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
     // 実行段に命令がある間(ex_occupiedが1の間)のみ意味を持つ(それ以外では直前に実行した命令の値が残っている)
@@ -576,8 +610,16 @@ module alu_sv (
                     unique case (func_r)
                         // ジャンプは，指定された飛び先へ進む
                         JMP:  ex_completes = 1'b1;
-                        // 関数呼び出しは，戻り先をスタックへ書き込み終えたら飛び先へ進む
-                        CALL: ex_completes = (ram_write_state == EXECUTE) && ram_write.ready;
+                        // 関数呼び出しは，戻り先をスタックへ書き込み終えたら，積んだ戻り先を指すようスタックポインタを下げて飛び先へ進む．
+                        // 下げた値は戻り先を書き込んだ番地そのもので，書き込みの要求時に控えた番地を使う(減算器を経ないため経路が短い)．
+                        // 即値のCALLは後の命令を捨てないため，飛び先の先頭の命令が確認段でスタックポインタを読む場合に備えて，
+                        // 他の複数サイクル命令の結果と同じく確認段へ回す
+                        CALL: begin
+                            ex_completes     = (ram_write_state == EXECUTE) && ram_write.ready;
+                            late_write_valid = (ram_write_state == EXECUTE) && ram_write.ready;
+                            late_write_addr  = SP_ADDR;
+                            late_write_value = register_t'(ram_write.address);
+                        end
                         // 関数リターンは，戻り先をスタックから読み出し終えたら戻り先へ進む
                         RET:  ex_completes = (ram_read_state == EXECUTE) && ram_read.ready;
                         default: ;
@@ -624,9 +666,9 @@ module alu_sv (
     assign ex_redirects =
         // 実行段の命令がこのサイクルに完了する(CALL・RETは完了するまで飛び先が確定しないため)
         ex_completes
-        // かつ，分岐が成立したか，ジャンプ系の命令である．ジャンプ系は飛び先が次の番地でも捨てる(一致を確かめる比較を
-        // 経路に加えないため)．常に捨てるため，CALL・RETが書き換えるスタックポインタを確認段へ回す必要もない
-        && (is_branch_taken || is_jumping);
+        // かつ，分岐が成立したか，届いた時点で飛び先から取得し始めていないジャンプ系の命令である．
+        // ジャンプ系は飛び先が次の番地でも捨てる(一致を確かめる比較を経路に加えないため)
+        && (is_branch_taken || (is_jumping && !ex_early_jump));
 
     // ===== 確認段から実行段への受け渡し(組み合わせ回路) =====
 
@@ -760,11 +802,14 @@ module alu_sv (
             fetch_next_pc <= '0;
             redirect_pending <= 1'b0;
             redirect_pc <= '0;
+            early_jump_pending <= 1'b0;
+            early_jump_pc <= '0;
             rom_arrived <= 1'b0;
             rom_arrived_pc <= '0;
             queue_instruction <= '{default: nop()};
             queue_pc <= '{default: '0};
             queue_pc_valid <= '{default: 1'b1};
+            queue_early_jump <= '{default: 1'b0};
             queue_count <= '0;
             fetching_from_ram <= 1'b0;
             fetching_upper_word <= 1'b0;
@@ -772,6 +817,7 @@ module alu_sv (
             ex_occupied <= 1'b0;
             ex_pc <= '0;
             current_instruction <= nop();
+            ex_early_jump <= 1'b0;
             rs1_val_r <= '0;
             rs2_val_r <= '0;
             rd_addr_r <= '0;
@@ -835,19 +881,21 @@ module alu_sv (
             // ===== 取得段: ROMからの命令の取得 =====
 
             // ROMへ番地を出したら，次のサイクルに届く命令を命令キューへ取り込めるよう番地を控える．
-            // 分岐・ジャンプで取得し直す場合は，出した番地の結果を捨てるため控えない
-            rom_arrived <= fetch_request && !ex_redirects;
+            // 分岐・ジャンプで取得し直す場合と，即値のジャンプが届いた場合は，出した番地の結果を捨てるため控えない
+            rom_arrived <= fetch_request && !ex_redirects && !push_early_jump;
             if (fetch_request) begin
                 rom_arrived_pc <= fetch_pc;
             end
             // 順番どおりに取得する番地を，ROMへ番地を出したかメインメモリから命令を取り込み終えた場合は，このサイクルに
             // 取得した番地(取得し直すサイクルなら飛び先)の次へ進める．
-            // 取得段は取得した命令が分岐・ジャンプかを調べず，常に順番どおりの次の番地を取得していく．
-            // 飛び先が確定するのは実行段で，飛び先を控えて次のサイクルに置き換える(fetch_pcを参照)
+            // 飛び先は，実行段か即値のジャンプが届いた時点で控え，次のサイクルに置き換える(fetch_pcを参照)
             fetch_next_pc <= fetch_pc + register_t'(fetch_request || ram_arrived);
             // 実行段が分岐・ジャンプで後の命令を捨てるかと，その飛び先を控える
             redirect_pending <= ex_redirects;
             redirect_pc <= next_pc;
+            // 即値のジャンプが届いたかと，その飛び先を控える
+            early_jump_pending <= push_early_jump;
+            early_jump_pc <= command_arrived.imm[31:0];
 
             // ===== 取得段: メモリの後半からの命令の取得 =====
 
@@ -899,11 +947,13 @@ module alu_sv (
                     queue_instruction[i] <= push_instruction;
                     queue_pc[i]          <= push_pc;
                     queue_pc_valid[i]    <= push_pc_valid;
+                    queue_early_jump[i]  <= push_early_jump;
                 end
                 else if (dispatch && i < QUEUE_DEPTH - 1) begin
                     queue_instruction[i] <= queue_instruction[i + 1];
                     queue_pc[i]          <= queue_pc[i + 1];
                     queue_pc_valid[i]    <= queue_pc_valid[i + 1];
+                    queue_early_jump[i]  <= queue_early_jump[i + 1];
                 end
             end
             // 命令キューの命令数を，分岐・ジャンプで取得し直す場合は0にし，それ以外は入れた数と取り除いた数で更新する
@@ -953,6 +1003,7 @@ module alu_sv (
                     imm_r     <= command_next.imm;
                     mask_r    <= command_next.mask;
                     current_instruction <= queue_instruction[0];
+                    ex_early_jump       <= queue_early_jump[0];
                 end
                 // 実行段の命令が分岐・ジャンプで後の命令を捨てる場合は，実行できない命令でも捨てられるため何もしない
                 else if (ex_redirects) begin
@@ -1095,12 +1146,11 @@ module alu_sv (
                                     // 戻り先(呼び出しの次の番地)を，スタックポインタの1ワード下へ書き込む
                                     IDLE: request_ram_write(4'hf, sequential_pc);
 
-                                    // 書き込みが完了したら，積んだ戻り先を指すようスタックポインタを下げる(飛び先へは共通の処理で進む)
+                                    // 書き込みが完了したら書き込みを終える(スタックポインタの更新と飛び先へ進むのは共通の処理で行う)
                                     EXECUTE: begin
                                         if (ram_write.ready) begin
                                             ram_write_state <= IDLE;
                                             ram_write.valid <= 1'b0;
-                                            register[SP_ADDR] <= register[SP_ADDR] - 4;
                                         end
                                     end
 
