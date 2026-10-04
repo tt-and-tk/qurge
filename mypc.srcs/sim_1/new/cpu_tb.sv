@@ -1660,6 +1660,14 @@ module cpu_tb;
         expect_reg(1, 32'd1);
         expect_reg(2, 32'd1);
 
+        // r1を3から1ずつ減らし，0になったら抜けるループを，末尾の後方への即値のJMPで先頭の判定へ戻して回す
+        `BEGIN_TEST("後方への即値のJMPで戻るループを繰り返してから抜ける");
+        run('{movi(1, 32'd3), movi(3, 32'd1), eq(1, 0, im(4)), sub(1, 3, 1), add(2, 3, 2), jmp(6'h00, im(2))});
+        // 3回繰り返して抜ける
+        expect_end();
+        expect_reg(1, 32'd0);
+        expect_reg(2, 32'd3);
+
         // 即値のJMPの飛び先に，別の即値のJMPを置く
         `BEGIN_TEST("即値のJMPの飛び先が即値のJMPでも，飛び越えた命令は実行されない");
         run('{jmp(6'h00, im(2)), movi(1, 32'd1), jmp(6'h00, im(4)), movi(2, 32'd1), movi(3, 32'd1)});
