@@ -165,10 +165,10 @@ module alu_sv (
     // ROMの番地入力の手前はレジスタの値の選択だけになり，取得し直す番地をROMへ出すサイクルは変わらない
     register_t fetch_pc;
     assign fetch_pc = redirect_pending ? redirect_pc : fetch_next_pc;
-    // 前のサイクルにROMへ番地を出したか．出していれば，このサイクルにその結果がROMから出てくる
-    logic fetch_pending = 1'b0;
-    // 前のサイクルにROMへ出した番地
-    register_t fetch_pending_pc = '0;
+    // このサイクルにROMから命令が届いたか(前のサイクルにROMへ番地を出したか)
+    logic rom_arrived = 1'b0;
+    // ROMから届いた命令の番地(前のサイクルにROMへ出した番地)
+    register_t rom_arrived_pc = '0;
 
     // fetch_pcが，ROMへ渡せる幅(pc_bus_t)に収まっているか．収まらない番地(メモリの後半など)はROMへ出さない
     util_p::bool_t fetch_pc_fits;
@@ -198,7 +198,7 @@ module alu_sv (
     // 含めない(ROMの番地を出すまでの経路を伸ばさないため)．出した番地の結果を入れる場所が命令キューに
     // 残るときだけ出す
     logic fetch_request;
-    assign fetch_request = fetch_pc_fits && (queue_count + fetch_pending < QUEUE_DEPTH);
+    assign fetch_request = fetch_pc_fits && (queue_count + rom_arrived < QUEUE_DEPTH);
 
     // ===== 確認段 =====
 
@@ -336,7 +336,7 @@ module alu_sv (
         // 取得用のプログラムカウンタがROMへ渡せる幅を外れている(ROMへ番地を出せない)
         !fetch_pc_fits
         // ROMから結果を待っている命令がない
-        && !fetch_pending
+        && !rom_arrived
         // 命令キュー(確認段を含む)に命令がない
         && queue_count == 0
         // 実行段に命令がない
@@ -344,16 +344,16 @@ module alu_sv (
         // メインメモリから命令を読み出している最中でない
         && !fetching_from_ram;
 
-    // このサイクルにメインメモリから上位ワードが届き，命令が揃ったか
-    logic ram_fetch_done;
-    assign ram_fetch_done = fetching_from_ram && ram_read.ready && fetching_upper_word;
+    // このサイクルにメインメモリから命令が届いたか(上位ワードが届き，命令が揃ったか)
+    logic ram_arrived;
+    assign ram_arrived = fetching_from_ram && ram_read.ready && fetching_upper_word;
 
     // ===== 命令キューへ入れる命令(組み合わせ回路) =====
     // ROMから受け取る命令と，メインメモリから揃った命令のどちらか(同じサイクルに両方が揃うことはない)
 
     // このサイクルに命令キューへ命令を入れるか
     logic queue_push;
-    assign queue_push = fetch_pending || ram_fetch_done;
+    assign queue_push = rom_arrived || ram_arrived;
     // 入れる命令の機械語・プログラムカウンタ・命令を置ける番地から取得できたか．
     // 取得できたかは，ROMから受け取る命令では，ROMが命令とともに返すrom_read.valid(番地がROMに格納された命令数の
     // 範囲内か)をそのまま使う．番地がROMへ渡せる幅に収まるかは，収まる番地しかROMへ出さない(fetch_request)ため確かめなくてよい．
@@ -361,9 +361,9 @@ module alu_sv (
     machine_p::machine_t push_instruction;
     register_t           push_pc;
     logic                push_pc_valid;
-    assign push_instruction = fetch_pending ? rom_read.machine : {ram_read.data, ram_fetch_lower_r};
-    assign push_pc          = fetch_pending ? fetch_pending_pc : fetch_pc;
-    assign push_pc_valid    = fetch_pending ? rom_read.valid   : 1'b1;
+    assign push_instruction = rom_arrived ? rom_read.machine : {ram_read.data, ram_fetch_lower_r};
+    assign push_pc          = rom_arrived ? rom_arrived_pc : fetch_pc;
+    assign push_pc_valid    = rom_arrived ? rom_read.valid   : 1'b1;
 
     // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
     // 実行段に命令がある間(ex_occupiedが1の間)のみ意味を持つ(それ以外では直前に実行した命令の値が残っている)
@@ -753,8 +753,8 @@ module alu_sv (
             fetch_next_pc <= '0;
             redirect_pending <= 1'b0;
             redirect_pc <= '0;
-            fetch_pending <= 1'b0;
-            fetch_pending_pc <= '0;
+            rom_arrived <= 1'b0;
+            rom_arrived_pc <= '0;
             queue_instruction <= '{default: nop()};
             queue_pc <= '{default: '0};
             queue_pc_valid <= '{default: 1'b1};
@@ -829,15 +829,15 @@ module alu_sv (
 
             // ROMへ番地を出したら，次のサイクルに結果を命令キューへ入れられるよう番地を控える．
             // 分岐・ジャンプで取得し直す場合は，出した番地の結果を捨てるため控えない
-            fetch_pending <= fetch_request && !ex_redirects;
+            rom_arrived <= fetch_request && !ex_redirects;
             if (fetch_request) begin
-                fetch_pending_pc <= fetch_pc;
+                rom_arrived_pc <= fetch_pc;
             end
             // 順番どおりに取得する番地を，ROMへ番地を出したかメインメモリから命令を取り込み終えた場合は，このサイクルに
             // 取得した番地(取得し直すサイクルなら飛び先)の次へ進める．
             // 取得段は取得した命令が分岐・ジャンプかを調べず，常に順番どおりの次の番地を取得していく．
             // 飛び先が確定するのは実行段で，飛び先を控えて次のサイクルに置き換える(fetch_pcを参照)
-            fetch_next_pc <= fetch_pc + register_t'(fetch_request || ram_fetch_done);
+            fetch_next_pc <= fetch_pc + register_t'(fetch_request || ram_arrived);
             // 実行段が分岐・ジャンプで後の命令を捨てるかと，その飛び先を控える
             redirect_pending <= ex_redirects;
             redirect_pc <= next_pc;
