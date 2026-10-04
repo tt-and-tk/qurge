@@ -305,6 +305,32 @@ module alu_sv (
     // 上位ワードの番地は下位ワードの4バイト後．下位ワードの番地は8の倍数(下位3ビットが0)のため，4を表すビットを立てるだけでよい
     assign fetch_upper_address = fetch_lower_address | ram_p::address_bus_t'(4);
 
+    // メインメモリから読み出した命令の下位ワード(イミディエイトデータ)．上位ワードが届くまで控えておく
+    register_t ram_fetch_lower_r = '0;
+
+    // 取得用のプログラムカウンタがROMへ渡せる幅を外れ，パイプラインが空になったか
+    logic pipeline_drained;
+    assign pipeline_drained = !fetch_pc_fits && !fetch_pending && queue_count == 0 && !ex_valid && !fetching_from_ram;
+
+    // このサイクルにメインメモリから上位ワードが届き，命令が揃ったか
+    logic ram_fetch_done;
+    assign ram_fetch_done = fetching_from_ram && ram_read.ready && fetching_upper_word;
+
+    // ===== 命令キューへ入れる命令(組み合わせ回路) =====
+    // ROMから受け取る命令と，メインメモリから揃った命令のどちらか(同じサイクルに両方が揃うことはない)
+
+    // このサイクルに命令キューへ命令を入れるか
+    logic queue_push;
+    assign queue_push = fetch_pending || ram_fetch_done;
+    // 入れる命令の機械語・プログラムカウンタ・命令を置ける番地から取得できたか．
+    // ROMから受け取る命令は，番地がROMに格納された命令数の範囲内だった場合にのみ実行できるものとして扱う
+    machine_p::machine_t push_instruction;
+    register_t           push_pc;
+    logic                push_pc_valid;
+    assign push_instruction = fetch_pending ? rom_read.machine : {ram_read.data, ram_fetch_lower_r};
+    assign push_pc          = fetch_pending ? fetch_pending_pc : fetch_pc;
+    assign push_pc_valid    = fetch_pending ? rom_read.valid   : 1'b1;
+
     // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
     // 実行段に命令がある間のみ意味を持つ(それ以外では直前に実行した命令の値が残っている)
 
@@ -682,6 +708,7 @@ module alu_sv (
             queue_count <= '0;
             fetching_from_ram <= 1'b0;
             fetching_upper_word <= 1'b0;
+            ram_fetch_lower_r <= '0;
             ex_valid <= 1'b0;
             current_instruction <= nop();
             rs1_val_r <= '0;
@@ -1084,44 +1111,57 @@ module alu_sv (
             if (remainder_write_valid) begin
                 register[remainder_write_addr] <= remainder_write_value;
             end
-            // 完了した命令を実行段から下ろす．同じサイクルに次の命令を受け取る場合は，下の受け渡しで上書きされる
-            if (ex_completes) begin
+            // 実行段に命令が入っているかを更新する．実行できる命令を受け取れば入り，受け取らずに命令が完了すれば空く．
+            // 分岐・ジャンプで後の命令を捨てる場合は，同じサイクルに受け取った命令も捨てるため空く
+            if (dispatch && check_executable && !ex_redirects) begin
+                ex_valid <= 1'b1;
+            end
+            else if (ex_completes) begin
                 ex_valid <= 1'b0;
             end
 
             // ===== 取得段・取り込み段 =====
 
-            // ROMへ番地を出したら，次のサイクルに結果を命令キューへ入れられるよう番地を控え，次の番地へ進める
-            fetch_pending <= fetch_request;
+            // ROMへ番地を出したら，次のサイクルに結果を命令キューへ入れられるよう番地を控える．
+            // 分岐・ジャンプで取得し直す場合は，出した番地の結果を捨てるため控えない
+            fetch_pending <= fetch_request && !ex_redirects;
             if (fetch_request) begin
                 fetch_pending_pc <= fetch_pc;
+            end
+            // 取得用のプログラムカウンタを，分岐・ジャンプで取得し直す場合は飛び先へ，
+            // ROMへ番地を出したかメインメモリから命令を取り込み終えた場合は次の番地へ進める
+            if (ex_redirects) begin
+                fetch_pc <= next_pc;
+            end
+            else if (fetch_request || ram_fetch_done) begin
                 fetch_pc <= fetch_pc + 1;
             end
 
-            // 確認段の命令を実行段へ渡す場合は，命令キューの先頭を取り除き，後ろの命令を1つずつ前へ詰める
-            if (dispatch) begin
-                for (int i = 0; i < QUEUE_DEPTH - 1; i++) begin
+            // 命令キューの各位置を更新する．取り込んだ命令を入れる位置(前へ詰めた後の末尾)には取り込んだ命令を入れ，
+            // それ以外は，確認段の命令を実行段へ渡す場合に，後ろの命令を1つずつ前へ詰める
+            for (int i = 0; i < QUEUE_DEPTH; i++) begin
+                if (queue_push && i == queue_count - dispatch) begin
+                    queue_instruction[i] <= push_instruction;
+                    queue_pc[i]          <= push_pc;
+                    queue_pc_valid[i]    <= push_pc_valid;
+                end
+                else if (dispatch && i < QUEUE_DEPTH - 1) begin
                     queue_instruction[i] <= queue_instruction[i + 1];
                     queue_pc[i]          <= queue_pc[i + 1];
                     queue_pc_valid[i]    <= queue_pc_valid[i + 1];
                 end
             end
-            // 前のサイクルに出した番地の結果をROMから受け取り，命令キューの末尾へ入れる(前へ詰めた後の末尾の位置)．
-            // 取り込む命令は，番地がROMに格納された命令数の範囲内だった場合にのみ実行できるものとして扱う
-            if (fetch_pending) begin
-                queue_instruction[queue_count - dispatch] <= rom_read.machine;
-                queue_pc[queue_count - dispatch]          <= fetch_pending_pc;
-                queue_pc_valid[queue_count - dispatch]    <= rom_read.valid;
+            // 命令キューの命令数を，分岐・ジャンプで取得し直す場合は0にし，それ以外は入れた数と取り除いた数で更新する
+            if (ex_redirects) begin
+                queue_count <= '0;
             end
-            // 命令キューの命令数を，入れた数と取り除いた数で更新する
-            queue_count <= queue_count + fetch_pending - dispatch;
+            else begin
+                queue_count <= queue_count + queue_push - dispatch;
+            end
 
             // ===== 確認段: 実行段への受け渡し =====
 
             if (dispatch) begin
-                // 実行段の命令の番地を，渡す命令の番地にする
-                register[PC_ADDR] <= queue_pc[0];
-
                 // 実行できる命令は，実行に使う値と命令の内容を実行段へ渡す
                 if (check_executable) begin
                     // 読み出しアドレスが，このサイクルに完了する複数サイクル命令の書き込み先と重なる場合は，レジスタから
@@ -1147,7 +1187,6 @@ module alu_sv (
                     imm_r     <= command_next.imm;
                     mask_r    <= command_next.mask;
                     current_instruction <= queue_instruction[0];
-                    ex_valid <= 1'b1;
                 end
                 // 実行できない命令は動作を保証できないため，その番地で停止させる．ただし，実行段の命令が
                 // 分岐・ジャンプで後の命令を捨てる場合は，捨てられる命令のため停止させない
@@ -1156,16 +1195,18 @@ module alu_sv (
                 end
             end
 
-            // ===== 実行段: 分岐・ジャンプによる取得し直し =====
+            // ===== 実行段: 実行段の命令の番地 =====
 
-            // 分岐が成立した場合とジャンプ系の命令の完了時は，読み出し中・命令キュー・確認段から渡した命令を
-            // すべて捨てて，飛び先から取得し直す(上で行った取得段・命令キュー・受け渡しの更新を打ち消す)
+            // 分岐が成立した場合とジャンプ系の命令の完了時は飛び先，確認段から命令を受け取る場合はその命令の番地にする．
+            // ROMにもメモリの後半にも命令を置けない番地へ進んで停止する場合は，その番地を停止した番地とする
             if (ex_redirects) begin
                 register[PC_ADDR] <= next_pc;
-                fetch_pc <= next_pc;
-                fetch_pending <= 1'b0;
-                queue_count <= '0;
-                ex_valid <= 1'b0;
+            end
+            else if (dispatch) begin
+                register[PC_ADDR] <= queue_pc[0];
+            end
+            else if (pipeline_drained && !pc_in_code_area) begin
+                register[PC_ADDR] <= fetch_pc;
             end
 
             // ===== メモリの後半からの命令の取得 =====
@@ -1173,7 +1214,7 @@ module alu_sv (
             // 取得用のプログラムカウンタがROMへ渡せる幅を外れ，パイプラインが空になったら，メモリの後半から取得するか停止する．
             // パイプラインが空になるのを待つのは，実行中の命令とメインメモリの読み出しポートを取り合わないためと，
             // 前の命令が分岐・ジャンプで飛び先を変える可能性や，メモリの後半へ命令を書き込み終えていない可能性があるため
-            if (!fetch_pc_fits && !fetch_pending && queue_count == 0 && !ex_valid && !fetching_from_ram) begin
+            if (pipeline_drained) begin
                 // メモリの後半を指していれば，メインメモリへ命令の下位ワードの読み出しを要求する
                 if (pc_in_code_area) begin
                     ram_read.valid   <= 1'b1;
@@ -1184,31 +1225,24 @@ module alu_sv (
                 end
                 // ROMにもメモリの後半にも命令を置けない番地へ進んだため，その番地で停止する
                 else begin
-                    register[PC_ADDR] <= fetch_pc;
                     is_halted <= 1'b1;
                 end
             end
 
-            // メインメモリからの命令の取り込み．下位ワード・上位ワードの順に読み出し，命令キューの先頭へ取り込む
-            // (取得中はパイプラインが空のため，命令キューの先頭は空いている)．
+            // メインメモリからの命令の取り込み．下位ワード・上位ワードの順に読み出す．
             // メインメモリの読み出しを要求している間は停止しない(停止は確認段・実行段でのみ起こる)ことを前提に，
             // 停止時のメインメモリのリセットは行っていない(メインメモリはresetnでのみリセットされる)
             if (fetching_from_ram && ram_read.ready) begin
-                // 下位ワード(イミディエイトデータ)を取り込み，続けて上位ワードを読む．validを下ろさずに番地だけを
+                // 下位ワード(イミディエイトデータ)を控え，続けて上位ワードを読む．validを下ろさずに番地だけを
                 // 変えると，メインメモリは完了を返した次のサイクルに待機へ戻った時点で新しい要求として受け付ける
                 // (一度下ろすと，上げ直すまでの1サイクルが余分にかかる)
                 if (!fetching_upper_word) begin
-                    queue_instruction[0][31:0] <= ram_read.data;
+                    ram_fetch_lower_r <= ram_read.data;
                     ram_read.address <= fetch_upper_address;
                     fetching_upper_word <= 1'b1;
                 end
-                // 上位ワード(命令語)を取り込んで命令が揃ったので，読み出しを終えて確認段へ渡し，次の番地へ進める
+                // 上位ワード(命令語)が届いて命令が揃ったので，読み出しを終える(命令は命令キューへ入れる)
                 else begin
-                    queue_instruction[0][63:32] <= ram_read.data;
-                    queue_pc[0] <= fetch_pc;
-                    queue_pc_valid[0] <= 1'b1;
-                    queue_count <= 1;
-                    fetch_pc <= fetch_pc + 1;
                     ram_read.valid <= 1'b0;
                     fetching_from_ram <= 1'b0;
                     fetching_upper_word <= 1'b0;
