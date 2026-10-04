@@ -47,7 +47,7 @@ ROMの内容(`mypc.srcs/sources_1/new/rom_sv.sv`)は，QosmosのPynesisソース
 pn2mc.exe -pn mypc.srcs/pn/qosmos.pn -pt mypc.srcs/pn/qosmos.pt -sv mypc.srcs/sources_1/new/rom_sv.sv
 ```
 
-`pn2mc.exe`は`compiler`リポジトリでビルドしたものを使い，起動引数は`specification`の`compiler.md`を参照する．`-sv`を省略すると`.pt`と同じ場所へ出力されVivadoが読む`rom_sv.sv`は更新されないため，省略しない．
+`pn2mc.exe`は`compiler`リポジトリでビルドし，そのディレクトリにPATHを通しておく．起動引数は`specification`の`compiler.md`を参照する．`-sv`を省略すると`.pt`と同じ場所へ出力されVivadoが読む`rom_sv.sv`は更新されないため，省略しない．
 
 生成し直した`rom_sv.sv`に差分が出たら，`.pn`の変更と同じコミットに含める．チェックアウトした直後に変換ツールなしで合成できるよう，`rom_sv.sv`もGit管理下に置いているためである．
 
