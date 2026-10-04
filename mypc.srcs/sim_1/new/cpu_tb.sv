@@ -1652,6 +1652,14 @@ module cpu_tb;
         expect_reg(2, 32'h7ff8);
         expect_reg(SP_ADDR, 32'h8000);
 
+        // 呼んだ関数の先頭で，SPからの相対位置のRMRで積まれた戻り先を読む
+        `BEGIN_TEST("即値のCALLの飛び先の先頭のRMRは下げた後のSPから戻り先を読む");
+        run('{call(6'h00, im(3)), movi(1, 32'd1), jmp(6'h00, im(5)), rmr(4'hf, SP_ADDR, 2, im(0)), ret()});
+        // 戻り先1が読め，戻った後の代入も実行される
+        expect_end();
+        expect_reg(1, 32'd1);
+        expect_reg(2, 32'd1);
+
         // 即値のJMPの飛び先に，別の即値のJMPを置く
         `BEGIN_TEST("即値のJMPの飛び先が即値のJMPでも，飛び越えた命令は実行されない");
         run('{jmp(6'h00, im(2)), movi(1, 32'd1), jmp(6'h00, im(4)), movi(2, 32'd1), movi(3, 32'd1)});
