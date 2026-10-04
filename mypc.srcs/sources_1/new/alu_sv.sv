@@ -198,8 +198,8 @@ module alu_sv (
     );
 
     // 確認段に命令があるか
-    logic check_valid;
-    assign check_valid = (queue_count != 0);
+    logic check_occupied;
+    assign check_occupied = (queue_count != 0);
 
     // 確認段の命令が実行できるか
     util_p::bool_t check_executable;
@@ -219,7 +219,7 @@ module alu_sv (
     // 確認段から命令を受け取るときに取り込み，実行中はこれらの値を参照して命令を実行する
 
     // 実行段に命令があるか
-    logic ex_valid = 1'b0;
+    logic ex_occupied = 1'b0;
     // 実行段の命令の機械語．ex_validが0の間は前回実行した命令の値が残ったままで，意味を持たない
     machine_p::machine_t current_instruction = nop();
 
@@ -314,7 +314,7 @@ module alu_sv (
 
     // 取得用のプログラムカウンタがROMへ渡せる幅を外れ，パイプラインが空になったか
     logic pipeline_drained;
-    assign pipeline_drained = !fetch_pc_fits && !fetch_pending && queue_count == 0 && !ex_valid && !fetching_from_ram;
+    assign pipeline_drained = !fetch_pc_fits && !fetch_pending && queue_count == 0 && !ex_occupied && !fetching_from_ram;
 
     // このサイクルにメインメモリから上位ワードが届き，命令が揃ったか
     logic ram_fetch_done;
@@ -494,7 +494,7 @@ module alu_sv (
         remainder_write_value = div_result_tdata[31:0];
 
         // 定義されていないfuncの命令は確認段で停止させるため，ここではどの命令タイプでも定義済みのfuncだけを扱う
-        if (ex_valid) begin
+        if (ex_occupied) begin
             unique case (command.m_type)
                 // 処理を実行しない
                 N_TYPE: ex_completes = 1'b1;
@@ -603,7 +603,7 @@ module alu_sv (
     // 実行段の命令が分岐・ジャンプで後の命令を捨てる場合も渡す条件に含めない(渡した後に捨てる)のは，
     // 分岐の比較結果から多数のレジスタの取り込み可否までの経路を作らないため
     logic dispatch;
-    assign dispatch = check_valid && (!ex_valid || ex_completes) && !spi_hazard;
+    assign dispatch = check_occupied && (!ex_occupied || ex_completes) && !spi_hazard;
 
     // メモリを読み書きする命令が，メモリへ要求を出す際に呼ぶタスク．番地はmem_addressを使い，
     // 読み書きしてよい範囲(mem_address_in_range)を外れる場合は，折り返した番地へアクセスせず要求を出さずに停止する
@@ -713,7 +713,7 @@ module alu_sv (
             fetching_from_ram <= 1'b0;
             fetching_upper_word <= 1'b0;
             ram_fetch_lower_r <= '0;
-            ex_valid <= 1'b0;
+            ex_occupied <= 1'b0;
             current_instruction <= nop();
             rs1_val_r <= '0;
             rs2_val_r <= '0;
@@ -894,7 +894,7 @@ module alu_sv (
 
             // ===== 実行段: 複数サイクルかかる命令の要求と応答待ち =====
             // 完了の判定と結果の書き込みは，ここではなく実行段の完了判定(ex_completes)と下の共通の処理で行う
-            if (ex_valid) begin
+            if (ex_occupied) begin
                 // 関数タイプごとに実行
                 unique case (command.m_type)
                     // 処理を実行しない(N系)．不正な値が入っても全て無視する
@@ -1235,10 +1235,10 @@ module alu_sv (
             // 実行段に命令が入っているかを更新する．実行できる命令を受け取れば入り，受け取らずに命令が完了すれば空く．
             // 分岐・ジャンプで後の命令を捨てる場合は，同じサイクルに受け取った命令も捨てるため空く
             if (dispatch && check_executable && !ex_redirects) begin
-                ex_valid <= 1'b1;
+                ex_occupied <= 1'b1;
             end
             else if (ex_completes) begin
-                ex_valid <= 1'b0;
+                ex_occupied <= 1'b0;
             end
 
             // ===== 実行段: 実行段の命令の番地 =====

@@ -347,7 +347,7 @@ module cpu_tb;
                 break;
             end
             // 正常終了を表す命令の実行に入った
-            if (append_end && dut.alu_sv_0.register[PC_ADDR] == end_pc && dut.alu_sv_0.ex_valid) begin
+            if (append_end && dut.alu_sv_0.register[PC_ADDR] == end_pc && dut.alu_sv_0.ex_occupied) begin
                 outcome = ENDED;
                 break;
             end
