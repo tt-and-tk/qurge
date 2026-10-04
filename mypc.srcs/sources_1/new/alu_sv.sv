@@ -521,18 +521,16 @@ module alu_sv (
     register_t        remainder_write_value;
 
     always_comb begin
-        // 既定値として「完了せず何も書き込まない」を与え，下の場合分けで該当する命令だけが上書きする．
-        // 全ての出力に既定値を与えておくのは，場合分けで代入しない経路があると前の値を保持するラッチが作られるため．
-        // 書き込み先・値は書き込む命令でしか使わないため，その命令で最もよく使う値(rd_addr_r・除算IPの余り)を
-        // 既定値にし，場合分けでの代入を減らしている
+        // 既定値として「完了せず何も書き込まない」を全ての出力に与え，下の場合分けで該当する命令だけが上書きする
+        // (場合分けで代入しない経路があると，前の値を保持するラッチが作られるため)
         ex_completes          = 1'b0;
         ex_alu_write          = 1'b0;
         late_write_valid      = 1'b0;
-        late_write_addr       = rd_addr_r;
+        late_write_addr       = rd_addr_r;               // 書き込む命令が共通して使う書き込み先を既定値にし，場合分けでの代入を減らす
         late_write_value      = '0;
         remainder_write_valid = 1'b0;
-        remainder_write_addr  = imm_r[5:0];
-        remainder_write_value = div_result_tdata[31:0];
+        remainder_write_addr  = imm_r[5:0];              // 余りを書き込む唯一の命令である割り算が使う書き込み先
+        remainder_write_value = div_result_tdata[31:0];  // 同じく割り算が使う，除算IPが返す余り
 
         // 定義されていないfuncの命令は確認段で停止させるため，ここではどの命令タイプでも定義済みのfuncだけを扱う
         if (ex_occupied) begin
