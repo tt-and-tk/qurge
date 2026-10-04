@@ -605,10 +605,18 @@ module alu_sv (
     // 読み出し専用のビットで，書き込んだ値では変わらない．書き込む32ビットの値をそのまま確認段の命令へ回すと，
     // MISOビットだけが書き込んだ値になって誤る．このため回さずに，書き込みを終えたレジスタを読めるまで確認段の命令を1サイクル待たせる
     logic spi_hazard;
-    assign spi_hazard = (command_next.rs1 == SPI_ADDR || command_next.rs2 == SPI_ADDR)
-        && ((ex_alu_write          && rd_addr_r            == SPI_ADDR)
+    assign spi_hazard =
+        // 確認段の命令が，第1・第2オペランドのどちらかでAR_SPIを読み出す
+        (command_next.rs1 == SPI_ADDR || command_next.rs2 == SPI_ADDR)
+        // かつ，実行段がこのサイクルに次のいずれかの書き込みでAR_SPIへ書き込む
+        && (
+            // 1サイクルで完了する命令の結果
+            (ex_alu_write          && rd_addr_r            == SPI_ADDR)
+            // 複数サイクルかけて得た結果(メモリから読んだ値・標準入力・掛け算・割り算の商)
          || (late_write_valid      && late_write_addr      == SPI_ADDR)
-         || (remainder_write_valid && remainder_write_addr == SPI_ADDR));
+            // 割り算の余り
+         || (remainder_write_valid && remainder_write_addr == SPI_ADDR)
+        );
 
     // 確認段の命令をこのサイクルに実行段へ渡すか．実行段が空いているか，このサイクルに空く場合に渡す．
     // 実行段の命令が分岐・ジャンプで後の命令を捨てる場合も渡す条件に含めない(渡した後に捨てる)のは，
