@@ -195,7 +195,8 @@ int sd_init_commands(void) {
             break;
         }
     }
-    // ここに来る応答は0x00か0x01だけであり，0x00でなければ上限まで繰り返しても完了しなかった(添えるのは最後に返った応答)
+    // エラー応答は本体で戻っているため，ここに来る応答は0x00か0x01だけである
+    // 0x00でなければ，上限まで繰り返しても完了しなかった(添えるのは最後に返った応答)
     if (response != 0x00) {
         print("[FAIL] SD card: initialize (ACMD41): not ready");
         print_response(response);
