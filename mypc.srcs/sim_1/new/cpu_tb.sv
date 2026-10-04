@@ -1303,6 +1303,28 @@ module cpu_tb;
         // ビット3がMISOの1，ほかのビットがメモリから読んだ値になる
         expect_end();
         expect_reg(2, 32'b1100);
+
+        // MISOピンを0にした状態で，上位ビットを立てた値をMOVでSPIのレジスタへ書き込み，直後と2つ後の命令で読み出す
+        `BEGIN_TEST("SPIのレジスタへMOVで書き込んでも上位28ビットは0で読める");
+        run('{movi(SPI_ADDR, 32'hffff_fff6), movr(1, SPI_ADDR), movr(2, SPI_ADDR)});
+        // どちらも上位28ビットが0，ビット3がMISOの0，ほかのビットが書き込んだ値になる
+        expect_end();
+        expect_reg(1, 32'b0110);
+        expect_reg(2, 32'b0110);
+
+        // MISOピンを0にした状態で，上位ビットを立てた値をRMでSPIのレジスタへ書き込み，直後の命令で読み出す
+        `BEGIN_TEST("SPIのレジスタへRMで書き込んでも上位28ビットは0で読める");
+        run('{movi(1, 32'hffff_fff6), wm(4'hf, 6'h00, 1, im(32'h100)), rm(4'hf, 6'h00, SPI_ADDR, im(32'h100)), movr(2, SPI_ADDR)});
+        // 上位28ビットが0，ビット3がMISOの0，ほかのビットがメモリから読んだ値になる
+        expect_end();
+        expect_reg(2, 32'b0110);
+
+        // MISOピンを0にした状態で，全ビットが1の余り(-10÷-9の余り-1)をSPIのレジスタへ書き込み，直後の命令で読み出す
+        `BEGIN_TEST("SPIのレジスタへ割り算の余りを書き込んでも上位28ビットは0で読める");
+        run('{movi(1, 32'hffff_fff6), movi(2, 32'hffff_fff7), div(1, 2, 3, im(SPI_ADDR)), movr(4, SPI_ADDR)});
+        // 上位28ビットが0，ビット3がMISOの0，ほかのビットが余りの1になる
+        expect_end();
+        expect_reg(4, 32'b0111);
     endtask
 
     // 命令の種類によらない停止の条件と，停止後の挙動
