@@ -177,7 +177,7 @@ module alu_sv (
     // 飛び先はfetch_next_pcへ直接入れず，控えたレジスタから選ぶ．
     // fetch_next_pcは，ROMを作る多数のブロックRAMへ番地を配るために合成で多数複製される．
     // 分岐の比較結果から全ての複製までの経路が，1クロックに収まらないため．
-    // 控えたレジスタから選んでも，飛び先をROMへ出すサイクルは直接入れる場合と変わらない
+    // なお，控えたレジスタから選んでも，飛び先をROMへ出すサイクルは直接入れる場合と変わらない
     register_t fetch_pc;
     assign fetch_pc = redirect_pending   ? redirect_pc
                     : early_jump_pending ? early_jump_pc
