@@ -1681,6 +1681,16 @@ module cpu_tb;
         expect_reg(1, 32'd1);
         expect_reg(2, 32'd1);
 
+        // 関数から戻るRETの直後に，戻り先の代入を飛び越える即値のJMPを置く
+        `BEGIN_TEST("RETで飛び越えた即値のJMPの飛び先へは進まない");
+        run('{call(6'h00, im(4)), movi(1, 32'd1), movi(2, 32'd1), jmp(6'h00, im(7)),
+              ret(), jmp(6'h00, im(2)), movi(3, 32'd1)});
+        // 戻り先の代入から順に実行され，RETの後のJMPの飛び先は実行されない
+        expect_end();
+        expect_reg(1, 32'd1);
+        expect_reg(2, 32'd1);
+        expect_reg(3, 32'd0);
+
         // 成立する分岐の2つ後に，分岐先の代入を飛び越える即値のJMPを置く(分岐の実行段と同じサイクルにJMPが届く)
         `BEGIN_TEST("成立した分岐の実行と同じサイクルに届いた即値のJMPの飛び先へは進まない");
         run('{eq(0, 0, im(3)), nop(), jmp(6'h00, im(4)), movi(1, 32'd1), movi(2, 32'd1)});
