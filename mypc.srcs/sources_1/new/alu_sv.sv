@@ -339,7 +339,9 @@ module alu_sv (
     logic queue_push;
     assign queue_push = fetch_pending || ram_fetch_done;
     // 入れる命令の機械語・プログラムカウンタ・命令を置ける番地から取得できたか．
-    // ROMから受け取る命令は，番地がROMに格納された命令数の範囲内だった場合にのみ実行できるものとして扱う
+    // 取得できたかは，ROMから受け取る命令では，ROMが命令とともに返すrom_read.valid(番地がROMに格納された命令数の
+    // 範囲内か)をそのまま使う．番地がROMへ渡せる幅に収まるかは，収まる番地しかROMへ出さない(fetch_request)ため確かめなくてよい．
+    // メインメモリから受け取る命令は，メモリの後半を指す番地でしか取得しないため，常に取得できたものとする
     machine_p::machine_t push_instruction;
     register_t           push_pc;
     logic                push_pc_valid;
