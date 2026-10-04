@@ -64,7 +64,7 @@ const int FAT_ERR_NOT_EMPTY = 15;   // 削除しようとしたディレクト�
 const int FAT_ERR_PATH_TOO_LONG = 16;  // 移動すると，現在のディレクトリのパスが保持できる長さを超える
 const int FAT_ERR_TOO_LARGE = 17;   // ファイルの内容が読み込み先に収まらない
 
-// MBR(ブロック0)の形式
+// MBR(セクタ0)の形式
 const int MBR_PARTITION_OFFSET = 0x1be;  // 第1パーティションエントリの位置
 const int MBR_PARTITION_TYPE = 4;        // パーティションエントリ内の種別の位置
 const int MBR_PARTITION_START = 8;       // パーティションエントリ内の開始セクタ番号の位置
@@ -367,7 +367,7 @@ int fat_mount(void) {
         return FAT_ERR_INIT;
     }
 
-    // ブロック0はMBRか，パーティションを持たないカードではファイルシステムのブートセクタそのものになる
+    // セクタ0はMBRか，パーティションを持たないカードではファイルシステムのブートセクタそのものになる
     if (sd_read_block(0, fat_sector) == 0) {
         return FAT_ERR_READ;
     }
@@ -388,7 +388,7 @@ int fat_mount(void) {
             return FAT_ERR_NOT_FAT32;
         }
     }
-    // 種別がFAT32でなければブロック0自体をブートセクタとみなす(そうでなければBPBの検査で弾かれる)
+    // 種別がFAT32でなければセクタ0自体をブートセクタとみなす(そうでなければBPBの検査で弾かれる)
     return fat_parse_bpb(fs_start);
 }
 
