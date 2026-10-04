@@ -645,7 +645,7 @@ module alu_sv (
         && (
             // 1サイクルで完了する命令の結果
             (ex_alu_write          && rd_addr_r            == SPI_ADDR)
-            // 複数サイクルかけて得た結果(メモリから読んだ値・標準入力・掛け算・割り算の商)
+            // 複数サイクルかけて得た結果
          || (late_write_valid      && late_write_addr      == SPI_ADDR)
             // 割り算の余り
          || (remainder_write_valid && remainder_write_addr == SPI_ADDR)
