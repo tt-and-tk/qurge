@@ -1243,6 +1243,25 @@ module cpu_tb;
         if (gpio !== 19'h54281)
             fail($sformatf("GPIO8〜GPIO26: 期待値0x54281，実際0x%h", gpio));
 
+        // 出力用の各レジスタとGPIO0へ，全ビットが1の値を書き込む
+        `BEGIN_TEST("出力用のレジスタは使うビットだけが書き込んだ値になり，使わないビットは0になる");
+        run('{movi(LED_ADDR, '1), movi(RGB_LED_ADDR, '1), movi(PMOD_A_ADDR, '1), movi(PMOD_B_ADDR, '1),
+              movi(AR_LOW_ADDR, '1), movi(AR_HIGH_ADDR, '1), movi(AR_MISC_ADDR, '1),
+              movi(GPIO0_ADDR, '1), movi(GPIO1_ADDR, '1), movi(GPIO2_ADDR, '1), movi(GPIO3_ADDR, '1)});
+        // 仕様で使うとされたビットだけが1で残る．どのピンにも出ないGPIO0は全ビット0になる
+        expect_end();
+        expect_reg(LED_ADDR,     32'hf);
+        expect_reg(RGB_LED_ADDR, 32'h3f);
+        expect_reg(PMOD_A_ADDR,  32'hff);
+        expect_reg(PMOD_B_ADDR,  32'hff);
+        expect_reg(AR_LOW_ADDR,  32'hff);
+        expect_reg(AR_HIGH_ADDR, 32'h3f);
+        expect_reg(AR_MISC_ADDR, 32'h7);
+        expect_reg(GPIO0_ADDR,   32'h0);
+        expect_reg(GPIO1_ADDR,   32'hff);
+        expect_reg(GPIO2_ADDR,   32'hff);
+        expect_reg(GPIO3_ADDR,   32'h7);
+
         // タクトスイッチ・DIPスイッチを押した状態で，それぞれのレジスタを読み出す
         `BEGIN_TEST("タクトスイッチ・DIPスイッチの状態を読める");
         btn = 4'b1010;
