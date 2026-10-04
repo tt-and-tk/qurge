@@ -1281,6 +1281,12 @@ int fat_mkdir(char *text) {
         entry.cluster = cluster;
         entry.size = 0;
         status = fat_add_entry(&entry);
+        // エントリを書き込めなかった場合は，確保したクラスタを解放せずに返す
+        // カードへの書き込みは失敗しても書けている可能性があり，解放すると使用中のエントリが空きクラスタを指しうるため
+        // (エントリを置く前のディレクトリの拡張で書き込めなかった場合も同じ値で返るが，区別しない．解放しなくても，どこからも指されないクラスタが1つ残るだけのため)
+        if (status == FAT_ERR_WRITE) {
+            return status;
+        }
     }
     // 途中で失敗した場合は，どのエントリからも指されないクラスタが残らないよう解放する
     if (status != FAT_OK) {
@@ -1291,6 +1297,7 @@ int fat_mkdir(char *text) {
 
 // entryのファイルの内容を，dataの先頭lengthバイトで丸ごと置き換える
 // 新しい内容を空きクラスタへ書き終えてから差し替えるため，失敗を返した場合はファイルは元の内容のまま残る(一時的に元の内容と新しい内容の両方の空きが要る)
+// ただしエントリのカードへの書き込みに失敗した場合は，新しい内容に置き換わっている可能性がある
 // 差し替えた後に元の内容の解放に失敗しても，成功を返す
 int fat_write(struct FatEntry *entry, char *data, int length) {
     unsigned int old_cluster = entry->cluster;      // 置き換える前の内容の開始クラスタ
@@ -1338,19 +1345,28 @@ int fat_write(struct FatEntry *entry, char *data, int length) {
         }
         sector++;
     }
-    // 全て書けたら，エントリを新しい内容の位置と大きさに差し替える
-    if (status == FAT_OK) {
-        entry->attr |= ATTR_ARCHIVE;
-        entry->cluster = first;
-        entry->size = length;
-        status = fat_store_entry(entry, 1);
+    // 書き終えられなかった場合は，書きかけの新しい内容を解放する(エントリはまだ書き換えていないため，ファイルは元の内容のまま残る)
+    if (status != FAT_OK) {
+        if (first != 0) {
+            fat_free_chain(first);
+        }
+        return status;
     }
-    // 差し替えられなかった場合は書きかけの新しい内容を解放し，エントリを元の内容に戻す
+    // 全て書けたら，エントリを新しい内容の位置と大きさに差し替える
+    entry->attr |= ATTR_ARCHIVE;
+    entry->cluster = first;
+    entry->size = length;
+    status = fat_store_entry(entry, 1);
+    // 差し替えられなかった場合は，エントリを元の内容に戻す
     if (status != FAT_OK) {
         entry->attr = old_attr;
         entry->cluster = old_cluster;
         entry->size = old_size;
-        if (first != 0) {
+        // エントリを含むセクタを読み込めなかった場合は，カード上のエントリは書き換わっていないため，新しい内容を解放する
+        // 書き込めなかった場合は，新しい内容も元の内容も解放しない．カードへの書き込みは失敗しても書けている可能性があり，
+        // カード上のエントリが新旧どちらを指すか分からないため(どちらを解放しても，使用中のエントリが空きクラスタを指しうる)
+        // セクタが新旧どちらかの内容になっていれば，指されない側のクラスタはどのエントリからも指されないだけで内容を壊さない(パソコンのディスク検査で回収できる)
+        if (status == FAT_ERR_READ && first != 0) {
             fat_free_chain(first);
         }
         return status;
@@ -1366,6 +1382,7 @@ int fat_write(struct FatEntry *entry, char *data, int length) {
 
 // 現在のディレクトリにある"NAME.EXT"形式のファイル名file_nameのファイルの内容を，dataの先頭lengthバイトで丸ごと置き換える(ファイルが無ければ作成する)
 // 既にあるファイルは，失敗しても元の内容のまま残る．新しく作成したファイルは，内容の書き込みに失敗すると空のまま残る
+// ただしいずれも，エントリのカードへの書き込みに失敗した場合は，新しい内容に置き換わっている可能性がある
 int fat_write_file(char *file_name, char *data, int length) {
     struct FatEntry entry;  // 書き込むファイルのエントリ
     int status;             // 作成・書き込みの結果
