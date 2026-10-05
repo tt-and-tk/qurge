@@ -170,11 +170,7 @@ package alu_p;
         else
             is_writable = util_p::FALSE;
     endfunction
-    // そのアドレスのレジスタの各ビットを使うかを，ビットごとに表した値を返す．
-    // 使うビットの位置を1，使わないビットの位置を0とする(ビットの数ではない)．
-    // 使わないビットは常に0になる．
-    // 関数内の'1は全ビットが1，'0は全ビットが0の値を表す
-    function register_t used_bits(
+    function register_t used_bits(  // そのアドレスのレジスタで使うビットを1で表した値．使わないビットは常に0になる
         machine_p::addr_t addr
     );
         // CPU内のレジスタ
