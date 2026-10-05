@@ -170,6 +170,88 @@ package alu_p;
         else
             is_writable = util_p::FALSE;
     endfunction
+    function register_t used_bits(  // そのアドレスのレジスタで使うビットを1で表した値．使わないビットは常に0になる
+        machine_p::addr_t addr
+    );
+        // CPU内のレジスタ
+        if (6'h00 <= addr && addr <= 6'h0f)
+            used_bits = '1;
+        // スタックポインタ
+        else if (addr == 6'h10)
+            used_bits = '1;
+        // 空き
+        else if (6'h11 <= addr && addr <= 6'h1b)
+            used_bits = '0;
+        // フラグ．値を格納する命令がない
+        else if (addr == 6'h1c)
+            used_bits = '0;
+        // 引数が格納されているレジスタの一つ目の番地
+        else if (addr == 6'h1d)
+            used_bits = '1;
+        // 演算結果
+        else if (addr == 6'h1e)
+            used_bits = '1;
+        // プログラムカウンタ．値はレジスタ配列ではなく命令の番地として別に持つ
+        else if (addr == 6'h1f)
+            used_bits = '0;
+        // タクトスイッチ
+        else if (addr == 6'h20)
+            used_bits = 32'hf;
+        // DIPスイッチ
+        else if (addr == 6'h21)
+            used_bits = 32'h3;
+        // LED
+        else if (addr == 6'h22)
+            used_bits = 32'hf;
+        // RGB LED
+        else if (addr == 6'h23)
+            used_bits = 32'h3f;
+        // Pmod A
+        else if (addr == 6'h24)
+            used_bits = 32'hff;
+        // Pmod B
+        else if (addr == 6'h25)
+            used_bits = 32'hff;
+        // AR8〜AR13
+        else if (addr == 6'h26)
+            used_bits = 32'h3f;
+        // I2C
+        else if (addr == 6'h27)
+            used_bits = 32'h7;
+        // AR0〜AR7
+        else if (addr == 6'h28)
+            used_bits = 32'hff;
+        // 空き
+        else if (addr == 6'h29)
+            used_bits = '0;
+        // SPI
+        else if (addr == 6'h2a)
+            used_bits = 32'hf;
+        // アナログピン
+        else if (addr == 6'h2b)
+            used_bits = '0;    // オミット
+        // XADC
+        else if (addr == 6'h2c)
+            used_bits = '0;    // オミット
+        // GPIO0〜GPIO7．どのピンにも出力しない
+        else if (addr == 6'h2d)
+            used_bits = '0;
+        // GPIO8〜GPIO15
+        else if (addr == 6'h2e)
+            used_bits = 32'hff;
+        // GPIO16〜GPIO23
+        else if (addr == 6'h2f)
+            used_bits = 32'hff;
+        // GPIO24〜GPIO26
+        else if (addr == 6'h30)
+            used_bits = 32'h7;
+        // 空き
+        else if (6'h31 <= addr && addr <= 6'h34)
+            used_bits = '0;
+        // 定義されていない
+        else
+            used_bits = '0;
+    endfunction
 
     // 命令のデコード時点で分かる情報(命令種別・func・レジスタ番地)から，その命令が実行可能かを
     // 判定する．
