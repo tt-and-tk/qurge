@@ -598,7 +598,8 @@ module alu_sv (
         late_write_addr       = rd_addr_r;               // 書き込む命令が共通して使う書き込み先を既定値にし，場合分けでの代入を減らす
         late_write_value      = '0;
         remainder_write_valid = 1'b0;
-        remainder_write_addr  = imm_r[5:0];              // 余りを書き込む唯一の命令である割り算が使う書き込み先(番地の上限以下であることを確認段で確かめているため，下位6ビットで表せる)
+        // 余りの書き込み先は，番地の上限以下であることを確認段で確かめているため，下位6ビットで表せる
+        remainder_write_addr  = imm_r[5:0];              // 余りを書き込む唯一の命令である割り算が使う書き込み先
         remainder_write_value = div_result_tdata[31:0];  // 同じく割り算が使う，除算IPが返す余り
 
         // 定義されていないfuncの命令は確認段で停止させるため，ここではどの命令タイプでも定義済みのfuncだけを扱う
