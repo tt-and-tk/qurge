@@ -285,12 +285,16 @@ package alu_p;
                         // 二項演算: 読み出し元2つと書き込み先が有効か
                         AND, OR, XOR, NAND, ADD, SUB, MUL:
                             is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd);
-                        // 割り算: 読み出し元2つと書き込み先(イミディエイトデータ使用時は余りの書き込み先も)が有効か．
-                        // 余りの書き込み先は，イミディエイトデータ全体が番地の上限以下であることを確かめてから書き込み可否を判定する
-                        // (下位6ビットだけで判定すると，上限を超える番地が下位6ビットで折り返した番地として通るため)
+                        // 割り算: 読み出し元2つと書き込み先(イミディエイトデータ使用時は余りの書き込み先も)が有効か
                         DIV, DIVU:
                             is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd)
-                                && (!imm[32] || (imm[31:0] <= REGISTER_MAX_ADDR && is_writable(imm[5:0])));
+                                // イミディエイトデータを使わないなら，余りを書き込まないため判定しない
+                                && (!imm[32]
+                                    // 余りの書き込み先の番地が，イミディエイトデータ全体で上限以下である
+                                    // (下位6ビットだけで判定すると，上限を超える番地が下位6ビットで折り返した番地として通るため)
+                                    || (imm[31:0] <= REGISTER_MAX_ADDR
+                                        // かつ，その番地が書き込み可能である(上限以下のため下位6ビットで表せる)
+                                        && is_writable(imm[5:0])));
                         // それ以外は不正な命令として無効扱い
                         default: is_instruction_executable = util_p::FALSE;
                     endcase
