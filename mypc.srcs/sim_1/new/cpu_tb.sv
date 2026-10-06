@@ -653,13 +653,37 @@ module cpu_tb;
         expect_reg(4, 32'h0000_0010);
         expect_reg(5, 32'hf800_0000);
 
-        // シフト量に33(下位5ビットは1)を即値・rs2で指定する
-        `BEGIN_TEST("シフト量は下位5ビットだけを使う");
-        run('{movi(1, 32'h8000_0001), movi(6, 32'd33), sll(1, 0, 2, im(33)), srl(1, 6, 3, NO_IMM)});
-        // 1ビットだけシフトされる
+        // 32以上のシフト量を，即値・rs2(直前の命令の結果を含む)で指定して左シフト・論理右シフトする．
+        // 32以上を表すビットのうち最下位(32)・最上位(0x8000_0000)だけが立つ値と，下位5ビットが1の33・負の-1を使う
+        `BEGIN_TEST("シフト量が32以上なら左シフト・論理右シフトの結果は0になる");
+        run('{movi(1, 32'h8000_0001), movi(7, 32'hffff_ffff), movi(6, 32'd33),
+              srl(1, 6, 2, NO_IMM), sll(1, 0, 3, im(32)), sla(1, 7, 4, NO_IMM), srl(1, 0, 5, im(32'h8000_0000))});
+        // 全ビットがあふれ，空いたビットを埋める0だけが残る
         expect_end();
-        expect_reg(2, 32'h0000_0002);
-        expect_reg(3, 32'h4000_0000);
+        expect_reg(2, 32'h0);
+        expect_reg(3, 32'h0);
+        expect_reg(4, 32'h0);
+        expect_reg(5, 32'h0);
+
+        // 負の値と正の値を，32以上のシフト量(即値の32・rs2の33と-1)で算術右シフトする
+        `BEGIN_TEST("シフト量が32以上なら算術右シフトの結果は符号ビットで埋まる");
+        run('{movi(1, 32'h8000_0001), movi(8, 32'h7fff_ffff), movi(6, 32'd33), movi(7, 32'hffff_ffff),
+              sra(1, 0, 2, im(32)), sra(8, 0, 3, im(32)), sra(1, 6, 4, NO_IMM), sra(8, 7, 5, NO_IMM)});
+        // 負の値は-1，正の値は0になる
+        expect_end();
+        expect_reg(2, 32'hffff_ffff);
+        expect_reg(3, 32'h0);
+        expect_reg(4, 32'hffff_ffff);
+        expect_reg(5, 32'h0);
+
+        // 32未満で最大のシフト量31を即値で指定する
+        `BEGIN_TEST("シフト量31は32以上として扱わずにシフトする");
+        run('{movi(1, 32'h8000_0001), sll(1, 0, 2, im(31)), srl(1, 0, 3, im(31)), sra(1, 0, 4, im(31))});
+        // 最上位・最下位ビットが反対の端へ移る
+        expect_end();
+        expect_reg(2, 32'h8000_0000);
+        expect_reg(3, 32'h0000_0001);
+        expect_reg(4, 32'hffff_ffff);
 
         // S系で未定義のfuncを持つ命令を実行する
         `BEGIN_TEST("S系で未定義のfuncは停止する");
