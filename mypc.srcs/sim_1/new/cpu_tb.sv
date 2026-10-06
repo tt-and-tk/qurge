@@ -36,7 +36,8 @@ module cpu_tb;
     // 10nsごとに1周期のクロックを作る
     always #5 clk = ~clk;
 
-    rom_read_if  rom_read();   // CPUとROMの接続
+    rom_read_if  rom_read1();  // CPUとROMの接続(1つ目の読み出しポート)
+    rom_read_if  rom_read2();  // CPUとROMの接続(2つ目の読み出しポート)
     ram_read_if  ram_read();   // CPUとメインメモリの接続(読み出し)
     ram_write_if ram_write();  // CPUとメインメモリの接続(書き込み)
 
@@ -72,7 +73,8 @@ module cpu_tb;
     // 試験対象のCPU
     cpu_sv dut (
         .clk(clk), .resetn(resetn),
-        .rom_read(rom_read),
+        .rom_read1(rom_read1),
+        .rom_read2(rom_read2),
         .ram_read(ram_read),
         .ram_write(ram_write),
         .div_divisor_tdata(div_divisor_tdata),
@@ -124,7 +126,8 @@ module cpu_tb;
     // テストケースごとに命令列を書き換えるROM
     tb_rom rom (
         .clk(clk),
-        .rom_read(rom_read)
+        .rom_read1(rom_read1),
+        .rom_read2(rom_read2)
     );
 
     // 符号ありの除算IPのモデル．レイテンシはブロックダイアグラム上の除算IP(top_div_gen_0_0)に合わせる
@@ -1658,9 +1661,56 @@ module cpu_tb;
         run('{movi(1, 32'd1)});
         base = cycles;
         run('{movi(1, 32'd1), jmp(6'h00, im(2)), jmp(6'h00, im(3)), jmp(6'h00, im(4))});
-        // 3命令ぶんの2倍のサイクル数だけ多くかかる
+        // 3命令ぶんの2倍のサイクル数から1を引いたサイクル数だけ多くかかる．
+        // 1を引くのは，基準の命令列では正常終了を表す命令が代入と同じ組で届き，代入を実行段へ渡すまで1サイクル待つため
         expect_end();
-        expect_cycles(base + 6);
+        expect_cycles(base + 5);
+
+        // 即値のJMPと飛び越える代入を組の1つ目・2つ目に置いた命令列と，その2命令の代わりにNOPを2つ置いた命令列を実行する
+        `BEGIN_TEST("組の1つ目の即値のJMPで飛び越える2つ目の命令は実行されず，読み飛ばしでサイクル数は増えない");
+        run('{nop(), nop(), movi(2, 32'd1)});
+        base = cycles;
+        run('{jmp(6'h00, im(2)), movi(1, 32'd1), movi(2, 32'd1)});
+        // 2つ目の代入は実行されず，飛び先の代入は実行される．
+        // 2つ目を読み飛ばすサイクルは飛び先が届くのを待つ間に重なるため，NOPを2つ並べた場合と同じサイクル数で終わる
+        expect_end();
+        expect_reg(1, 32'd0);
+        expect_reg(2, 32'd1);
+        expect_cycles(base);
+
+        // 代入と即値のJMPを組の1つ目・2つ目に置き，JMPで次の組の1つ目の代入を飛び越える
+        `BEGIN_TEST("組の2つ目の即値のJMPは，同じ組の1つ目を実行してから飛び先へ進み，1サイクルで実行される");
+        run('{movi(1, 32'd1), nop(), movi(3, 32'd1)});
+        base = cycles;
+        run('{movi(1, 32'd1), jmp(6'h00, im(3)), movi(2, 32'd1), movi(3, 32'd1)});
+        // 1つ目の代入と飛び先の代入は実行され，飛び越えた代入は実行されない．
+        // 1つ目の代入を実行している間に飛び先が届くため，JMPの代わりにNOPを1つ置いた場合と同じサイクル数で終わる
+        expect_end();
+        expect_reg(1, 32'd1);
+        expect_reg(2, 32'd0);
+        expect_reg(3, 32'd1);
+        expect_cycles(base);
+
+        // 奇数番地へ飛ぶ即値のJMPを置き，飛び先の直前(同じ組の偶数番地)には，飛び先の次の代入を飛び越える即値のJMPを置く
+        `BEGIN_TEST("飛び先が奇数番地なら，同じ組の偶数番地の命令は実行も先行取得もされない");
+        run('{jmp(6'h00, im(3)), movi(1, 32'd1), jmp(6'h00, im(5)), movi(2, 32'd1), movi(3, 32'd1), movi(4, 32'd1)});
+        // 飛び先から順に実行され，偶数番地のJMPの飛び先へは進まない
+        expect_end();
+        expect_reg(1, 32'd0);
+        expect_reg(2, 32'd1);
+        expect_reg(3, 32'd1);
+        expect_reg(4, 32'd1);
+
+        // 偶数番地へ飛ぶ即値のJMPと，奇数番地へ飛ぶ即値のJMPで，飛び先から同じ命令を同じ数だけ実行する
+        `BEGIN_TEST("飛び先が奇数番地で最初に1命令しか届かなくても，偶数番地へ飛ぶ場合と同じサイクル数で終わる");
+        run('{jmp(6'h00, im(2)), nop(), movi(1, 32'd1), movi(2, 32'd1), movi(3, 32'd1)});
+        base = cycles;
+        run('{jmp(6'h00, im(3)), nop(), nop(), movi(1, 32'd1), movi(2, 32'd1), movi(3, 32'd1)});
+        // どちらも飛び先の3つの代入を実行する．
+        // 奇数番地へ飛ぶ場合は最初に1命令しか届かないが，その1命令を実行する間に次の組が届くため，サイクル数は変わらない
+        expect_end();
+        expect_reg(3, 32'd1);
+        expect_cycles(base);
 
         // r1への代入だけの命令列と，その後にr1が指す次の番地へのJMPを置いた命令列を実行する
         `BEGIN_TEST("レジスタの番地へのJMPは実行段で取得し直すため4サイクルかかる");
@@ -1738,7 +1788,8 @@ module cpu_tb;
         expect_reg(7, 32'd0);
         expect_reg(8, 32'd1);
 
-        // 成立する分岐の直後に，分岐先の代入を飛び越える即値のJMPを置く(分岐の実行段より後にJMPが届く)
+        // 成立する分岐の直後に，分岐先の代入を飛び越える即値のJMPを置く
+        // (分岐とJMPが同じ組で届き，分岐が実行段で完了する前にJMPの飛び先を取得し始める)
         `BEGIN_TEST("成立した分岐で飛び越えた即値のJMPの飛び先へは進まない");
         run('{eq(0, 0, im(2)), jmp(6'h00, im(3)), movi(1, 32'd1), movi(2, 32'd1)});
         // 分岐先の代入から順に実行される
@@ -1756,9 +1807,10 @@ module cpu_tb;
         expect_reg(2, 32'd1);
         expect_reg(3, 32'd0);
 
-        // 成立する分岐の2つ後に，分岐先の代入を飛び越える即値のJMPを置く(分岐の実行段と同じサイクルにJMPが届く)
+        // 2つのNOPに続けて成立する分岐を置き，その2つ後(次の組の1つ目)に，分岐先の代入を飛び越える即値のJMPを置く．
+        // 命令キューに命令が溜まって組の取得が2サイクルに1回になるため，分岐の実行段と同じサイクルにJMPが届く
         `BEGIN_TEST("成立した分岐の実行と同じサイクルに届いた即値のJMPの飛び先へは進まない");
-        run('{eq(0, 0, im(3)), nop(), jmp(6'h00, im(4)), movi(1, 32'd1), movi(2, 32'd1)});
+        run('{nop(), nop(), eq(0, 0, im(3)), nop(), jmp(6'h00, im(6)), movi(1, 32'd1), movi(2, 32'd1)});
         // 分岐先の代入から順に実行される
         expect_end();
         expect_reg(1, 32'd1);
