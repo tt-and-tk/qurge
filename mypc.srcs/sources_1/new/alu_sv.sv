@@ -295,8 +295,11 @@ module alu_sv (
     // 書き換えず，最後に実行した命令の値を保持したままにする．実行段の値から求める組み合わせ回路の結果は，
     // このフラグが1の間だけ使い，0の間は求められた値を使わない
     logic ex_occupied = 1'b0;
-    // 実行段の命令の番地．分岐の飛び先とCALLの戻り先を求めるのに使う
+    // 実行段の命令の番地．次の番地(CALLの戻り先を含む)を求めるのに使う
     register_t ex_pc = '0;
+    // 実行段の命令が分岐なら，その飛び先(命令の番地にイミディエイトデータを足した番地)．確認段で求めておく．
+    // 実行段で求めると，分岐の比較結果で飛び先を選ぶ回路の手前に加算器が入り，1クロックに収まらないため
+    register_t branch_target_r = '0;
     // 実行段の命令の機械語．ex_occupiedが0の間は前回実行した命令の値が残ったままで，意味を持たない
     machine_p::machine_t current_instruction = nop();
     // 実行段の命令が，先行取得した即値のジャンプか．
@@ -582,7 +585,7 @@ module alu_sv (
     // 実行段の命令の次に実行する命令の番地．参照してよいのは実行段に命令がある間だけ．
     // それ以外では，命令タイプと，比較と飛び先の指定に使う値が直前に実行した命令のものが残っているだけで，結果に意味がない．
     register_t next_pc;
-    assign next_pc = is_branch_taken ? ex_pc + imm_r[31:0]              // 比較結果がtrueの分岐は指定されたぶん離れた番地へ
+    assign next_pc = is_branch_taken ? branch_target_r                  // 比較結果がtrueの分岐は指定されたぶん離れた番地へ
                    : is_jumping      ? jump_target                      // 移動する命令は指定された飛び先へ
                    : sequential_pc;                                     // それ以外は次の番地へ進む
 
@@ -944,6 +947,7 @@ module alu_sv (
             ram_fetch_lower_r <= '0;
             ex_occupied <= 1'b0;
             ex_pc <= '0;
+            branch_target_r <= '0;
             current_instruction <= nop();
             ex_early_jump <= 1'b0;
             rs1_val_r <= '0;
@@ -1508,9 +1512,11 @@ module alu_sv (
 
             // ===== 実行段: 実行段の命令の番地 =====
 
-            // 確認段から命令を受け取る場合はその命令の番地にする(実行できず停止する命令でも同じく更新する)
+            // 確認段から命令を受け取る場合はその命令の番地にする(実行できず停止する命令でも同じく更新する)．
+            // 分岐の飛び先もあわせて求める(分岐以外の命令では使われない)
             if (dispatch) begin
                 ex_pc <= queue_pc[0];
+                branch_target_r <= queue_pc[0] + command_next.imm[31:0];
             end
 
             // ===== IOからレジスタへの取り込み・使わないビットの0固定 =====
