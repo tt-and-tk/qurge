@@ -544,11 +544,11 @@ module alu_sv (
             // シフト系．シフト量が32以上なら，全ビットがあふれた結果にする
             S_TYPE: begin
                 unique case (func_r)
-                    // 左シフト・論理右シフトは，空いたビットを埋める0だけが残る
+                    // 左シフト・論理右シフトは，シフト量が32以上なら空いたビットを埋める0だけが残る
                     SLL: write_value = shift_overflow ? '0 : rs1_val << shift_amount;
                     SRL: write_value = shift_overflow ? '0 : rs1_val >> shift_amount;
                     SLA: write_value = shift_overflow ? '0 : rs1_val <<< shift_amount;
-                    // 算術右シフトは，空いたビットを埋める符号ビットだけが残る．
+                    // 算術右シフトは，シフト量が32以上なら空いたビットを埋める符号ビットだけが残る．
                     // シフトは$unsignedで囲んで単独で評価させる(囲まないと，条件演算子のもう一方が符号なしのため
                     // 式全体が符号なしとして評価され，>>>が論理シフトになる)
                     SRA: write_value = shift_overflow ? {32{rs1_val[31]}} : $unsigned($signed(rs1_val) >>> shift_amount);
