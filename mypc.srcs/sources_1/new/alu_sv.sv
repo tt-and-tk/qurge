@@ -622,7 +622,7 @@ module alu_sv (
                             late_write_valid = (mul_state == RESPONSE);
                             late_write_value = mul_result_r;
                         end
-                        // 割り算は，除算IPから結果が届いたら商を書き込み，imm[32]=1なら余りもimm[31:0]の番地へ書き込む
+                        // 割り算は，除算IPから結果が届いたら商を書き込み，imm[32]=1なら余りもimm[5:0]の番地へ書き込む
                         DIV, DIVU: begin
                             ex_completes          = (div_state == RESPONSE) && div_result_tvalid;
                             late_write_valid      = (div_state == RESPONSE) && div_result_tvalid;
