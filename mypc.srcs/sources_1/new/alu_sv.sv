@@ -497,6 +497,7 @@ module alu_sv (
     assign push_pc_valid1    = !rom_arrived       ? 1'b1
                              : rom_arrived_pc[0]  ? rom_read2.valid
                              : rom_read1.valid;
+    // 先行取得した即値のジャンプかは，使う命令(奇数番地の命令だけを使う場合は奇数番地の命令)についての判定を使う
     assign push_early_jump1  = rom_arrived_pc[0] ? early_jump_odd : early_jump_even;
 
     // 2つ目に取り込む命令の機械語・プログラムカウンタ・命令を置ける番地から取得できたか・先行取得した即値のジャンプか・読み飛ばすか．
@@ -506,10 +507,13 @@ module alu_sv (
     logic                push_pc_valid2;
     logic                push_early_jump2;
     logic                push_skip2;
+    // 機械語は，組の奇数番地を読む読み出しポートの出力
     assign push_instruction2 = rom_read2.machine;
     // 組の偶数番地の最下位ビットを1にした番地
     assign push_pc2          = {rom_arrived_pc[31:1], 1'b1};
+    // 取得できたかは，組の奇数番地を読む読み出しポートが命令とともに返すvalid
     assign push_pc_valid2    = rom_read2.valid;
+    // 先行取得した即値のジャンプかは，奇数番地の命令についての判定
     assign push_early_jump2  = early_jump_odd;
     // 1つ目が先行取得する即値のジャンプなら，2つ目は飛び越えて実行しないため読み飛ばす．
     // 取り込む命令数を変えて取り込まないようにしないのは，ROMの出力のデコード結果から命令キューの全段の
