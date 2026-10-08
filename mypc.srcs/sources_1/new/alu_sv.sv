@@ -512,7 +512,11 @@ module alu_sv (
     // 1サイクルでレジスタへの書き込みまで完了する命令の結果．それ以外の命令では0になり使われない
     register_t write_value;
 
-    // シフト系のシフト量．イミディエイトデータまたはrs2の下位5bit(0〜31)のみを使用する
+    // シフト系のシフト量(イミディエイトデータまたはrs2の32ビット全体を符号なし整数とみなした値)を，2つに分けて求める
+    // シフト量が32以上か．上位27ビットのいずれかが1なら32以上になる
+    logic shift_overflow;
+    assign shift_overflow = imm_r[32] ? (imm_r[31:5] != '0) : (rs2_val[31:5] != '0);
+    // シフト量の下位5bit(0〜31)．32未満のシフトはこれだけで決まる
     logic [4:0] shift_amount;
     assign shift_amount = imm_r[32] ? imm_r[4:0] : rs2_val[4:0];
 
@@ -537,13 +541,17 @@ module alu_sv (
                 endcase
             end
 
-            // シフト系
+            // シフト系．シフト量が32以上なら，全ビットがあふれた結果にする
             S_TYPE: begin
                 unique case (func_r)
-                    SLL: write_value = rs1_val << shift_amount;
-                    SRL: write_value = rs1_val >> shift_amount;
-                    SLA: write_value = rs1_val <<< shift_amount;
-                    SRA: write_value = $signed(rs1_val) >>> shift_amount;
+                    // 左シフト・論理右シフトは，シフト量が32以上なら空いたビットを埋める0だけが残る
+                    SLL: write_value = shift_overflow ? '0 : rs1_val << shift_amount;
+                    SRL: write_value = shift_overflow ? '0 : rs1_val >> shift_amount;
+                    SLA: write_value = shift_overflow ? '0 : rs1_val <<< shift_amount;
+                    // 算術右シフトは，シフト量が32以上なら空いたビットを埋める符号ビットだけが残る．
+                    // シフトは$unsignedで囲んで単独で評価させる(囲まないと，条件演算子のもう一方が符号なしのため
+                    // 式全体が符号なしとして評価され，>>>が論理シフトになる)
+                    SRA: write_value = shift_overflow ? {32{rs1_val[31]}} : $unsigned($signed(rs1_val) >>> shift_amount);
                     // 不正なfunc．順序回路側が停止させる
                     default: ;
                 endcase
@@ -590,6 +598,7 @@ module alu_sv (
         late_write_addr       = rd_addr_r;               // 書き込む命令が共通して使う書き込み先を既定値にし，場合分けでの代入を減らす
         late_write_value      = '0;
         remainder_write_valid = 1'b0;
+        // 余りの書き込み先は，番地の上限以下であることを確認段で確かめているため，下位6ビットで表せる
         remainder_write_addr  = imm_r[5:0];              // 余りを書き込む唯一の命令である割り算が使う書き込み先
         remainder_write_value = div_result_tdata[31:0];  // 同じく割り算が使う，除算IPが返す余り
 
