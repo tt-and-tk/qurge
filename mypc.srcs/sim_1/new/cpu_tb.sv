@@ -261,6 +261,7 @@ module cpu_tb;
 
     outcome_enum    outcome;                          // 直前の実行の終わり方
     int             cycles;                           // 直前の実行の所要サイクル数
+    bit             redirect_met_early_jump;          // 直前の実行で，実行段が分岐・ジャンプで取得し直すサイクルに，先行取得する即値のジャンプがROMから届いたことがあるか
     register_t      regs[0:REGISTER_MAX_ADDR];        // 直前の実行を終えた時点のレジスタの値
     int             end_pc;                           // 正常終了を表す命令の番地
     machine_queue_t code_area;                        // 実行前にコード領域へ直接置く命令列
@@ -339,12 +340,17 @@ module cpu_tb;
         repeat (2) @(negedge clk);
         resetn = 1'b1;
 
+        // 実行段が取得し直すサイクルに先行取得する即値のジャンプが届いたかを，まだ届いていない状態から数え始める
+        redirect_met_early_jump = 1'b0;
         // 停止・正常終了・打ち切りのいずれかに至るまで1サイクルずつ進める
         for (int cycle = 0; ; cycle++) begin
             // ROMにもメモリの後半にも命令を置けない番地へ進んで停止する場合は，CPUがその番地をどこにも残さないため，
             // 停止する前のこのサイクルのうちに，停止するかとその番地(取得用のプログラムカウンタ)を控える
             unreachable_halt = dut.alu_sv_0.pipeline_drained && !dut.alu_sv_0.pc_in_code_area;
             unreachable_pc   = dut.alu_sv_0.fetch_pc;
+            // 実行段が取得し直すと決まったサイクルに，先行取得する即値のジャンプが届いたかを控える
+            if (dut.alu_sv_0.ex_redirects && dut.alu_sv_0.push_early_jump)
+                redirect_met_early_jump = 1'b1;
             // クロックの立ち上がりで更新された値が確定するのを待つ
             @(posedge clk);
             #1;
@@ -1815,6 +1821,9 @@ module cpu_tb;
         expect_end();
         expect_reg(1, 32'd1);
         expect_reg(2, 32'd1);
+        // 命令の配置が意図どおり，分岐の実行と同じサイクルにJMPを届かせている(命令キューの深さなどが変わると届く時機がずれるため確かめる)
+        if (!redirect_met_early_jump)
+            fail("分岐で取得し直すサイクルに即値のJMPが届いていません");
 
         // 即値のJMPの直後に，WM・PRINTを置き，JMPでそれを飛び越える
         `BEGIN_TEST("即値のJMPで飛び越えたWM・PRINTは実行されない");
