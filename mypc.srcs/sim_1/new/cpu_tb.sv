@@ -1727,6 +1727,16 @@ module cpu_tb;
         expect_reg(2, 32'd1);
         expect_reg(3, 32'd1);
 
+        // DIVで実行段が止まっている間に，偶数番地の即値のJMPと奇数番地のWMの組が届く
+        `BEGIN_TEST("命令キューに命令が溜まっている間に読み飛ばした奇数番地のWMは実行されない");
+        run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, NO_IMM), movi(4, 32'd1),
+              jmp(6'h00, im(6)), wm(4'hf, 6'h00, 1, im(32'h100)), movi(5, 32'd1)});
+        // 商が求まり，JMPの手前と飛び先の代入は実行され，WMはメモリへ書き込まない
+        expect_end();
+        expect_reg(3, 32'd2);
+        expect_reg(4, 32'd1);
+        expect_reg(5, 32'd1);
+        expect_mem32(32'h100, 32'd0);
 
         // r1への代入だけの命令列と，その後にr1が指す次の番地へのJMPを置いた命令列を実行する
         `BEGIN_TEST("レジスタの番地へのJMPは実行段で取得し直すため4サイクルかかる");
