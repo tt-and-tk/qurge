@@ -217,7 +217,7 @@ module alu_sv (
                            : 2'd2;
 
     // fetch_pcが，ROMへ渡せる幅(pc_bus_t)に収まっているか．収まらない番地(メモリの後半など)はROMへ出さない．
-    // 組の偶数番地が収まれば，奇数番地も収まる(ROMの命令数の上限が偶数のため．下の組み立て時の検査を参照)
+    // 組の偶数番地が収まれば，奇数番地も収まる(ROMの命令数の上限が偶数のため．偶数であることは組み立て時に検査する)
     util_p::bool_t fetch_pc_fits;
     assign fetch_pc_fits = util_p::is_within_bit_width(fetch_pc, $bits(rom_p::pc_bus_t));
     // 組の2命令は，偶数番地の最下位ビットを1にした番地を奇数番地として読む．ROMの命令数の上限が奇数だと，
