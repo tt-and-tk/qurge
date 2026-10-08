@@ -1718,6 +1718,16 @@ module cpu_tb;
         expect_reg(3, 32'd1);
         expect_cycles(base);
 
+        // 組の偶数番地に即値のCALLを，奇数番地(CALLの戻り先)に別の番地への即値のJMPを置く
+        `BEGIN_TEST("組の2命令とも即値のジャンプなら偶数番地の飛び先へ進み，戻った後に奇数番地のジャンプを実行する");
+        run('{call(6'h00, im(3)), jmp(6'h00, im(5)), movi(1, 32'd1), movi(2, 32'd1), ret(), movi(3, 32'd1)});
+        // 呼んだ関数の代入を実行してから戻り先のJMPで飛び，飛び越えた代入は実行されない
+        expect_end();
+        expect_reg(1, 32'd0);
+        expect_reg(2, 32'd1);
+        expect_reg(3, 32'd1);
+
+
         // r1への代入だけの命令列と，その後にr1が指す次の番地へのJMPを置いた命令列を実行する
         `BEGIN_TEST("レジスタの番地へのJMPは実行段で取得し直すため4サイクルかかる");
         run('{movi(1, 32'd2)});
