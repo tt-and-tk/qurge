@@ -8,12 +8,6 @@
 `include "machine.svh"
 
 package ram_p;
-    // 列挙体
-    typedef enum logic [1:0] {   // メモリ読み出し・書き込み成否
-        NONE,          // 初期状態
-        SUCCESS        // 成功
-    } code_enum;
-
     // 定数
     localparam int RAM_SIZE = 65536;         // メモリの実容量(バイト)．範囲外番地をアドレスバス幅で判定するため2のべき乗とする
     localparam int CODE_AREA_BASE = RAM_SIZE / 2;  // メモリの後半(命令を置いて実行できる領域)の先頭番地．前半はスタックなどに使う
@@ -31,7 +25,6 @@ interface ram_read_if;     // メモリ読み込みインターフェース
     logic                valid;
     logic                ready;
     logic                last;
-    ram_p::code_enum     code;
 
     modport slave(
         input  address,
@@ -39,8 +32,7 @@ interface ram_read_if;     // メモリ読み込みインターフェース
         input  mask,
         input  valid,
         output ready,
-        input  last,
-        output code
+        input  last
     );
 
     modport master(
@@ -49,8 +41,7 @@ interface ram_read_if;     // メモリ読み込みインターフェース
         output mask,
         output valid,
         input  ready,
-        output last,
-        input  code
+        output last
     );
 endinterface
 interface ram_write_if;     // メモリ書き込みインターフェース
@@ -60,7 +51,6 @@ interface ram_write_if;     // メモリ書き込みインターフェース
     logic                valid;
     logic                ready;
     logic                last;
-    ram_p::code_enum     code;
 
     modport slave(
         input  address,
@@ -68,8 +58,7 @@ interface ram_write_if;     // メモリ書き込みインターフェース
         input  mask,
         input  valid,
         output ready,
-        input last,
-        output code
+        input last
     );
 
     modport master(
@@ -78,8 +67,7 @@ interface ram_write_if;     // メモリ書き込みインターフェース
         output mask,
         output valid,
         input  ready,
-        output last,
-        input  code
+        output last
     );
 endinterface
 

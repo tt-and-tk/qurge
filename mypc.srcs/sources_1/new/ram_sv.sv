@@ -98,9 +98,7 @@ module ram_sv import ram_p::*, util_p::*; (
         if (!resetn) begin
             // IO
             ram_read.ready <= 1'b0;
-            ram_read.code <= NONE;
             ram_write.ready <= 1'b0;
-            ram_write.code <= NONE;
 
             // 内部変数
             // 有効フラグを下ろしてram_read.dataを0にする(lane_data_0〜3自体はリセットしない．リセット付きのレジスタは
@@ -118,7 +116,6 @@ module ram_sv import ram_p::*, util_p::*; (
             unique case (ram_read_state)
                 // 待機
                 IDLE: begin
-                    ram_read.code <= NONE;
                     // 読み出し命令を検知
                     if (ram_read.valid) begin
                         ram_read_state <= EXECUTE;
@@ -148,10 +145,9 @@ module ram_sv import ram_p::*, util_p::*; (
                     end
                 end
 
-                // メモリ読み込みの実行結果を返す
+                // readyを下ろして待機へ戻る
                 RESPONSE: begin
                     ram_read.ready <= 1'b0;
-                    ram_read.code <= SUCCESS;
                     ram_read_state <= IDLE;
                 end
             endcase
@@ -160,7 +156,6 @@ module ram_sv import ram_p::*, util_p::*; (
             unique case (ram_write_state)
                 // 待機
                 IDLE: begin
-                    ram_write.code <= NONE;
                     // 書き込み命令を検知
                     if (ram_write.valid) begin
                         ram_write_state <= EXECUTE;
@@ -192,10 +187,9 @@ module ram_sv import ram_p::*, util_p::*; (
                     end
                 end
 
-                // メモリ書き込みの実行結果を返す
+                // readyを下ろして待機へ戻る
                 RESPONSE: begin
                     ram_write.ready <= 1'b0;
-                    ram_write.code <= SUCCESS;
                     ram_write_state <= IDLE;
                 end
             endcase
