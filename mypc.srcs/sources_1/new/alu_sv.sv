@@ -1050,9 +1050,11 @@ module alu_sv (
             fetch_next_pc <=
                 // ROMへ番地を出したなら，組の2命令を取得したため次の組の偶数番地
                 fetch_request ? {fetch_pc[31:1] + 31'd1, 1'b0}
-                // それ以外で，メインメモリから命令を取り込み終えたなら次の番地．どちらでもなければfetch_pcを最下位ビットごと保持する
+                // メインメモリから命令を取り込み終えたなら，次の番地
+                : ram_arrived ? fetch_pc + 1
+                // どちらでもなければ，fetch_pcを最下位ビットごと保持する
                 // (控えた飛び先から取得し始められなかった場合に，その飛び先を引き継ぐため)
-                : fetch_pc + register_t'(ram_arrived);
+                : fetch_pc;
             // 実行段が分岐・ジャンプで後の命令を捨てるかと，その飛び先を控える
             redirect_pending <= ex_redirects;
             redirect_pc <= next_pc;
