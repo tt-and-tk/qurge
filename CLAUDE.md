@@ -41,7 +41,7 @@ PYNQ-Z2(Zynq-7000)上に実装する自作CPUと，それを動かすソフト�
 
 ### QosmosのROMの生成
 
-ROMの内容(`mypc.srcs/sources_1/new/rom_sv.sv`)は，QosmosのPynesisソース(`mypc.srcs/pn/`)から生成する．直接編集しても次の生成で上書きされるため，変更は`.pn`に対して行う．Vivadoはこの変換を行わず，生成済みの`rom_sv.sv`を他のHDLソースと同じく読み込むだけである．このため，`mypc.srcs/pn/`配下を変更したときと，コンパイラ・アセンブラを更新して生成結果が変わりうるときは，合成の前にリポジトリ直下で次を実行して`rom_sv.sv`を生成し直す．
+ROMの内容(`mypc.srcs/sources_1/new/rom_sv.sv`)は，QosmosのPynesisソース(`mypc.srcs/pn/`)から生成したものを使い，Qosmosの変更は`.pn`に対して行う．検証などのため一時的にQosmosのソース以外から作ったROMの内容を置いてもよいが，次の生成で上書きされるためコミットしない．Vivadoはこの変換を行わず，生成済みの`rom_sv.sv`を他のHDLソースと同じく読み込むだけである．このため，`mypc.srcs/pn/`配下を変更したときと，コンパイラ・アセンブラを更新して生成結果が変わりうるときは，合成の前にリポジトリ直下で次を実行して`rom_sv.sv`を生成し直す．
 
 ```
 pn2mc.exe -pn mypc.srcs/pn/qosmos.pn -pt mypc.srcs/pn/qosmos.pt -sv mypc.srcs/sources_1/new/rom_sv.sv
@@ -100,7 +100,7 @@ mypc/                                  # リポジトリルート(Vivadoプロ�
 
 | ディレクトリ | 内容 |
 |-------------|------|
-| `mypc.srcs/sources_1/new/` | カスタムCPUのHDLソース（主な作業対象） |
+| `mypc.srcs/sources_1/new/` | カスタムCPUのHDLソース(主な作業対象)．ただしROMの内容(`rom_sv.sv`)は手で編集せず，「QosmosのROMの生成」の手順で生成する |
 | `mypc.srcs/constrs_1/new/` | PYNQ-Z2ボードのピン制約 (top.xdc) |
 | `mypc.srcs/cpp/` | PS(ARM)側のC++プログラムと，それをPYNQ-Z2ボード上でビルドするスクリプト．ビルド手順は「PS側(ARM/C++)のビルド・書き込み方法」を参照 |
 | `mypc.srcs/pn/` | ROM上で動くQosmosのPynesisソース(`.pn`)．入口は`qosmos.pn`で，「QosmosのROMの生成」の手順で`rom_sv.sv`へ変換する．`lib/`は，Qosmosの実行ファイルのソースが取り込むライブラリ(ROMには入らない．番号などの取り決めを置くファイルはシェルも取り込む) |
