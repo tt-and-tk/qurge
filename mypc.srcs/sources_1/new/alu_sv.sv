@@ -212,9 +212,13 @@ module alu_sv (
     // このサイクルにROMから届いた命令のうち，使う命令数(0〜2)．
     // ROMの出力によらず，前のサイクルまでのレジスタだけで決まる(取り込む位置を決める経路を伸ばさないため)
     logic [1:0] rom_arrived_num;
-    assign rom_arrived_num = !rom_arrived       ? 2'd0
-                           : rom_arrived_pc[0]  ? 2'd1
-                           : 2'd2;
+    assign rom_arrived_num =
+        // ROMから命令が届いていなければ，使う命令はない
+        !rom_arrived        ? 2'd0
+        // 奇数番地をROMへ出していれば，組のうち奇数番地の命令だけを使う
+        : rom_arrived_pc[0] ? 2'd1
+        // 偶数番地をROMへ出していれば，組の2命令とも使う
+        : 2'd2;
 
     // fetch_pcが，ROMへ渡せる幅(pc_bus_t)に収まっているか．収まらない番地(メモリの後半など)はROMへ出さない．
     // 組の偶数番地が収まれば，最下位ビットだけを1にした奇数番地も同じビット幅に収まる
