@@ -1967,6 +1967,10 @@ module cpu_tb;
         expect_end();
         expect_reg(2, 32'd1);
         expect_cycles(pair + 1);
+        run('{movi(1, 32'h55), wm(4'hf, 6'h00, 1, im(32'h100)), rm(4'hf, 6'h00, 3, im(32'h100)), add(3, 0, 4)});
+        // 先頭がメモリから読み込むRMでも，読み込んだ値を受け取る
+        expect_end();
+        expect_reg(4, 32'h55);
 
         // 代入の後に，代入先の番地をオペランドのフィールドに持つが，その値を使わない命令をそれぞれ置く
         `BEGIN_TEST("2番目が実際には使わないオペランドが先頭の書き込み先と同じでも同時発行される");
@@ -2003,8 +2007,13 @@ module cpu_tb;
         expect_end();
         expect_reg(5, 32'd1);
         expect_cycles(base + 1);
+        run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, im(4)), movi(3, 32'd7)});
+        // 商の書き込み先へ書き込む場合は，後の代入の値が残り，同じく1サイクル多くかかる
+        expect_end();
+        expect_reg(3, 32'd7);
+        expect_cycles(base + 1);
         run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, im(4)), movi(4, 32'd7)});
-        // 余りの書き込み先へ書き込む場合は，後の代入の値が残り，同じく1サイクル多くかかる
+        // 余りの書き込み先へ書き込む場合も同じ
         expect_end();
         expect_reg(4, 32'd7);
         expect_cycles(base + 1);
