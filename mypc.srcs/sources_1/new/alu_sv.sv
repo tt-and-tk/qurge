@@ -387,14 +387,14 @@ module alu_sv (
             && check_executable1 && check_executable2
             // かつ，2番目が2本目のパイプラインで実行できる単純な演算である
             && is_simple_operation(command_next2.m_type, command_next2.func)
-            // かつ，先頭が分岐・ジャンプでない(分岐の成立時に2番目の書き込みを取り消す経路を作らないため)．
+            // かつ，先頭が分岐・ジャンプ以外の命令である(分岐の成立時に2番目の書き込みを取り消す経路を作らないため)．
             // 読み飛ばす命令は先行取得する即値のジャンプの次にしか置かれないため，2番目が読み飛ばす命令である場合もここで除かれる
             && command_next1.m_type != F_TYPE && command_next1.m_type != J_TYPE
-            // かつ，2番目が第1オペランドを使うなら，その番地が2番目に読ませないレジスタでない
+            // かつ，2番目が第1オペランドを使う場合，その番地は2番目に読ませてよいレジスタである
             && !(uses_rs1(command_next2.m_type, command_next2.imm) && blocks_second_read(command_next2.rs1))
-            // かつ，2番目が第2オペランドを使うなら，その番地が2番目に読ませないレジスタでない
+            // かつ，2番目が第2オペランドを使う場合，その番地は2番目に読ませてよいレジスタである
             && !(uses_rs2(command_next2.m_type, command_next2.func, command_next2.imm) && blocks_second_read(command_next2.rs2))
-            // かつ，2番目の書き込み先が先頭の書き込み先と重ならない
+            // かつ，2番目の書き込み先は，先頭の書き込み先と別のレジスタである
             && !hits_check_write(command_next2.rd);
     end
 
