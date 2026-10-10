@@ -268,10 +268,10 @@ module alu_sv (
     // ===== 確認段 =====
 
     // 確認段(命令キューの先頭)の命令をデコードする．命令キューが空の間のデコード結果は意味を持たない
-    command_if command_next();
-    assign command_next.machine = queue_instruction[0];
-    decoder_sv decoder_sv_next(
-        .command(command_next)
+    command_if command_next1();
+    assign command_next1.machine = queue_instruction[0];
+    decoder_sv decoder_sv_next1(
+        .command(command_next1)
     );
 
     // 確認段に命令があるか
@@ -281,8 +281,8 @@ module alu_sv (
     // 確認段の命令が実行できるか
     util_p::bool_t check_executable;
     assign check_executable = is_instruction_executable(
-        queue_pc_valid[0], command_next.m_type, command_next.func,
-        command_next.rs1, command_next.rs2, command_next.rd, command_next.imm
+        queue_pc_valid[0], command_next1.m_type, command_next1.func,
+        command_next1.rs1, command_next1.rs2, command_next1.rd, command_next1.imm
     );
 
     // 命令キューの2番目の命令(先頭と同時発行する候補)をデコードする．命令キューに2命令以上ない間のデコード結果は意味を持たない
@@ -337,18 +337,18 @@ module alu_sv (
     util_p::bool_t check_writes_rd;
     assign check_writes_rd =
         // 演算系・シフト系・代入系
-        command_next.m_type == P_TYPE || command_next.m_type == S_TYPE || command_next.m_type == A_TYPE
+        command_next1.m_type == P_TYPE || command_next1.m_type == S_TYPE || command_next1.m_type == A_TYPE
         // メモリ読み込み
-        || (command_next.m_type == M_TYPE && (command_next.func == RM || command_next.func == RMR))
+        || (command_next1.m_type == M_TYPE && (command_next1.func == RM || command_next1.func == RMR))
         // 標準入力
-        || (command_next.m_type == IO_TYPE && command_next.func == SCAN);
+        || (command_next1.m_type == IO_TYPE && command_next1.func == SCAN);
     // 確認段の命令(先頭)が割り算の余りを書き込むか．書き込み先はimm[5:0]
     util_p::bool_t check_writes_remainder;
     assign check_writes_remainder =
         // 割り算である
-        command_next.m_type == P_TYPE && (command_next.func == DIV || command_next.func == DIVU)
+        command_next1.m_type == P_TYPE && (command_next1.func == DIV || command_next1.func == DIVU)
         // かつ，余りの書き込み先をイミディエイトデータで指定している
-        && command_next.imm[32];
+        && command_next1.imm[32];
 
     // 2番目の命令が，先頭の命令が書き込むレジスタ(rdと割り算の余りの書き込み先)と同じ番地か．
     // 先頭が書き込まないレジスタとは一致させない(WMなどのrdフィールドに入る値で同時発行できなくならないようにするため)
@@ -357,9 +357,9 @@ module alu_sv (
     );
         hits_check_write =
             // 先頭が書き込むrdと同じ番地
-            (check_writes_rd && addr == command_next.rd)
+            (check_writes_rd && addr == command_next1.rd)
             // 先頭が書き込む余りの書き込み先と同じ番地(番地の上限以下であることをis_instruction_executable()で確かめているため，下位6ビットで比べる)
-            || (check_writes_remainder && addr == command_next.imm[5:0]);
+            || (check_writes_remainder && addr == command_next1.imm[5:0]);
     endfunction
 
     // 同時発行する場合に，2番目の命令にオペランドとして読ませないレジスタの番地か
@@ -386,7 +386,7 @@ module alu_sv (
         && is_simple_operation(command_next2.m_type, command_next2.func)
         // かつ，先頭が分岐・ジャンプでない(分岐の成立時に2番目の書き込みを取り消す経路を作らないため)．
         // 読み飛ばす命令は先行取得する即値のジャンプの次にしか置かれないため，2番目が読み飛ばす命令である場合もここで除かれる
-        && command_next.m_type != F_TYPE && command_next.m_type != J_TYPE
+        && command_next1.m_type != F_TYPE && command_next1.m_type != J_TYPE
         // かつ，2番目が第1オペランドを使うなら，その番地が2番目に読ませないレジスタでない
         && !(uses_rs1(command_next2.m_type, command_next2.imm) && blocks_second_read(command_next2.rs1))
         // かつ，2番目が第2オペランドを使うなら，その番地が2番目に読ませないレジスタでない
@@ -1014,7 +1014,7 @@ module alu_sv (
     logic spi_hazard;
     assign spi_hazard =
         // 確認段の命令が，第1・第2オペランドのどちらかでAR_SPIを読み出す
-        (command_next.rs1 == SPI_ADDR || command_next.rs2 == SPI_ADDR)
+        (command_next1.rs1 == SPI_ADDR || command_next1.rs2 == SPI_ADDR)
         // かつ，実行段がこのサイクルに次のいずれかの書き込みでAR_SPIへ書き込む
         && (
             // 1サイクルで完了する命令の結果
@@ -1414,22 +1414,22 @@ module alu_sv (
                 // 実行できる命令は，実行に使う値と命令の内容を実行段へ渡す
                 if (check_executable) begin
                     // 第1・第2オペランドの読み出し値を選ぶ
-                    rs1_val_r <= read_operand(command_next.rs1, queue_pc[0]);
-                    rs2_val_r <= read_operand(command_next.rs2, queue_pc[0]);
+                    rs1_val_r <= read_operand(command_next1.rs1, queue_pc[0]);
+                    rs2_val_r <= read_operand(command_next1.rs2, queue_pc[0]);
                     // 確認段の命令が，実行段の命令の演算結果を使うかを，第1・第2オペランドごとに印として渡す．
                     // 実行段の1本目・2本目のパイプラインの命令がこのサイクルに1サイクルで求めた結果を書き込み，
                     // その書き込み先が読み出しアドレスと同じなら使う(プログラムカウンタは書き込み先にならないため重ならない)．
                     // 結果そのものは，実行段がこのサイクルに演算してalu_result_r・ex2_alu_result_rへ保持し，次のサイクルに
                     // 実行段の入口で読み出し値と差し替える．複数サイクル命令の結果のようにread_operand()でここで受け取らないのは，
                     // 演算回路からここまでの経路が1クロックに収まらないため
-                    rs1_from_alu_r     <= ex_alu_write  && (rd_addr_r     == command_next.rs1);
-                    rs2_from_alu_r     <= ex_alu_write  && (rd_addr_r     == command_next.rs2);
-                    rs1_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next.rs1);
-                    rs2_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next.rs2);
-                    rd_addr_r <= command_next.rd;
-                    func_r    <= command_next.func;
-                    imm_r     <= command_next.imm;
-                    mask_r    <= command_next.mask;
+                    rs1_from_alu_r     <= ex_alu_write  && (rd_addr_r     == command_next1.rs1);
+                    rs2_from_alu_r     <= ex_alu_write  && (rd_addr_r     == command_next1.rs2);
+                    rs1_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next1.rs1);
+                    rs2_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next1.rs2);
+                    rd_addr_r <= command_next1.rd;
+                    func_r    <= command_next1.func;
+                    imm_r     <= command_next1.imm;
+                    mask_r    <= command_next1.mask;
                     current_instruction <= queue_instruction[0];
                     ex_early_jump       <= queue_early_jump[0];
 
@@ -1827,7 +1827,7 @@ module alu_sv (
                 // 受け取る命令の番地
                 ex_pc <= queue_pc[0];
                 // 受け取る命令が分岐の場合の飛び先．分岐以外の命令では使われない
-                branch_target_r <= queue_pc[0] + command_next.imm[31:0];
+                branch_target_r <= queue_pc[0] + command_next1.imm[31:0];
             end
 
             // ===== IOからレジスタへの取り込み・使わないビットの0固定 =====
