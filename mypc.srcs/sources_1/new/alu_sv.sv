@@ -379,22 +379,24 @@ module alu_sv (
     // 命令キューの値だけで決め，実行段の状態を含めない(取り除く命令数を決める経路を伸ばさないため)．
     // assignではなくalways_combで求めるのは，hits_check_write()が引数以外に読む値の変化でも求め直させるため
     util_p::bool_t check_pair;
-    always_comb check_pair =
-        // 命令キューに2命令以上ある
-        queue_count >= 2
-        // かつ，2命令とも実行できる(2番目が実行できない場合は同時発行せず，先頭に来たときに停止させる)
-        && check_executable1 && check_executable2
-        // かつ，2番目が2本目のパイプラインで実行できる単純な演算である
-        && is_simple_operation(command_next2.m_type, command_next2.func)
-        // かつ，先頭が分岐・ジャンプでない(分岐の成立時に2番目の書き込みを取り消す経路を作らないため)．
-        // 読み飛ばす命令は先行取得する即値のジャンプの次にしか置かれないため，2番目が読み飛ばす命令である場合もここで除かれる
-        && command_next1.m_type != F_TYPE && command_next1.m_type != J_TYPE
-        // かつ，2番目が第1オペランドを使うなら，その番地が2番目に読ませないレジスタでない
-        && !(uses_rs1(command_next2.m_type, command_next2.imm) && blocks_second_read(command_next2.rs1))
-        // かつ，2番目が第2オペランドを使うなら，その番地が2番目に読ませないレジスタでない
-        && !(uses_rs2(command_next2.m_type, command_next2.func, command_next2.imm) && blocks_second_read(command_next2.rs2))
-        // かつ，2番目の書き込み先が先頭の書き込み先と重ならない
-        && !hits_check_write(command_next2.rd);
+    always_comb begin
+        check_pair =
+            // 命令キューに2命令以上ある
+            queue_count >= 2
+            // かつ，2命令とも実行できる(2番目が実行できない場合は同時発行せず，先頭に来たときに停止させる)
+            && check_executable1 && check_executable2
+            // かつ，2番目が2本目のパイプラインで実行できる単純な演算である
+            && is_simple_operation(command_next2.m_type, command_next2.func)
+            // かつ，先頭が分岐・ジャンプでない(分岐の成立時に2番目の書き込みを取り消す経路を作らないため)．
+            // 読み飛ばす命令は先行取得する即値のジャンプの次にしか置かれないため，2番目が読み飛ばす命令である場合もここで除かれる
+            && command_next1.m_type != F_TYPE && command_next1.m_type != J_TYPE
+            // かつ，2番目が第1オペランドを使うなら，その番地が2番目に読ませないレジスタでない
+            && !(uses_rs1(command_next2.m_type, command_next2.imm) && blocks_second_read(command_next2.rs1))
+            // かつ，2番目が第2オペランドを使うなら，その番地が2番目に読ませないレジスタでない
+            && !(uses_rs2(command_next2.m_type, command_next2.func, command_next2.imm) && blocks_second_read(command_next2.rs2))
+            // かつ，2番目の書き込み先が先頭の書き込み先と重ならない
+            && !hits_check_write(command_next2.rd);
+    end
 
     // ===== 取得段: メモリの後半からの命令の取得 =====
 
