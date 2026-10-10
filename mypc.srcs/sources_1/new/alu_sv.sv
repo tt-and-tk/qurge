@@ -398,6 +398,11 @@ module alu_sv (
             && !hits_check_write(command_next2.rd);
     end
 
+    // 確認段の命令を，実行段へ渡さずに読み飛ばすか．
+    // 実行しない命令のため，実行段の空き・AR_SPIへの書き込み待ち・実行できるかの確認(停止)のいずれにも関わらず取り除く
+    logic check_skip;
+    assign check_skip = check_occupied && queue_skip[0];
+
     // ===== 取得段: メモリの後半からの命令の取得 =====
 
     // メインメモリから命令を読み出している最中か
@@ -718,6 +723,74 @@ module alu_sv (
     // 読み飛ばしは確認段で1サイクルを使うが，先行取得した飛び先が届くまでの空き時間に重なるため，多くの場合は所要サイクル数が増えない．
     // 命令キューに命令が溜まっている場合(前の命令が割り算などで実行段に留まっている場合)は，飛び先の実行が1サイクル遅れる
     assign push_skip2        = early_jump_even;
+
+    // ===== 取り込み段: 命令キューの次の値(組み合わせ回路) =====
+    // 次のクロックで命令キューの各位置と命令数を書き換える値(以下，次の値と書く)を求める．
+    // 次の値は，確認段の命令を実行段へ渡す場合と渡さない場合のそれぞれについて，命令キューの値と取り込む命令だけから求めておく．
+    // 実行段へ渡すか(実行段の完了待ちを含む)は，順序回路でどちらかを選ぶ最後の段にだけ使う．
+    // 取り除く命令数からまとめて求めないのは，dispatchから取り除く命令数・取り込む位置の比較を経て
+    // 命令キューの全位置の取り込み可否に至る経路ができ，1クロックに収まらないため
+
+    // 命令キューの各レジスタに対応する次の値．命令キューは今のサイクルの命令を保持するレジスタで，これらは
+    // 組み合わせ回路で求める次のサイクルの候補である．渡す場合と渡さない場合の2通りを持つため，命令キューとは別に宣言する．
+    // 添字0: 実行段へ渡さない場合，添字1: 実行段へ渡す場合
+    machine_p::machine_t queue_instruction_next[2][QUEUE_DEPTH];  // 命令キューの機械語
+    register_t           queue_pc_next[2][QUEUE_DEPTH];           // 命令キューの命令のプログラムカウンタ
+    logic                queue_pc_valid_next[2][QUEUE_DEPTH];     // 命令を置ける番地から取得できたか
+    logic                queue_early_jump_next[2][QUEUE_DEPTH];   // 先行取得した即値のジャンプか
+    logic                queue_skip_next[2][QUEUE_DEPTH];         // 実行せずに読み飛ばすか
+    logic [$clog2(QUEUE_DEPTH + 1)-1:0] queue_count_next[2];      // 命令キューに入っている命令数
+
+    always_comb begin
+        for (int d = 0; d < 2; d++) begin
+            int pop_num;  // 先頭から取り除く命令数(0〜2)
+            pop_num =
+                // 実行段へ渡すなら，同時発行する場合は2命令，それ以外は先頭の1命令
+                (d == 1)     ? (check_pair ? 2 : 1)
+                // 実行段へ渡さない場合は，読み飛ばすなら先頭の1命令，それ以外は取り除かない
+                : check_skip ? 1
+                : 0;
+
+            // 各位置を，取り込んだ命令を入れる位置(前へ詰めた後の末尾とその次)には取り込んだ1つ目・2つ目の命令にし，
+            // それ以外は，取り除いた命令数ぶん後ろの命令を前へ詰めた値にする．
+            // 2つ目を入れる位置は，ROMへ番地を出すときに2命令ぶんの空きを確かめている(fetch_request)ため，命令キューに収まる
+            for (int i = 0; i < QUEUE_DEPTH; i++) begin
+                // 既定値は今の値を保持する
+                queue_instruction_next[d][i] = queue_instruction[i];
+                queue_pc_next[d][i]          = queue_pc[i];
+                queue_pc_valid_next[d][i]    = queue_pc_valid[i];
+                queue_early_jump_next[d][i]  = queue_early_jump[i];
+                queue_skip_next[d][i]        = queue_skip[i];
+                // 1つ目に取り込む命令を入れる位置
+                if (push_num >= 1 && i == queue_count - pop_num) begin
+                    queue_instruction_next[d][i] = push_instruction1;
+                    queue_pc_next[d][i]          = push_pc1;
+                    queue_pc_valid_next[d][i]    = push_pc_valid1;
+                    queue_early_jump_next[d][i]  = push_early_jump1;
+                    queue_skip_next[d][i]        = 1'b0;
+                end
+                // 2つ目に取り込む命令を入れる位置
+                else if (push_num == 2 && i == queue_count - pop_num + 1) begin
+                    queue_instruction_next[d][i] = push_instruction2;
+                    queue_pc_next[d][i]          = push_pc2;
+                    queue_pc_valid_next[d][i]    = push_pc_valid2;
+                    queue_early_jump_next[d][i]  = push_early_jump2;
+                    queue_skip_next[d][i]        = push_skip2;
+                end
+                // 命令を取り除くなら，取り除いた命令数ぶん後ろの命令を詰める
+                else if (pop_num != 0 && i + pop_num < QUEUE_DEPTH) begin
+                    queue_instruction_next[d][i] = queue_instruction[i + pop_num];
+                    queue_pc_next[d][i]          = queue_pc[i + pop_num];
+                    queue_pc_valid_next[d][i]    = queue_pc_valid[i + pop_num];
+                    queue_early_jump_next[d][i]  = queue_early_jump[i + pop_num];
+                    queue_skip_next[d][i]        = queue_skip[i + pop_num];
+                end
+            end
+
+            // 命令数は，入れた数と取り除いた数で更新する
+            queue_count_next[d] = queue_count + push_num - pop_num;
+        end
+    end
 
     // ===== 分岐・ジャンプ先・次番地の算出(組み合わせ回路) =====
     // 実行段に命令がある間(ex_occupiedが1の間)のみ意味を持つ(それ以外では直前に実行した命令の値が残っている)
@@ -1050,79 +1123,6 @@ module alu_sv (
         && (!ex_occupied || ex_completes)
         // かつ，AR_SPIへの書き込みが終わるのを待つ必要がない
         && !spi_hazard;
-
-    // 確認段の命令を，実行段へ渡さずに読み飛ばすか．
-    // 実行しない命令のため，実行段の空き・AR_SPIへの書き込み待ち・実行できるかの確認(停止)のいずれにも関わらず取り除く
-    logic check_skip;
-    assign check_skip = check_occupied && queue_skip[0];
-
-    // ===== 取り込み段: 命令キューの次の値(組み合わせ回路) =====
-    // 次のクロックで命令キューの各位置と命令数を書き換える値(以下，次の値と書く)を求める．
-    // 次の値は，確認段の命令を実行段へ渡す場合と渡さない場合のそれぞれについて，命令キューの値と取り込む命令だけから求めておく．
-    // 実行段へ渡すか(実行段の完了待ちを含む)は，順序回路でどちらかを選ぶ最後の段にだけ使う．
-    // 取り除く命令数からまとめて求めないのは，dispatchから取り除く命令数・取り込む位置の比較を経て
-    // 命令キューの全位置の取り込み可否に至る経路ができ，1クロックに収まらないため
-
-    // 命令キューの各レジスタに対応する次の値．命令キューは今のサイクルの命令を保持するレジスタで，これらは
-    // 組み合わせ回路で求める次のサイクルの候補である．渡す場合と渡さない場合の2通りを持つため，命令キューとは別に宣言する．
-    // 添字0: 実行段へ渡さない場合，添字1: 実行段へ渡す場合
-    machine_p::machine_t queue_instruction_next[2][QUEUE_DEPTH];  // 命令キューの機械語
-    register_t           queue_pc_next[2][QUEUE_DEPTH];           // 命令キューの命令のプログラムカウンタ
-    logic                queue_pc_valid_next[2][QUEUE_DEPTH];     // 命令を置ける番地から取得できたか
-    logic                queue_early_jump_next[2][QUEUE_DEPTH];   // 先行取得した即値のジャンプか
-    logic                queue_skip_next[2][QUEUE_DEPTH];         // 実行せずに読み飛ばすか
-    logic [$clog2(QUEUE_DEPTH + 1)-1:0] queue_count_next[2];      // 命令キューに入っている命令数
-
-    always_comb begin
-        for (int d = 0; d < 2; d++) begin
-            int pop_num;  // 先頭から取り除く命令数(0〜2)
-            pop_num =
-                // 実行段へ渡すなら，同時発行する場合は2命令，それ以外は先頭の1命令
-                (d == 1)     ? (check_pair ? 2 : 1)
-                // 実行段へ渡さない場合は，読み飛ばすなら先頭の1命令，それ以外は取り除かない
-                : check_skip ? 1
-                : 0;
-
-            // 各位置を，取り込んだ命令を入れる位置(前へ詰めた後の末尾とその次)には取り込んだ1つ目・2つ目の命令にし，
-            // それ以外は，取り除いた命令数ぶん後ろの命令を前へ詰めた値にする．
-            // 2つ目を入れる位置は，ROMへ番地を出すときに2命令ぶんの空きを確かめている(fetch_request)ため，命令キューに収まる
-            for (int i = 0; i < QUEUE_DEPTH; i++) begin
-                // 既定値は今の値を保持する
-                queue_instruction_next[d][i] = queue_instruction[i];
-                queue_pc_next[d][i]          = queue_pc[i];
-                queue_pc_valid_next[d][i]    = queue_pc_valid[i];
-                queue_early_jump_next[d][i]  = queue_early_jump[i];
-                queue_skip_next[d][i]        = queue_skip[i];
-                // 1つ目に取り込む命令を入れる位置
-                if (push_num >= 1 && i == queue_count - pop_num) begin
-                    queue_instruction_next[d][i] = push_instruction1;
-                    queue_pc_next[d][i]          = push_pc1;
-                    queue_pc_valid_next[d][i]    = push_pc_valid1;
-                    queue_early_jump_next[d][i]  = push_early_jump1;
-                    queue_skip_next[d][i]        = 1'b0;
-                end
-                // 2つ目に取り込む命令を入れる位置
-                else if (push_num == 2 && i == queue_count - pop_num + 1) begin
-                    queue_instruction_next[d][i] = push_instruction2;
-                    queue_pc_next[d][i]          = push_pc2;
-                    queue_pc_valid_next[d][i]    = push_pc_valid2;
-                    queue_early_jump_next[d][i]  = push_early_jump2;
-                    queue_skip_next[d][i]        = push_skip2;
-                end
-                // 命令を取り除くなら，取り除いた命令数ぶん後ろの命令を詰める
-                else if (pop_num != 0 && i + pop_num < QUEUE_DEPTH) begin
-                    queue_instruction_next[d][i] = queue_instruction[i + pop_num];
-                    queue_pc_next[d][i]          = queue_pc[i + pop_num];
-                    queue_pc_valid_next[d][i]    = queue_pc_valid[i + pop_num];
-                    queue_early_jump_next[d][i]  = queue_early_jump[i + pop_num];
-                    queue_skip_next[d][i]        = queue_skip[i + pop_num];
-                end
-            end
-
-            // 命令数は，入れた数と取り除いた数で更新する
-            queue_count_next[d] = queue_count + push_num - pop_num;
-        end
-    end
 
     // 確認段の命令が実行段へ渡すオペランドの値を，番地で指定したレジスタから読み出す．読み出しアドレスが，このサイクルに完了する
     // 複数サイクル命令の書き込み先と重なる場合は，レジスタから読んだ値ではなく書き込む値をそのまま使う(フォワーディング)
