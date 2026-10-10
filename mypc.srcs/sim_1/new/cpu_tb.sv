@@ -2057,6 +2057,30 @@ module cpu_tb;
         expect_reg(5, 32'd3);
         expect_cycles(base);
 
+        // DIVとr6への代入を同時発行し，DIVの完了後に実行するADDがr6を読む
+        `BEGIN_TEST("複数サイクル命令と同時発行した2番目の命令の結果を，次の命令が受け取る");
+        run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, NO_IMM), movi(6, 32'd5), add(6, 0, 7)});
+        // ADDはr6へ代入した値を受け取る
+        expect_end();
+        expect_reg(7, 32'd5);
+
+        // ADDと，ADDが読むr1への代入を同時発行する
+        `BEGIN_TEST("先頭が読むレジスタへ同時発行した2番目が書き込んでも，先頭は書き込む前の値を使う");
+        run('{movi(1, 32'd5), movi(2, 32'd3), movi(3, 32'd8), movi(1, 32'd9)});
+        base = cycles;
+        run('{movi(1, 32'd5), movi(2, 32'd3), add(1, 2, 3), movi(1, 32'd9)});
+        // ADDは書き込む前のr1で和を求め，r1には後の代入の値が残る．ADDの代わりに和を代入する命令列と同じサイクル数で終わる
+        expect_end();
+        expect_reg(3, 32'd8);
+        expect_reg(1, 32'd9);
+        expect_cycles(base);
+        // WMと，WMがメモリへ書き込むr1への代入を同時発行する
+        run('{movi(1, 32'd5), wm(4'hf, 6'h00, 1, im(32'h100)), movi(1, 32'd9)});
+        // メモリには書き込む前のr1が書かれ，r1には後の代入の値が残る
+        expect_end();
+        expect_mem32(32'h100, 32'd5);
+        expect_reg(1, 32'd9);
+
         // 0で割るDIVと代入を同時発行する
         `BEGIN_TEST("先頭が停止すると，同時発行した2番目の命令は書き込まない");
         run('{movi(1, 32'd9), div(1, 0, 3, NO_IMM), movi(5, 32'd1)});
