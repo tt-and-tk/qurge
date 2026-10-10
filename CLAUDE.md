@@ -100,7 +100,7 @@ mypc/                                  # リポジトリルート(Vivadoプロ�
 
 | ディレクトリ | 内容 |
 |-------------|------|
-| `mypc.srcs/sources_1/new/` | カスタムCPUのHDLソース(主な作業対象)．ただしROMの内容(`rom_sv.sv`)は手で編集せず，「QosmosのROMの生成」の手順で生成する |
+| `mypc.srcs/sources_1/new/` | カスタムCPUのHDLソース(主な作業対象)と，手で編集せず「QosmosのROMの生成」の手順で生成するROMの内容(`rom_sv.sv`) |
 | `mypc.srcs/constrs_1/new/` | PYNQ-Z2ボードのピン制約 (top.xdc) |
 | `mypc.srcs/cpp/` | PS(ARM)側のC++プログラムと，それをPYNQ-Z2ボード上でビルドするスクリプト．ビルド手順は「PS側(ARM/C++)のビルド・書き込み方法」を参照 |
 | `mypc.srcs/pn/` | ROM上で動くQosmosのPynesisソース(`.pn`)．入口は`qosmos.pn`で，「QosmosのROMの生成」の手順で`rom_sv.sv`へ変換する．`lib/`は，Qosmosの実行ファイルのソースが取り込むライブラリ(ROMには入らない．番号などの取り決めを置くファイルはシェルも取り込む) |
