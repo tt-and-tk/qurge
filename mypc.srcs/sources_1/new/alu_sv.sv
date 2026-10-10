@@ -361,6 +361,17 @@ module alu_sv (
             || (check_writes_remainder && addr == command_next.imm[5:0]);
     endfunction
 
+    // 同時発行する場合に，2番目の命令にオペランドとして読ませないレジスタの番地か
+    function automatic util_p::bool_t blocks_second_read(
+        machine_p::addr_t addr
+    );
+        blocks_second_read =
+            // 先頭が書き込むレジスタ(同じサイクルに実行段へ渡す先頭の結果を，2番目が受け取る経路を設けないため)
+            hits_check_write(addr)
+            // AR_SPI(実行段の命令がAR_SPIへ書き込み終えるのを待つ仕組み(spi_hazard)は，先頭の命令にだけ設けているため)
+            || addr == SPI_ADDR;
+    endfunction
+
     // 2番目の命令を先頭と同じサイクルに実行段へ渡すか(同時発行するか)．
     // 命令キューの値だけで決め，実行段の状態を含めない(取り除く命令数を決める経路を伸ばさないため)．
     // assignではなくalways_combで求めるのは，hits_check_write()が引数以外に読む値の変化でも求め直させるため
@@ -375,13 +386,10 @@ module alu_sv (
         // かつ，先頭が分岐・ジャンプでない(分岐の成立時に2番目の書き込みを取り消す経路を作らないため)．
         // 読み飛ばす命令は先行取得する即値のジャンプの次にしか置かれないため，2番目が読み飛ばす命令である場合もここで除かれる
         && command_next.m_type != F_TYPE && command_next.m_type != J_TYPE
-        // かつ，2番目が実際に使う第1オペランドが，先頭が書き込むレジスタでもAR_SPIでもない．
-        // AR_SPIを除くのは，先頭が書き込みを終えるのを待つ仕組み(spi_hazard)を2番目に設けないため
-        && !(uses_rs1(command_next2.m_type, command_next2.imm)
-             && (hits_check_write(command_next2.rs1) || command_next2.rs1 == SPI_ADDR))
-        // かつ，2番目が実際に使う第2オペランドも同様
-        && !(uses_rs2(command_next2.m_type, command_next2.func, command_next2.imm)
-             && (hits_check_write(command_next2.rs2) || command_next2.rs2 == SPI_ADDR))
+        // かつ，2番目が第1オペランドを使うなら，その番地が2番目に読ませないレジスタでない
+        && !(uses_rs1(command_next2.m_type, command_next2.imm) && blocks_second_read(command_next2.rs1))
+        // かつ，2番目が第2オペランドを使うなら，その番地が2番目に読ませないレジスタでない
+        && !(uses_rs2(command_next2.m_type, command_next2.func, command_next2.imm) && blocks_second_read(command_next2.rs2))
         // かつ，2番目の書き込み先が先頭の書き込み先と重ならない
         && !hits_check_write(command_next2.rd);
 
