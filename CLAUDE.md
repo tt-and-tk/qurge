@@ -102,6 +102,6 @@ mypc/                                  # リポジトリルート(Vivadoプロ�
 |-------------|------|
 | `mypc.srcs/sources_1/new/` | カスタムCPUのHDLソース（主な作業対象） |
 | `mypc.srcs/constrs_1/new/` | PYNQ-Z2ボードのピン制約 (top.xdc) |
-| `mypc.srcs/cpp/` | PS(ARM)側のC++プログラム(`run.cpp`が現行版)．`compile.sh`はPYNQ-Z2ボード上でビルドする際に使うスクリプト |
+| `mypc.srcs/cpp/` | PS(ARM)側のC++プログラムと，それをPYNQ-Z2ボード上でビルドするスクリプト．ビルド手順は「PS側(ARM/C++)のビルド・書き込み方法」を参照 |
 | `mypc.srcs/pn/` | ROM上で動くQosmosのPynesisソース(`.pn`)．入口は`qosmos.pn`で，「QosmosのROMの生成」の手順で`rom_sv.sv`へ変換する．`lib/`は，Qosmosの実行ファイルのソースが取り込むライブラリ(ROMには入らない．番号などの取り決めを置くファイルはシェルも取り込む) |
 | `mypc.srcs/sim_1/` | テストベンチ(`new/`)と，それをコンパイル・実行するスクリプト．実行方法は「CPUのシミュレーション」を参照 |
