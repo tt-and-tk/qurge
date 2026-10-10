@@ -1935,6 +1935,10 @@ module cpu_tb;
         // 同時発行できる場合より1サイクル多くかかる
         expect_end();
         expect_cycles(pair + 1);
+        run('{movi(1, 32'd3), movi(2, 32'd4), movi(5, 32'd1), mul(1, 2, 3)});
+        // 演算系でも複数サイクルかかるMULは同時発行されず，積が書き込まれる
+        expect_end();
+        expect_reg(3, 32'd12);
 
         // 成立しない分岐の後に代入を置く
         `BEGIN_TEST("先頭が分岐なら同時発行されない");
