@@ -419,9 +419,13 @@ module alu_sv (
     // 1サイクルに取り込む命令は最大2つで，プログラム上で先に実行する方を1つ目，その次を2つ目と呼ぶ．
     // 2つ取り込むのは，ROMから組の2命令とも使う場合だけである
 
-    // このサイクルに命令キューへ取り込む命令数(0〜2)．メインメモリからは1命令ずつ届く
+    // このサイクルに命令キューへ取り込む命令数(0〜2)
     logic [1:0] push_num;
-    assign push_num = rom_arrived ? rom_arrived_num : 2'(ram_arrived);
+    assign push_num =
+        // ROMから届いていれば，ROMから届いた命令のうち使う命令数
+        rom_arrived ? rom_arrived_num
+        // それ以外は，メインメモリから届いていれば1命令(メインメモリからは1命令ずつ届く)
+        : 2'(ram_arrived);
 
     // ROMから届いた組の2命令をそれぞれデコードする．ROMから命令が届かないサイクルのデコード結果は意味を持たない
     command_if command_arrived1();
@@ -472,33 +476,50 @@ module alu_sv (
     // このサイクルにROMから届いた命令のどちらかで先行取得するか
     logic push_early_jump;
     assign push_early_jump = early_jump_even || early_jump_odd;
-    // 先行取得する飛び先．組の2命令とも即値のジャンプなら，プログラム上で先に実行する偶数番地の命令の飛び先にする
-    // (奇数番地の命令は，偶数番地の命令で飛び越えて実行しないため)
+    // 先行取得する飛び先
     register_t early_jump_target;
-    assign early_jump_target = early_jump_even ? command_arrived1.imm[31:0] : command_arrived2.imm[31:0];
+    assign early_jump_target =
+        // 偶数番地の命令で先行取得するなら，その飛び先．組の2命令とも即値のジャンプでも，
+        // 奇数番地の命令は偶数番地の命令で飛び越えて実行しないため，こちらを優先する
+        early_jump_even ? command_arrived1.imm[31:0]
+        // それ以外は，奇数番地の命令の飛び先
+        : command_arrived2.imm[31:0];
 
     // 1つ目に取り込む命令の機械語・プログラムカウンタ・命令を置ける番地から取得できたか・先行取得した即値のジャンプか
     machine_p::machine_t push_instruction1;
     register_t           push_pc1;
     logic                push_pc_valid1;
     logic                push_early_jump1;
-    // 機械語は，ROMから届いた命令ではROMの出力(奇数番地の命令だけを使う場合はrom_read2)，
-    // メインメモリから届いた命令では届いた上位ワードと控えておいた下位ワード
-    assign push_instruction1 = !rom_arrived       ? {ram_read.data, ram_fetch_lower_r}
-                             : rom_arrived_pc[0]  ? rom_read2.machine
-                             : rom_read1.machine;
-    // プログラムカウンタは，ROMから届いた命令では番地を出したときに控えた番地，メインメモリから届いた命令では取得用のプログラムカウンタ
-    assign push_pc1          = rom_arrived ? rom_arrived_pc : fetch_pc;
-    // 取得できたかは，ROMから届いた命令では，ROMが命令とともに返すvalid(番地がROMに格納された命令数の範囲内か)を使う．
-    // 番地がROMへ渡せる幅に収まるかは，収まる番地しかROMへ出さない(fetch_request)ため確かめなくてよい．
-    // メインメモリから届いた命令は，メモリの後半を指す番地でしか取得しないため，常に取得できたものとする．
-    // ROMへ渡せる幅にもメモリの後半にも収まらない番地は，どちらからも取得せず命令が届かないため，ここでは扱わない．
-    // その番地へ進んだ場合は，パイプラインが空になった時点で停止させる(pipeline_drainedを使う取得段の処理)
-    assign push_pc_valid1    = !rom_arrived       ? 1'b1
-                             : rom_arrived_pc[0]  ? rom_read2.valid
-                             : rom_read1.valid;
-    // 先行取得した即値のジャンプかは，使う命令(奇数番地の命令だけを使う場合は奇数番地の命令)についての判定を使う
-    assign push_early_jump1  = rom_arrived_pc[0] ? early_jump_odd : early_jump_even;
+    // 機械語
+    assign push_instruction1 =
+        // メインメモリから届いた命令なら，届いた上位ワードと控えておいた下位ワード
+        !rom_arrived        ? {ram_read.data, ram_fetch_lower_r}
+        // ROMから組のうち奇数番地の命令だけを使うなら，奇数番地を読む読み出しポートの出力
+        : rom_arrived_pc[0] ? rom_read2.machine
+        // ROMから組の2命令とも使うなら，偶数番地を読む読み出しポートの出力
+        : rom_read1.machine;
+    // プログラムカウンタ
+    assign push_pc1 =
+        // ROMから届いた命令なら，番地を出したときに控えた番地
+        rom_arrived ? rom_arrived_pc
+        // メインメモリから届いた命令なら，取得用のプログラムカウンタ
+        : fetch_pc;
+    // 命令を置ける番地から取得できたか．ROMへ渡せる幅にもメモリの後半にも収まらない番地は，
+    // どちらからも取得せず命令が届かないため，ここでは扱わない(パイプラインが空になった時点で停止させる)
+    assign push_pc_valid1 =
+        // メインメモリから届いた命令なら，メモリの後半を指す番地でしか取得しないため，常に取得できたものとする
+        !rom_arrived        ? 1'b1
+        // ROMから組のうち奇数番地の命令だけを使うなら，奇数番地を読む読み出しポートが命令とともに返すvalid
+        // (番地がROMに格納された命令数の範囲内か．ROMへ渡せる幅に収まる番地しかROMへ出さないため，幅は確かめなくてよい)
+        : rom_arrived_pc[0] ? rom_read2.valid
+        // ROMから組の2命令とも使うなら，偶数番地を読む読み出しポートが命令とともに返すvalid
+        : rom_read1.valid;
+    // 先行取得した即値のジャンプか
+    assign push_early_jump1 =
+        // ROMから組のうち奇数番地の命令だけを使うなら，奇数番地の命令についての判定
+        rom_arrived_pc[0] ? early_jump_odd
+        // それ以外は，偶数番地の命令についての判定(メインメモリから届いた命令では偽になる)
+        : early_jump_even;
 
     // 2つ目に取り込む命令の機械語・プログラムカウンタ・命令を置ける番地から取得できたか・先行取得した即値のジャンプか・読み飛ばすか．
     // 2つ目を取り込むのはROMから組の2命令とも使う場合だけのため，常に組の奇数番地の命令になる
@@ -1023,13 +1044,14 @@ module alu_sv (
                 rom_arrived_pc <= fetch_pc;
             end
             // 順番どおりに取得する番地を，このサイクルに取得した番地(取得し直すサイクルなら飛び先)の次へ進める．
-            // ROMへ番地を出した場合は組の2命令を取得したため次の組の偶数番地へ，メインメモリから命令を取り込み終えた場合は
-            // 次の番地へ進める．どちらでもなければ，このサイクルのfetch_pcを最下位ビットごと保持する
-            // (控えた飛び先から取得し始められなかった場合に，その飛び先を引き継ぐため)．
             // 飛び先へ進む場合は，次のサイクルにfetch_pcが控えた飛び先へ置き換える．
             // 飛び先を控えるのは，実行段で取得し直すと決まった時点と，先行取得すると決まった時点の2つ
-            fetch_next_pc <= fetch_request ? {fetch_pc[31:1] + 31'd1, 1'b0}
-                           : fetch_pc + register_t'(ram_arrived);
+            fetch_next_pc <=
+                // ROMへ番地を出したなら，組の2命令を取得したため次の組の偶数番地
+                fetch_request ? {fetch_pc[31:1] + 31'd1, 1'b0}
+                // それ以外で，メインメモリから命令を取り込み終えたなら次の番地．どちらでもなければfetch_pcを最下位ビットごと保持する
+                // (控えた飛び先から取得し始められなかった場合に，その飛び先を引き継ぐため)
+                : fetch_pc + register_t'(ram_arrived);
             // 実行段が分岐・ジャンプで後の命令を捨てるかと，その飛び先を控える
             redirect_pending <= ex_redirects;
             redirect_pc <= next_pc;
