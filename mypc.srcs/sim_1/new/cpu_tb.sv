@@ -1968,7 +1968,7 @@ module cpu_tb;
         expect_reg(2, 32'd1);
         expect_cycles(pair + 1);
         run('{movi(1, 32'h55), wm(4'hf, 6'h00, 1, im(32'h100)), rm(4'hf, 6'h00, 3, im(32'h100)), add(3, 0, 4)});
-        // 先頭がメモリから読み込むRMでも，読み込んだ値を受け取る
+        // 先頭がメモリから読み込むRMで，2番目がその書き込み先を読む場合は，同時発行されずにRMが読み込んだ値を受け取る
         expect_end();
         expect_reg(4, 32'h55);
 
