@@ -424,18 +424,18 @@ module alu_sv (
     // 2本目のパイプラインで直前に完了した命令が書き込んだ値．alu_result_rと同じく，次の命令が受け取るために保持する
     register_t ex2_alu_result_r = '0;
     // 実行段の命令が，第1・第2オペランドとしてrs1_val_r・rs2_val_rの代わりにalu_result_rを使うか
-    logic rs1_forward_r = 1'b0;
-    logic rs2_forward_r = 1'b0;
+    logic rs1_from_alu_r = 1'b0;
+    logic rs2_from_alu_r = 1'b0;
     // 実行段の命令が，第1・第2オペランドとしてrs1_val_r・rs2_val_rの代わりにex2_alu_result_rを使うか．
     // alu_result_rを使う印と同時には立たない(同時発行した2命令の書き込み先は重ならないため)
-    logic rs1_forward_ex2_r = 1'b0;
-    logic rs2_forward_ex2_r = 1'b0;
+    logic rs1_from_ex2_alu_r = 1'b0;
+    logic rs2_from_ex2_alu_r = 1'b0;
 
     // 実行段の命令が使う第1・第2オペランドの値．実行段ではrs1_val_r・rs2_val_rを直接参照せず，必ずこちらを使う
     register_t rs1_val;
     register_t rs2_val;
-    assign rs1_val = rs1_forward_r ? alu_result_r : rs1_forward_ex2_r ? ex2_alu_result_r : rs1_val_r;
-    assign rs2_val = rs2_forward_r ? alu_result_r : rs2_forward_ex2_r ? ex2_alu_result_r : rs2_val_r;
+    assign rs1_val = rs1_from_alu_r ? alu_result_r : rs1_from_ex2_alu_r ? ex2_alu_result_r : rs1_val_r;
+    assign rs2_val = rs2_from_alu_r ? alu_result_r : rs2_from_ex2_alu_r ? ex2_alu_result_r : rs2_val_r;
 
     // ===== 実行段: 2本目のパイプライン =====
     // 同時発行した2番目の命令(単純な演算)を受け取ったときに設定する．1本目と同じく，空いている間も値を書き換えずに保持する
@@ -450,17 +450,17 @@ module alu_sv (
     register_t ex2_rs2_val_r = '0;           // 第2オペランドの読み出し値
 
     // 2本目の命令が，第1・第2オペランドとしてex2_rs1_val_r・ex2_rs2_val_rの代わりにalu_result_rを使うか
-    logic ex2_rs1_forward_r = 1'b0;
-    logic ex2_rs2_forward_r = 1'b0;
+    logic ex2_rs1_from_alu_r = 1'b0;
+    logic ex2_rs2_from_alu_r = 1'b0;
     // 2本目の命令が，第1・第2オペランドとしてex2_rs1_val_r・ex2_rs2_val_rの代わりにex2_alu_result_rを使うか
-    logic ex2_rs1_forward_ex2_r = 1'b0;
-    logic ex2_rs2_forward_ex2_r = 1'b0;
+    logic ex2_rs1_from_ex2_alu_r = 1'b0;
+    logic ex2_rs2_from_ex2_alu_r = 1'b0;
 
     // 2本目の命令が使う第1・第2オペランドの値．ex2_rs1_val_r・ex2_rs2_val_rを直接参照せず，必ずこちらを使う
     register_t ex2_rs1_val;
     register_t ex2_rs2_val;
-    assign ex2_rs1_val = ex2_rs1_forward_r ? alu_result_r : ex2_rs1_forward_ex2_r ? ex2_alu_result_r : ex2_rs1_val_r;
-    assign ex2_rs2_val = ex2_rs2_forward_r ? alu_result_r : ex2_rs2_forward_ex2_r ? ex2_alu_result_r : ex2_rs2_val_r;
+    assign ex2_rs1_val = ex2_rs1_from_alu_r ? alu_result_r : ex2_rs1_from_ex2_alu_r ? ex2_alu_result_r : ex2_rs1_val_r;
+    assign ex2_rs2_val = ex2_rs2_from_alu_r ? alu_result_r : ex2_rs2_from_ex2_alu_r ? ex2_alu_result_r : ex2_rs2_val_r;
 
     // ===== メモリ・標準入出力・割り算回路とのハンドシェイク状態 =====
     // それぞれの命令の実行が複数サイクルにまたがる間，どこまで進んだかを保持する
@@ -1225,10 +1225,10 @@ module alu_sv (
             imm_r <= '0;
             mask_r <= '0;
             alu_result_r <= '0;
-            rs1_forward_r <= 1'b0;
-            rs2_forward_r <= 1'b0;
-            rs1_forward_ex2_r <= 1'b0;
-            rs2_forward_ex2_r <= 1'b0;
+            rs1_from_alu_r <= 1'b0;
+            rs2_from_alu_r <= 1'b0;
+            rs1_from_ex2_alu_r <= 1'b0;
+            rs2_from_ex2_alu_r <= 1'b0;
             ex2_occupied <= 1'b0;
             ex2_m_type_r <= '0;
             ex2_func_r <= '0;
@@ -1237,10 +1237,10 @@ module alu_sv (
             ex2_rs1_val_r <= '0;
             ex2_rs2_val_r <= '0;
             ex2_alu_result_r <= '0;
-            ex2_rs1_forward_r <= 1'b0;
-            ex2_rs2_forward_r <= 1'b0;
-            ex2_rs1_forward_ex2_r <= 1'b0;
-            ex2_rs2_forward_ex2_r <= 1'b0;
+            ex2_rs1_from_alu_r <= 1'b0;
+            ex2_rs2_from_alu_r <= 1'b0;
+            ex2_rs1_from_ex2_alu_r <= 1'b0;
+            ex2_rs2_from_ex2_alu_r <= 1'b0;
 
             // 掛け算回路用
             mul_state <= IDLE;
@@ -1391,10 +1391,10 @@ module alu_sv (
                     // 結果そのものは，実行段がこのサイクルに演算してalu_result_r・ex2_alu_result_rへ保持し，次のサイクルに
                     // 実行段の入口で読み出し値と差し替える．結果を上の読み出し値のようにここで受け取らないのは，
                     // 演算回路からここまでの経路が1クロックに収まらないため
-                    rs1_forward_r     <= ex_alu_write  && (rd_addr_r     == command_next.rs1);
-                    rs2_forward_r     <= ex_alu_write  && (rd_addr_r     == command_next.rs2);
-                    rs1_forward_ex2_r <= ex2_alu_write && (ex2_rd_addr_r == command_next.rs1);
-                    rs2_forward_ex2_r <= ex2_alu_write && (ex2_rd_addr_r == command_next.rs2);
+                    rs1_from_alu_r     <= ex_alu_write  && (rd_addr_r     == command_next.rs1);
+                    rs2_from_alu_r     <= ex_alu_write  && (rd_addr_r     == command_next.rs2);
+                    rs1_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next.rs1);
+                    rs2_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next.rs2);
                     rd_addr_r <= command_next.rd;
                     func_r    <= command_next.func;
                     imm_r     <= command_next.imm;
@@ -1407,10 +1407,10 @@ module alu_sv (
                     if (check_pair) begin
                         ex2_rs1_val_r         <= read_operand(command_next2.rs1, queue_pc[1]);
                         ex2_rs2_val_r         <= read_operand(command_next2.rs2, queue_pc[1]);
-                        ex2_rs1_forward_r     <= ex_alu_write  && (rd_addr_r     == command_next2.rs1);
-                        ex2_rs2_forward_r     <= ex_alu_write  && (rd_addr_r     == command_next2.rs2);
-                        ex2_rs1_forward_ex2_r <= ex2_alu_write && (ex2_rd_addr_r == command_next2.rs1);
-                        ex2_rs2_forward_ex2_r <= ex2_alu_write && (ex2_rd_addr_r == command_next2.rs2);
+                        ex2_rs1_from_alu_r     <= ex_alu_write  && (rd_addr_r     == command_next2.rs1);
+                        ex2_rs2_from_alu_r     <= ex_alu_write  && (rd_addr_r     == command_next2.rs2);
+                        ex2_rs1_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next2.rs1);
+                        ex2_rs2_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next2.rs2);
                         ex2_m_type_r  <= command_next2.m_type;
                         ex2_func_r    <= command_next2.func;
                         ex2_rd_addr_r <= command_next2.rd;
