@@ -2064,7 +2064,7 @@ module cpu_tb;
         expect_end();
         expect_reg(7, 32'd5);
 
-        // ADDと，ADDが読むr1への代入を同時発行する
+        // ADDの代わりに和を代入する命令列と，ADDとADDが読むr1への代入を同時発行する命令列を実行する
         `BEGIN_TEST("先頭が読むレジスタへ同時発行した2番目が書き込んでも，先頭は書き込む前の値を使う");
         run('{movi(1, 32'd5), movi(2, 32'd3), movi(3, 32'd8), movi(1, 32'd9)});
         base = cycles;
