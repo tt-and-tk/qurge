@@ -494,9 +494,9 @@ module alu_sv (
     assign push_instruction1 =
         // メインメモリから届いた命令なら，届いた上位ワードと控えておいた下位ワード
         !rom_arrived        ? {ram_read.data, ram_fetch_lower_r}
-        // ROMから組のうち奇数番地の命令だけを使うなら，奇数番地を読む読み出しポートの出力
+        // ROMから組のうち奇数番地の命令だけを使うなら，奇数番地を読む読み出しポートが返す機械語
         : rom_arrived_pc[0] ? rom_read2.machine
-        // ROMから組の2命令とも使うなら，偶数番地を読む読み出しポートの出力
+        // ROMから組の2命令とも使うなら，偶数番地を読む読み出しポートが返す機械語
         : rom_read1.machine;
     // プログラムカウンタ
     assign push_pc1 =
@@ -529,7 +529,7 @@ module alu_sv (
     logic                push_pc_valid2;
     logic                push_early_jump2;
     logic                push_skip2;
-    // 機械語は，組の奇数番地を読む読み出しポートの出力
+    // 機械語は，組の奇数番地を読む読み出しポートが返す機械語
     assign push_instruction2 = rom_read2.machine;
     // 組の偶数番地の最下位ビットを1にした番地
     assign push_pc2          = {rom_arrived_pc[31:1], 1'b1};
