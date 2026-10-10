@@ -434,8 +434,18 @@ module alu_sv (
     // 実行段の命令が使う第1・第2オペランドの値．実行段ではrs1_val_r・rs2_val_rを直接参照せず，必ずこちらを使う
     register_t rs1_val;
     register_t rs2_val;
-    assign rs1_val = rs1_from_alu_r ? alu_result_r : rs1_from_ex2_alu_r ? ex2_alu_result_r : rs1_val_r;
-    assign rs2_val = rs2_from_alu_r ? alu_result_r : rs2_from_ex2_alu_r ? ex2_alu_result_r : rs2_val_r;
+    assign rs1_val =
+        // 1本目の直前の結果を受け取るなら，その値
+        rs1_from_alu_r       ? alu_result_r
+        // 2本目の直前の結果を受け取るなら，その値
+        : rs1_from_ex2_alu_r ? ex2_alu_result_r
+        // それ以外は，確認段で読み出した値
+        : rs1_val_r;
+    // 第2オペランドも，第1オペランドと同じ順で選ぶ
+    assign rs2_val =
+        rs2_from_alu_r       ? alu_result_r
+        : rs2_from_ex2_alu_r ? ex2_alu_result_r
+        : rs2_val_r;
 
     // ===== 実行段: 2本目のパイプライン =====
     // 同時発行した2番目の命令(単純な演算)を受け取ったときに設定する．1本目と同じく，空いている間も値を書き換えずに保持する
@@ -459,8 +469,18 @@ module alu_sv (
     // 2本目の命令が使う第1・第2オペランドの値．ex2_rs1_val_r・ex2_rs2_val_rを直接参照せず，必ずこちらを使う
     register_t ex2_rs1_val;
     register_t ex2_rs2_val;
-    assign ex2_rs1_val = ex2_rs1_from_alu_r ? alu_result_r : ex2_rs1_from_ex2_alu_r ? ex2_alu_result_r : ex2_rs1_val_r;
-    assign ex2_rs2_val = ex2_rs2_from_alu_r ? alu_result_r : ex2_rs2_from_ex2_alu_r ? ex2_alu_result_r : ex2_rs2_val_r;
+    assign ex2_rs1_val =
+        // 1本目の直前の結果を受け取るなら，その値
+        ex2_rs1_from_alu_r       ? alu_result_r
+        // 2本目の直前の結果を受け取るなら，その値
+        : ex2_rs1_from_ex2_alu_r ? ex2_alu_result_r
+        // それ以外は，確認段で読み出した値
+        : ex2_rs1_val_r;
+    // 第2オペランドも，第1オペランドと同じ順で選ぶ
+    assign ex2_rs2_val =
+        ex2_rs2_from_alu_r       ? alu_result_r
+        : ex2_rs2_from_ex2_alu_r ? ex2_alu_result_r
+        : ex2_rs2_val_r;
 
     // ===== メモリ・標準入出力・割り算回路とのハンドシェイク状態 =====
     // それぞれの命令の実行が複数サイクルにまたがる間，どこまで進んだかを保持する
