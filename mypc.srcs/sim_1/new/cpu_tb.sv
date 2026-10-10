@@ -2051,7 +2051,7 @@ module cpu_tb;
         base = cycles;
         run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, im(4)), movi(6, 32'd1), movi(7, 32'd1), add(3, 4, 5)});
         // DIVと同時発行したr6への代入はDIVの完了時に書き込まれ，ADDは商2と余り1の和を求める．
-        // 最後に代入する場合と同じサイクル数で終わる
+        // ADDの代わりに和を代入する命令列と同じサイクル数で終わる
         expect_end();
         expect_reg(6, 32'd1);
         expect_reg(5, 32'd3);
