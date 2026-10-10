@@ -2050,8 +2050,9 @@ module cpu_tb;
         run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, im(4)), movi(6, 32'd1), movi(7, 32'd1), movi(5, 32'd3)});
         base = cycles;
         run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, im(4)), movi(6, 32'd1), movi(7, 32'd1), add(3, 4, 5)});
-        // 商2と余り1の和になり，最後に代入する場合と同じサイクル数で終わる
+        // DIVと同時発行した代入は書き込まれ，商2と余り1の和になり，最後に代入する場合と同じサイクル数で終わる
         expect_end();
+        expect_reg(6, 32'd1);
         expect_reg(5, 32'd3);
         expect_cycles(base);
 
