@@ -1936,7 +1936,7 @@ module cpu_tb;
         expect_end();
         expect_cycles(pair + 1);
         run('{movi(1, 32'd3), movi(2, 32'd4), movi(5, 32'd1), mul(1, 2, 3)});
-        // 演算系でも複数サイクルかかるMULは同時発行されず，積が書き込まれる
+        // 複数サイクルかかるMULは単純な演算でないため同時発行されず，積が書き込まれる
         expect_end();
         expect_reg(3, 32'd12);
 
