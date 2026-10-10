@@ -279,8 +279,8 @@ module alu_sv (
     assign check_occupied = (queue_count != 0);
 
     // 確認段の命令が実行できるか
-    util_p::bool_t check_executable;
-    assign check_executable = is_instruction_executable(
+    util_p::bool_t check_executable1;
+    assign check_executable1 = is_instruction_executable(
         queue_pc_valid[0], command_next1.m_type, command_next1.func,
         command_next1.rs1, command_next1.rs2, command_next1.rd, command_next1.imm
     );
@@ -381,7 +381,7 @@ module alu_sv (
         // 命令キューに2命令以上ある
         queue_count >= 2
         // かつ，2命令とも実行できる(2番目が実行できない場合は同時発行せず，先頭に来たときに停止させる)
-        && check_executable && check_executable2
+        && check_executable1 && check_executable2
         // かつ，2番目が2本目のパイプラインで実行できる単純な演算である
         && is_simple_operation(command_next2.m_type, command_next2.func)
         // かつ，先頭が分岐・ジャンプでない(分岐の成立時に2番目の書き込みを取り消す経路を作らないため)．
@@ -1412,7 +1412,7 @@ module alu_sv (
 
             if (dispatch) begin
                 // 実行できる命令は，実行に使う値と命令の内容を実行段へ渡す
-                if (check_executable) begin
+                if (check_executable1) begin
                     // 第1・第2オペランドの読み出し値を選ぶ
                     rs1_val_r <= read_operand(command_next1.rs1, queue_pc[0]);
                     rs2_val_r <= read_operand(command_next1.rs2, queue_pc[0]);
@@ -1810,7 +1810,7 @@ module alu_sv (
             // 実行段の1本目・2本目のパイプラインに命令が入っているかを更新する
             // 実行できる命令を受け取れば入り，2本目には同時発行した場合だけ入る
             // (分岐・ジャンプで後の命令を捨てる場合は，同じサイクルに受け取った命令も2命令とも捨てるため除く)
-            if (dispatch && check_executable && !ex_redirects) begin
+            if (dispatch && check_executable1 && !ex_redirects) begin
                 ex_occupied <= 1'b1;
                 ex2_occupied <= check_pair;
             end
