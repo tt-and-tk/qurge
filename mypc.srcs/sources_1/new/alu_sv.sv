@@ -466,6 +466,8 @@ module alu_sv (
 
     // 2本目のパイプラインに命令が入っているか．1本目に命令が入っている間しか立たない
     logic ex2_occupied = 1'b0;
+
+    // 2本目の命令の内容と，確認段で読み出したオペランドの値
     machine_p::type_t ex2_m_type_r = '0;     // 命令タイプ
     machine_p::func_t ex2_func_r = '0;       // 命令の細分類(演算子)
     machine_p::addr_t ex2_rd_addr_r = '0;    // 書き込み先レジスタの番地
