@@ -2069,7 +2069,8 @@ module cpu_tb;
         run('{movi(1, 32'd5), movi(2, 32'd3), movi(3, 32'd8), movi(1, 32'd9)});
         base = cycles;
         run('{movi(1, 32'd5), movi(2, 32'd3), add(1, 2, 3), movi(1, 32'd9)});
-        // ADDは書き込む前のr1で和を求め，r1には後の代入の値が残る．ADDの代わりに和を代入する命令列と同じサイクル数で終わる
+        // ADDは書き込む前のr1で和を求め，r1には後の代入の値が残る．
+        // ADDの代わりに和を代入する命令列と同じサイクル数で終わる
         expect_end();
         expect_reg(3, 32'd8);
         expect_reg(1, 32'd9);
