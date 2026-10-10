@@ -85,8 +85,9 @@ module mother_board_sv(
     ram_read_if  ram_read();
     ram_write_if ram_write();
 
-    // メモリ読み込みインターフェース
-    rom_read_if rom_read();
+    // ROM読み込みインターフェース．1サイクルに2つの番地の命令を読むため2つ持つ
+    rom_read_if rom_read1();
+    rom_read_if rom_read2();
 
     // メインメモリ
     ram_sv ram_sv_0 (
@@ -101,7 +102,8 @@ module mother_board_sv(
     cpu_sv cpu_sv_0 (
         .clk(clk), .resetn(resetn),
         // プログラムデータ読み込み
-        .rom_read(rom_read),
+        .rom_read1(rom_read1),
+        .rom_read2(rom_read2),
         // メモリデータ読み書き
         .ram_read(ram_read),
         .ram_write(ram_write),
@@ -152,7 +154,8 @@ module mother_board_sv(
     rom_sv rom_sv_0 (
         .clk(clk),
         // プログラムデータ読み込み
-        .rom_read(rom_read)
+        .rom_read1(rom_read1),
+        .rom_read2(rom_read2)
     );
 
 endmodule

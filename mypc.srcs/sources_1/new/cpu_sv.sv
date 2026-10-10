@@ -28,7 +28,9 @@ module cpu_sv import machine_p::*; (
     input logic clk,
     input logic resetn,
 
-    rom_read_if.master rom_read,
+    // ROMの2つの読み出しポート．1サイクルに2つの番地の命令を読む
+    rom_read_if.master rom_read1,
+    rom_read_if.master rom_read2,
 
     ram_read_if.master ram_read,
     ram_write_if.master ram_write,
@@ -98,7 +100,8 @@ module cpu_sv import machine_p::*; (
     // ALU
     alu_sv alu_sv_0(
         .clk(clk), .resetn(resetn),
-        .rom_read(rom_read),
+        .rom_read1(rom_read1),
+        .rom_read2(rom_read2),
         .command(command),
         .ram_read(ram_read),
         .ram_write(ram_write),

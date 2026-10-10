@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
 // テストベンチ用のROM．rom_svと同じ同期読み出し(番地を出した次のサイクルに結果が確定し，
-// 範囲外の番地ではvalidを0にしてnopを返す)を行い，命令列と有効な命令数をテストケースごとに書き換えられる
+// 範囲外の番地ではvalidを0にしてnopを返す)を2つの読み出しポートで行い，命令列と有効な命令数をテストケースごとに書き換えられる
 //////////////////////////////////////////////////////////////////////////////////
 
 
@@ -9,8 +9,9 @@
 `include "machine.svh"
 
 module tb_rom (
-    input logic clk,               // クロック
-    rom_read_if.slave rom_read     // 命令の読み出し
+    input logic clk,                // クロック
+    rom_read_if.slave rom_read1,    // 命令の読み出し(1つ目のポート)
+    rom_read_if.slave rom_read2     // 命令の読み出し(2つ目のポート)
     );
     import machine_p::*;
 
@@ -39,15 +40,29 @@ module tb_rom (
         size = addr + instructions.size();
     endfunction
 
+    // 1つ目のポート
     always_ff @(posedge clk) begin
         // 番地が有効な命令数に収まっているかを返す
-        rom_read.valid <= (rom_read.pc < size);
+        rom_read1.valid <= (rom_read1.pc < size);
 
         // 範囲内ならその番地の命令を，範囲外ならnopを返す
-        if (rom_read.pc < size) begin
-            rom_read.machine <= machines[rom_read.pc];
+        if (rom_read1.pc < size) begin
+            rom_read1.machine <= machines[rom_read1.pc];
         end else begin
-            rom_read.machine <= nop();
+            rom_read1.machine <= nop();
+        end
+    end
+
+    // 2つ目のポート．1つ目のポートと同じ扱いで返す
+    always_ff @(posedge clk) begin
+        // 番地が有効な命令数に収まっているかを返す
+        rom_read2.valid <= (rom_read2.pc < size);
+
+        // 範囲内ならその番地の命令を，範囲外ならnopを返す
+        if (rom_read2.pc < size) begin
+            rom_read2.machine <= machines[rom_read2.pc];
+        end else begin
+            rom_read2.machine <= nop();
         end
     end
 
