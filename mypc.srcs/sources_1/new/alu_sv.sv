@@ -358,7 +358,7 @@ module alu_sv (
         hits_check_write =
             // 先頭が書き込むrdと同じ番地
             (check_writes_rd && addr == command_next.rd)
-            // 先頭が書き込む余りの書き込み先と同じ番地(番地の上限以下であることを実行できるかの確認で確かめているため，下位6ビットで比べる)
+            // 先頭が書き込む余りの書き込み先と同じ番地(番地の上限以下であることをis_instruction_executable()で確かめているため，下位6ビットで比べる)
             || (check_writes_remainder && addr == command_next.imm[5:0]);
     endfunction
 
