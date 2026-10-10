@@ -2008,12 +2008,12 @@ module cpu_tb;
         expect_reg(5, 32'd1);
         expect_cycles(base + 1);
         run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, im(4)), movi(3, 32'd7)});
-        // 商の書き込み先へ書き込む場合は，後の代入の値が残り，同じく1サイクル多くかかる
+        // 商の書き込み先へ書き込む場合は，後の代入の値が残り，関係しない演算より1サイクル多くかかる
         expect_end();
         expect_reg(3, 32'd7);
         expect_cycles(base + 1);
         run('{movi(1, 32'd9), movi(2, 32'd4), div(1, 2, 3, im(4)), movi(4, 32'd7)});
-        // 余りの書き込み先へ書き込む場合も同じ
+        // 余りの書き込み先へ書き込む場合は，後の代入の値が残り，関係しない演算より1サイクル多くかかる
         expect_end();
         expect_reg(4, 32'd7);
         expect_cycles(base + 1);
