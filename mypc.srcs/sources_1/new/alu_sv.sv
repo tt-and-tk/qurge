@@ -1108,18 +1108,24 @@ module alu_sv (
 
     // ===== 確認段から実行段への受け渡し(組み合わせ回路) =====
 
-    // 実行段の書き込みが，一部だけ反映されるレジスタへの書き込みで，その番地を確認段の命令が読み出すか
+    // 実行段がこのサイクルに，指定した番地のレジスタへ書き込み，確認段の命令がその番地を読み出すか
     function automatic util_p::bool_t hits_partial_write(
-        logic             write_valid,  // 実行段がこのサイクルに書き込むか
-        machine_p::addr_t write_addr    // 書き込み先の番地
+        machine_p::addr_t addr  // 調べるレジスタの番地
     );
         hits_partial_write =
-            // 実行段がこのサイクルに書き込む
-            write_valid
-            // かつ，書き込み先が一部だけ反映されるレジスタである
-            && is_partially_reflected(write_addr)
-            // かつ，確認段の命令が，第1・第2オペランドのどちらかでその番地を読み出す
-            && (command_next1.rs1 == write_addr || command_next1.rs2 == write_addr);
+            // 確認段の命令が，第1・第2オペランドのどちらかでその番地を読み出す
+            (command_next1.rs1 == addr || command_next1.rs2 == addr)
+            // かつ，実行段がこのサイクルに次のいずれかの書き込みでその番地へ書き込む
+            && (
+                // 1サイクルで完了する命令の結果
+                (ex_alu_write          && rd_addr_r            == addr)
+                // 2本目のパイプラインの命令の結果
+             || (ex2_alu_write         && ex2_rd_addr_r        == addr)
+                // 複数サイクルかけて得た結果
+             || (late_write_valid      && late_write_addr      == addr)
+                // 割り算の余り
+             || (remainder_write_valid && remainder_write_addr == addr)
+            );
     endfunction
 
     // 実行段がこのサイクルに一部だけ反映されるレジスタへ書き込み，確認段の命令がそのレジスタを読み出すか．
@@ -1127,18 +1133,18 @@ module alu_sv (
     // ピンへ出力するビットだけであり，ピンの値を写すビットと使わないビットは書き込んだ値にならない．
     // 書き込む32ビットの値をそのまま確認段の命令へ回すと，これらのビットが書き込んだ値になって誤る．
     // このため回さずに，書き込みを終えたレジスタを読めるまで確認段の命令を1サイクル待たせる．
-    // assignではなくalways_combで求めるのは，hits_partial_write()が引数以外に読む値の変化でも求め直させるため
+    // 書き込み先の番地から一部だけ反映されるかを求めず，該当する番地ごとに定数と比べるのは，
+    // 比較を浅くし，dispatchを経て多数のレジスタの取り込み可否へ至る経路を伸ばさないため
     util_p::bool_t partial_hazard;
     always_comb begin
-        partial_hazard =
-            // 1サイクルで完了する命令の結果
-            hits_partial_write(ex_alu_write, rd_addr_r)
-            // 2本目のパイプラインの命令の結果
-            || hits_partial_write(ex2_alu_write, ex2_rd_addr_r)
-            // 複数サイクルかけて得た結果
-            || hits_partial_write(late_write_valid, late_write_addr)
-            // 割り算の余り
-            || hits_partial_write(remainder_write_valid, remainder_write_addr);
+        // 該当するレジスタがなければ待たせない
+        partial_hazard = 1'b0;
+        for (int i = 0; i <= REGISTER_MAX_ADDR; i++) begin
+            // 一部だけ反映されるレジスタの番地だけを調べる(番地は定数のため，組み立て時に絞り込まれる)
+            if (is_partially_reflected(i)) begin
+                partial_hazard |= hits_partial_write(i);
+            end
+        end
     end
 
     // 確認段の命令をこのサイクルに実行段へ渡すか
