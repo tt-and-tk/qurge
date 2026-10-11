@@ -10,7 +10,7 @@ char hex(int value) {
     return 'a' + value - 10;
 }
 
-// valueを"0x??"の形式で出力する(改行は付けない)
+// 1バイトの値を"0x??"の形式で出力する(改行は付けない)
 void print_hex(char value) {
     char hex_buf[5];  // 出力用の一時バッファ
     // "0x"に続けて上位・下位の4ビットを1桁ずつ並べ，終端して出力する
