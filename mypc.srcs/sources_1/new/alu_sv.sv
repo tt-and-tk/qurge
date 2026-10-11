@@ -1891,15 +1891,12 @@ module alu_sv (
             // タクトスイッチ・DIPスイッチは同期化後の値で，ピンの値が届くまでこの1段と合わせて3サイクルかかる
             register[BTN_ADDR] <= {4'b0, btn_sync[1]};
             register[SW_ADDR] <= {6'b0, sw_sync[1]};
-            // Arduino SPIのMISOビットは外部ピンを毎サイクル取り込む
+            // Arduino SPIのMISOビットと，EthernetモジュールのINTn・MISOビットは外部ピンを毎サイクル取り込む
             // 取り込むのは同期化後の値で，ピンの値が届くまでこの1段と合わせて3サイクルかかる
             register[SPI_ADDR][3] <= miso_sync[1];
-            // AR_SPIのSCK・MOSI・SSビットには，ここでは触れない
-            // 命令が書き込んだ値をそのまま保持するため
-            // EthernetモジュールのINTn・MISOビットも同様に，同期化後の値を毎サイクル取り込む
             register[AR8_13_ADDR][0] <= eth_intn_sync[1];
             register[AR8_13_ADDR][4] <= eth_miso_sync[1];
-            // AR8_13のRSTn・CSn・MOSI・SCKビットには，ここでは触れない
+            // AR_SPI・AR8_13のピンへ出力するビットには，ここでは触れない
             // 命令が書き込んだ値をそのまま保持するため
 
             // 各レジスタの使わないビットは，命令が書き込んだ値によらず毎サイクル0にする
