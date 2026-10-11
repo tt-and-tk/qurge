@@ -448,6 +448,7 @@ int init_network(void) {
         print_response(version);
         return 0;
     }
+    // 応答はあってもW5100Sのバージョンでなければ，別の機器が応答しているか通信が乱れている
     if (version != ETH_VERSION) {
         print("[FAIL] Ethernet: reset: unexpected version");
         print_response(version);
