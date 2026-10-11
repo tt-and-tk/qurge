@@ -1414,6 +1414,7 @@ module cpu_tb;
         // ビット0だけがピンの1になり，ビット1・2はRSTn・CSnの初期値1になる
         expect_end();
         expect_reg(1, 32'b000111);
+        // MISOピンだけを1にした状態で，AR8〜AR13のレジスタを読み出す
         eth_miso = 1'b1;
         run('{movr(1, AR8_13_ADDR)});
         // 後のテストケースへ影響しないよう，MISOピンを0へ戻す
