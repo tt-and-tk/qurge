@@ -1405,17 +1405,22 @@ module cpu_tb;
         expect_end();
         expect_reg(4, 32'b0111);
 
-        // INTn・MISOピンを1にした状態で，AR8〜AR13のレジスタを読み出す
-        `BEGIN_TEST("INTn・MISOピンの値がAR8〜AR13のレジスタのビット0・4に読める");
+        // INTnピンだけを1にした状態と，MISOピンだけを1にした状態で，AR8〜AR13のレジスタを読み出す
+        `BEGIN_TEST("INTn・MISOピンの値がそれぞれAR8〜AR13のレジスタのビット0・4に読める");
         eth_intn = 1'b1;
+        run('{movr(1, AR8_13_ADDR)});
+        // 次の読み出しへ影響しないよう，INTnピンを0へ戻す
+        eth_intn = 1'b0;
+        // ビット0だけがピンの1になり，ビット1・2はRSTn・CSnの初期値1になる
+        expect_end();
+        expect_reg(1, 32'b000111);
         eth_miso = 1'b1;
         run('{movr(1, AR8_13_ADDR)});
-        // 後のテストケースへ影響しないよう，INTn・MISOピンを0へ戻す
-        eth_intn = 1'b0;
+        // 後のテストケースへ影響しないよう，MISOピンを0へ戻す
         eth_miso = 1'b0;
-        // ビット0・4がピンの1，ビット1・2がRSTn・CSnの初期値1になる
+        // ビット4だけがピンの1になり，ビット1・2はRSTn・CSnの初期値1になる
         expect_end();
-        expect_reg(1, 32'b010111);
+        expect_reg(1, 32'b010110);
 
         // INTn・MISOピンを1にした状態で，上位ビットとビット0・4以外を立てた値をAR8〜AR13のレジスタへ書き込み，
         // 直後の命令で第1オペランドとして，2つ後の命令で第2オペランドとして読み出す
