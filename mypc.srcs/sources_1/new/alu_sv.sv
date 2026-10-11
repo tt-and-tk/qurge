@@ -333,7 +333,8 @@ module alu_sv (
             || (m_type == S_TYPE && !imm[32]);
     endfunction
 
-    // 同時実行の判定に使う，先頭がrdへ書き込むか．実行できない命令の判定結果は意味を持たない．
+    // 先頭がrdへ書き込むか．同時実行してよいかの判定に使う．
+    // 先頭が実行できない命令の場合，判定結果は意味を持たない．
     // 2番目には求めない(同時実行するのは，必ずrdへ書き込む単純な演算に限るため)
     util_p::bool_t check_writes_rd;
     assign check_writes_rd =
@@ -343,7 +344,7 @@ module alu_sv (
         || (command_next1.m_type == M_TYPE && (command_next1.func == RM || command_next1.func == RMR))
         // 標準入力
         || (command_next1.m_type == IO_TYPE && command_next1.func == SCAN);
-    // 同時実行の判定に使う，先頭が割り算の余りを書き込むか．書き込み先はimm[5:0]
+    // 先頭が割り算の余りを書き込むか．同時実行してよいかの判定に使う．書き込み先はimm[5:0]
     util_p::bool_t check_writes_remainder;
     assign check_writes_remainder =
         // 割り算である
