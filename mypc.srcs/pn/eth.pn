@@ -77,19 +77,19 @@ unsigned char eth_frame(int op, int addr, int data) {
     return received;
 }
 
-// 番地addrのレジスタから1バイトを読み出す
+// 指定した番地のレジスタから1バイトを読み出す
 unsigned char eth_read(int addr) {
     // 読み出しのフレームを送る．データの位置は受信だけを行うため0xffを送る
     return eth_frame(ETH_OP_READ, addr, 0xff);
 }
 
-// 番地addrのレジスタへ1バイトを書き込む
+// 指定した番地のレジスタへ1バイトを書き込む
 void eth_write(int addr, int value) {
     // 書き込みのフレームを送る(受信した値は使わない)
     eth_frame(ETH_OP_WRITE, addr, value);
 }
 
-// valueの下位lengthバイトを，番地addrから始まるレジスタへ上位バイトから順に書き込む(lengthは4以下)
+// 値の下位の指定したバイト数(4以下)を，指定した番地から始まるレジスタへ上位バイトから順に書き込む
 void eth_write_bytes(int addr, unsigned int value, int length) {
     // 上位のバイトから1バイトずつ取り出して書き込む
     for (int i = 0; i < length; i++) {
@@ -97,7 +97,7 @@ void eth_write_bytes(int addr, unsigned int value, int length) {
     }
 }
 
-// 番地addrから始まるlengthバイトのレジスタを読み出し，先頭を上位バイトとした値を返す(lengthは4以下)
+// 指定した番地から始まる，指定したバイト数(4以下)のレジスタを読み出し，先頭を上位バイトとした値を返す
 unsigned int eth_read_bytes(int addr, int length) {
     unsigned int value = 0;  // 読み出したバイトを上位から順に組み立てる値
     // 1バイトずつ読み出し，下位へ積む
