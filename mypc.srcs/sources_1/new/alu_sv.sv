@@ -438,13 +438,13 @@ module alu_sv (
 
     // 1本目のパイプラインで直前に完了した1サイクル命令が書き込んだ値．次の命令がこの値を受け取る(フォワーディング)ために保持する．
     // 受け取った命令が実行段にある間は書き換えない(その間に完了する1サイクル命令はないため，自然に守られる)
-    register_t alu_result_r = '0;
+    register_t ex1_alu_result_r = '0;
     // 2本目のパイプラインで直前に完了した命令が書き込んだ値．1本目の結果と同じく，次の命令が受け取るために保持する
     register_t ex2_alu_result_r = '0;
     // 実行段の命令の第1・第2オペランドが，直前に1本目で完了した命令の結果か．
     // 結果であれば，確認段で読み出した値の代わりに，保持しておいたその結果を使う
-    logic rs1_from_alu_r = 1'b0;
-    logic rs2_from_alu_r = 1'b0;
+    logic rs1_from_ex1_alu_r = 1'b0;
+    logic rs2_from_ex1_alu_r = 1'b0;
     // 実行段の命令の第1・第2オペランドが，直前に2本目で完了した命令の結果か．
     // 結果であれば，確認段で読み出した値の代わりに，保持しておいたその結果を使う．
     // 1本目の結果を使う印と同時には立たない(同時実行した2命令の書き込み先は重ならないため)
@@ -456,14 +456,14 @@ module alu_sv (
     register_t rs2_val;
     assign rs1_val =
         // 1本目の直前の結果を受け取るなら，その値
-        rs1_from_alu_r       ? alu_result_r
+        rs1_from_ex1_alu_r ? ex1_alu_result_r
         // 2本目の直前の結果を受け取るなら，その値
         : rs1_from_ex2_alu_r ? ex2_alu_result_r
         // それ以外は，確認段で読み出した値
         : rs1_val_r;
     // 第2オペランドも，第1オペランドと同じ順で選ぶ
     assign rs2_val =
-        rs2_from_alu_r       ? alu_result_r
+        rs2_from_ex1_alu_r ? ex1_alu_result_r
         : rs2_from_ex2_alu_r ? ex2_alu_result_r
         : rs2_val_r;
 
@@ -484,8 +484,8 @@ module alu_sv (
 
     // 2本目の命令の第1・第2オペランドが，直前に1本目で完了した命令の結果か．
     // 結果であれば，確認段で読み出した値の代わりに，保持しておいたその結果を使う
-    logic ex2_rs1_from_alu_r = 1'b0;
-    logic ex2_rs2_from_alu_r = 1'b0;
+    logic ex2_rs1_from_ex1_alu_r = 1'b0;
+    logic ex2_rs2_from_ex1_alu_r = 1'b0;
     // 2本目の命令の第1・第2オペランドが，直前に2本目で完了した命令の結果か．
     // 結果であれば，確認段で読み出した値の代わりに，保持しておいたその結果を使う
     logic ex2_rs1_from_ex2_alu_r = 1'b0;
@@ -496,14 +496,14 @@ module alu_sv (
     register_t ex2_rs2_val;
     assign ex2_rs1_val =
         // 1本目の直前の結果を受け取るなら，その値
-        ex2_rs1_from_alu_r       ? alu_result_r
+        ex2_rs1_from_ex1_alu_r ? ex1_alu_result_r
         // 2本目の直前の結果を受け取るなら，その値
         : ex2_rs1_from_ex2_alu_r ? ex2_alu_result_r
         // それ以外は，確認段で読み出した値
         : ex2_rs1_val_r;
     // 第2オペランドも，第1オペランドと同じ順で選ぶ
     assign ex2_rs2_val =
-        ex2_rs2_from_alu_r       ? alu_result_r
+        ex2_rs2_from_ex1_alu_r ? ex1_alu_result_r
         : ex2_rs2_from_ex2_alu_r ? ex2_alu_result_r
         : ex2_rs2_val_r;
 
@@ -1269,9 +1269,9 @@ module alu_sv (
             func_r <= '0;
             imm_r <= '0;
             mask_r <= '0;
-            alu_result_r <= '0;
-            rs1_from_alu_r <= 1'b0;
-            rs2_from_alu_r <= 1'b0;
+            ex1_alu_result_r <= '0;
+            rs1_from_ex1_alu_r <= 1'b0;
+            rs2_from_ex1_alu_r <= 1'b0;
             rs1_from_ex2_alu_r <= 1'b0;
             rs2_from_ex2_alu_r <= 1'b0;
             ex2_occupied <= 1'b0;
@@ -1282,8 +1282,8 @@ module alu_sv (
             ex2_rs1_val_r <= '0;
             ex2_rs2_val_r <= '0;
             ex2_alu_result_r <= '0;
-            ex2_rs1_from_alu_r <= 1'b0;
-            ex2_rs2_from_alu_r <= 1'b0;
+            ex2_rs1_from_ex1_alu_r <= 1'b0;
+            ex2_rs2_from_ex1_alu_r <= 1'b0;
             ex2_rs1_from_ex2_alu_r <= 1'b0;
             ex2_rs2_from_ex2_alu_r <= 1'b0;
 
@@ -1433,11 +1433,11 @@ module alu_sv (
                     // 確認段の命令が，実行段の命令の演算結果を使うかを，第1・第2オペランドごとに印として渡す．
                     // 実行段の1本目・2本目のパイプラインの命令がこのサイクルに1サイクルで求めた結果を書き込み，
                     // その書き込み先が読み出しアドレスと同じなら使う(プログラムカウンタは書き込み先にならないため重ならない)．
-                    // 結果そのものは，実行段がこのサイクルに演算してalu_result_r・ex2_alu_result_rへ保持し，次のサイクルに
+                    // 結果そのものは，実行段がこのサイクルに演算してex1_alu_result_r・ex2_alu_result_rへ保持し，次のサイクルに
                     // 実行段の入口で読み出し値と差し替える．複数サイクル命令の結果のようにread_operand()でここで受け取らないのは，
                     // 演算回路からここまでの経路が1クロックに収まらないため
-                    rs1_from_alu_r     <= ex_alu_write  && (rd_addr_r     == command_next1.rs1);
-                    rs2_from_alu_r     <= ex_alu_write  && (rd_addr_r     == command_next1.rs2);
+                    rs1_from_ex1_alu_r <= ex_alu_write  && (rd_addr_r     == command_next1.rs1);
+                    rs2_from_ex1_alu_r <= ex_alu_write  && (rd_addr_r     == command_next1.rs2);
                     rs1_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next1.rs1);
                     rs2_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next1.rs2);
                     rd_addr_r <= command_next1.rd;
@@ -1452,8 +1452,8 @@ module alu_sv (
                     if (check_pair) begin
                         ex2_rs1_val_r         <= read_operand(command_next2.rs1, queue_pc[1]);
                         ex2_rs2_val_r         <= read_operand(command_next2.rs2, queue_pc[1]);
-                        ex2_rs1_from_alu_r     <= ex_alu_write  && (rd_addr_r     == command_next2.rs1);
-                        ex2_rs2_from_alu_r     <= ex_alu_write  && (rd_addr_r     == command_next2.rs2);
+                        ex2_rs1_from_ex1_alu_r <= ex_alu_write  && (rd_addr_r     == command_next2.rs1);
+                        ex2_rs2_from_ex1_alu_r <= ex_alu_write  && (rd_addr_r     == command_next2.rs2);
                         ex2_rs1_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next2.rs1);
                         ex2_rs2_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next2.rs2);
                         ex2_m_type_r  <= command_next2.m_type;
@@ -1819,7 +1819,7 @@ module alu_sv (
             // 最も遅く届く1本目の結果を，フリップフロップの直前で選ばせる
             if (ex_alu_write) begin
                 register[rd_addr_r] <= write_value;
-                alu_result_r <= write_value;
+                ex1_alu_result_r <= write_value;
             end
             // 実行段の1本目・2本目のパイプラインに命令が入っているかを更新する
             // 実行できる命令を受け取れば入り，2本目には同時実行した場合だけ入る
