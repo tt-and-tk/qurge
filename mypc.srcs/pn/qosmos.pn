@@ -2,6 +2,7 @@
 // シェルは標準入力から1行受け取り，先頭のトークンをコマンド名として解析し，対応する処理を呼び出す
 #include "args.pn"
 #include "sd.pn"
+#include "eth.pn"
 #include "fat.pn"
 #include "syscall_dispatch.pn"
 
@@ -15,6 +16,13 @@ const int ARGV_SIZE = INPUT_SIZE / 2 + 1;  // 実行ファイルへ渡すargvの
 const int DECIMAL_TEXT_SIZE = 12;   // 10進数を出力する一時バッファの要素数(intで最も長い"-2147483648"とヌル終端の分)
 const int EXIT_SUCCESS = 0;         // 組み込みコマンドが成功した場合の終了状態
 const int EXIT_FAILURE = 1;         // 組み込みコマンドがエラーになった場合と，実行ファイルを実行できなかった場合の終了状態
+
+// ネットワークの設定(IPv4アドレスは1つの値に上位バイトから並べる)
+const unsigned int NET_MAC_HIGH = 0x0200;         // MACアドレスの上位2バイト(先頭バイトの0x02はローカル管理のユニキャストアドレスを表す)
+const unsigned int NET_MAC_LOW = 0x00000001;      // MACアドレスの下位4バイト(02:00:00:00:00:01)
+const unsigned int NET_IP_ADDRESS = 0xc0a80ac8;   // 自身のIPアドレス(192.168.10.200)
+const unsigned int NET_SUBNET_MASK = 0xffffff00;  // サブネットマスク(255.255.255.0)
+const unsigned int NET_GATEWAY = 0xc0a80a01;      // ゲートウェイのIPアドレス(192.168.10.1)
 
 char input[INPUT_SIZE];  // 1行分の入力バッファ
 char cmd[INPUT_SIZE];    // 入力の先頭トークン(コマンド名)
@@ -414,6 +422,50 @@ int init_storage(void) {
     return 1;
 }
 
+// IPv4アドレスを"a.b.c.d"の形式で出力する(改行は付けない)
+void print_ipv4(unsigned int address) {
+    // 上位のバイトから順に10進数で出力し，間を'.'で区切る
+    for (int i = 3; i >= 0; i--) {
+        print_decimal((address >> (i << 3)) & 0xff);
+        // 最後のバイトの後には区切りを付けない
+        if (i > 0) {
+            print(".");
+        }
+    }
+}
+
+// Ethernetモジュールを初期化し，ネットワークの設定を書き込む．各段階の成否を[ OK ]・[FAIL]の行で出力する
+// 戻り値: 1(設定まで成功) / 0(失敗)
+int init_network(void) {
+    int version;  // リセット後にモジュールから読み出したバージョン
+
+    // モジュールをリセットし，読み出したバージョンでW5100Sが応答しているかを確かめる
+    version = eth_reset();
+    // 無応答(0xff)はモジュールが接続されていない場合に起きるため，他の値と分けて伝える
+    if (version == 0xff) {
+        print("[FAIL] Ethernet: reset: no response");
+        print_response(version);
+        return 0;
+    }
+    if (version != ETH_VERSION) {
+        print("[FAIL] Ethernet: reset: unexpected version");
+        print_response(version);
+        return 0;
+    }
+    print("[ OK ] Ethernet: reset\n");
+
+    // ネットワークの設定を書き込み，読み戻した値が一致するかを確かめる
+    if (eth_configure(NET_MAC_HIGH, NET_MAC_LOW, NET_IP_ADDRESS, NET_SUBNET_MASK, NET_GATEWAY) == 0) {
+        print("[FAIL] Ethernet: network settings: mismatch\n");
+        return 0;
+    }
+    // 設定したIPアドレスを添えて成功を出力する
+    print("[ OK ] Ethernet: network settings (IP ");
+    print_ipv4(NET_IP_ADDRESS);
+    print(")\n");
+    return 1;
+}
+
 // OS名Qosmosを大きな文字(アスキーアート)で出力し，副題を添える
 void print_banner(void) {
     // figletのstandardフォントで描いた5行と，空行を挟んだ副題を出力する
@@ -426,18 +478,27 @@ void print_banner(void) {
     print("   order out of chaos, on Qurge\n");
 }
 
-// OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，OS名を出力する
-// 呼ぶたびにハードウェアの初期化からやり直すため，再起動にもそのまま使える．マウントまで成功すればEXIT_SUCCESS，失敗すればEXIT_FAILUREを返す
+// OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，ネットワークを設定してOS名を出力する
+// 呼ぶたびにハードウェアの初期化からやり直すため，再起動にもそのまま使える．全て成功すればEXIT_SUCCESS，いずれかが失敗すればEXIT_FAILUREを返す
 int boot(void) {
-    int mounted;  // ファイルシステムをマウントできたか(0:失敗，1:成功)
+    int mounted;    // ファイルシステムをマウントできたか(0:失敗，1:成功)
+    int networked;  // ネットワークを設定できたか(0:失敗，1:成功)
 
     // ハードウェアを初期化し，ファイルシステムをマウントする
     mounted = init_storage();
+    // SDカードとEthernetモジュールは互いに依存しないため，マウントの成否によらずネットワークを設定する
+    networked = init_network();
     // 成否によらずOS名を出力する
     print_banner();
-    // 失敗してもrebootでやり直せるよう，シェルはそのまま起動し，やり直し方を伝える
+    // 失敗してもrebootでやり直せるよう，シェルはそのまま起動し，失敗したものごとにやり直し方を伝える
     if (mounted == 0) {
         print("Storage is not available. Insert a card and run reboot.\n");
+    }
+    if (networked == 0) {
+        print("Network is not available. Check the Ethernet module and run reboot.\n");
+    }
+    // いずれかが失敗していれば，起動の失敗とする
+    if (mounted == 0 || networked == 0) {
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;
