@@ -117,7 +117,7 @@ module alu_sv (
     output logic [7:0] jb,
 
     // Arduino
-    output logic [13:0] ar,       // AR0(ar[0])〜AR13(ar[13])
+    output logic [7:0] ar,        // AR0(ar[0])〜AR7(ar[7])
     output logic        a,        // 単体のデジタルI/Oピン
     output logic        ar_sda,
     output logic        ar_scl,
@@ -125,6 +125,14 @@ module alu_sv (
     output logic        ck_sck,
     output logic        ck_ss,
     input  logic        ck_miso,
+
+    // Ethernetモジュール(W5100S)．ArduinoヘッダーのAR8〜AR13につなぐ
+    input  logic        eth_intn,  // INTn(AR8)
+    output logic        eth_rstn,  // RSTn(AR9)
+    output logic        eth_csn,   // CSn(AR10)
+    output logic        eth_mosi,  // MOSI(AR11)
+    input  logic        eth_miso,  // MISO(AR12)
+    output logic        eth_sck,   // SCK(AR13)
 
     // ラズパイヘッダー
     output logic [26:8] gpio
@@ -144,6 +152,8 @@ module alu_sv (
         SP_ADDR:  register_t'(CODE_AREA_BASE),
         // Arduino SPIのSSはアクティブLowのため，非選択を表すHighにする
         SPI_ADDR: 32'h1,
+        // EthernetモジュールのRSTn・CSnはアクティブLowのため，非リセット・非選択を表すHighにする
+        AR8_13_ADDR: 32'h6,
         default:  '0
     };
 
@@ -152,21 +162,18 @@ module alu_sv (
 
     // レジスタの使わないビット(used_bits)を常に0に保つための前提を，組み立て時に確かめる
     for (genvar i = 0; i <= REGISTER_MAX_ADDR; i++) begin : g_register_used_bits_check
-        // 前提1: 初期値が，使わないビットに1を持たない
+        // 前提: 初期値が，使わないビットに1を持たない
         // 1を持つと，初期値と毎サイクルの0の代入が食い違い，そのビットが定数にならない
         if ((REGISTER_INIT[i] & ~used_bits(i)) != '0)
             $error("レジスタの初期値が，使わないビットに1を持っています");
-        // 前提2: 読み書きの両方ができ，一部のビットだけを使うレジスタはAR_SPIだけである
-        // 書き込んだ値を直後の命令へそのまま回すと，使わないビットが0にならずに読めてしまう．
-        // これを防ぐため，書き込みが終わるまで直後の命令を待たせる仕組み(spi_hazard)を，AR_SPIにだけ設けている
-        if (i != SPI_ADDR && is_readable(i) && is_writable(i) && used_bits(i) != '1)
-            $error("AR_SPI以外に，読み書きの両方ができ一部のビットだけを使うレジスタがあります");
     end
 
     // 外部ピンからの非同期入力の準安定状態を消す2段のシフトレジスタ(添字1が後段)
     (* ASYNC_REG = "TRUE" *) logic [1:0][3:0] btn_sync = '0;  // タクトスイッチ
     (* ASYNC_REG = "TRUE" *) logic [1:0][1:0] sw_sync = '0;   // DIPスイッチ
     (* ASYNC_REG = "TRUE" *) logic [1:0] miso_sync = '0;      // Arduino SPIのMISO
+    (* ASYNC_REG = "TRUE" *) logic [1:0] eth_intn_sync = '0;  // EthernetモジュールのINTn
+    (* ASYNC_REG = "TRUE" *) logic [1:0] eth_miso_sync = '0;  // EthernetモジュールのMISO
 
     // 実行できない命令を検出して停止していることを表すフラグ．立っている間は下のリセット
     // ブロックの中身を毎サイクル実行し続けて停止状態を保ち，外部からのリセット(resetn)が
@@ -376,8 +383,8 @@ module alu_sv (
         blocks_second_read =
             // 先頭が書き込むレジスタ(同じサイクルに実行段へ渡す先頭の結果を，2番目が受け取る経路を設けないため)
             hits_check_write(addr)
-            // AR_SPI(実行段の命令がAR_SPIへ書き込み終えるのを待つ仕組み(spi_hazard)は，先頭の命令にだけ設けているため)
-            || addr == SPI_ADDR;
+            // 一部だけ反映されるレジスタ(実行段の命令がそのレジスタへ書き込み終えるのを待つ仕組み(partial_hazard)は，先頭の命令にだけ設けているため)
+            || is_partially_reflected(addr);
     endfunction
 
     // 2番目の命令を先頭と同じサイクルに実行段へ渡すか(同時実行するか)．
@@ -404,7 +411,7 @@ module alu_sv (
     end
 
     // 確認段の命令を，実行段へ渡さずに読み飛ばすか．
-    // 実行しない命令のため，実行段の空き・AR_SPIへの書き込み待ち・実行できるかの確認(停止)のいずれにも関わらず取り除く
+    // 実行しない命令のため，実行段の空き・一部だけ反映されるレジスタへの書き込み待ち・実行できるかの確認(停止)のいずれにも関わらず取り除く
     logic check_skip;
     assign check_skip = check_occupied && queue_skip[0];
 
@@ -1101,26 +1108,47 @@ module alu_sv (
 
     // ===== 確認段から実行段への受け渡し(組み合わせ回路) =====
 
-    // 実行段がこのサイクルにAR_SPIへ書き込み，確認段の命令がAR_SPIを読み出すか．
-    // AR_SPIへ書き込む命令はレジスタ全体(32ビット)の値を書き込むが，書き込んだ値で変わるのはSCK・MOSI・SSビットだけである．
-    // MISOビットはピンの値を写し，上位28ビットは常に0になる．
-    // 書き込む32ビットの値をそのまま確認段の命令へ回すと，MISOビットと上位28ビットが書き込んだ値になって誤る．
-    // このため回さずに，書き込みを終えたレジスタを読めるまで確認段の命令を1サイクル待たせる
-    logic spi_hazard;
-    assign spi_hazard =
-        // 確認段の命令が，第1・第2オペランドのどちらかでAR_SPIを読み出す
-        (command_next1.rs1 == SPI_ADDR || command_next1.rs2 == SPI_ADDR)
-        // かつ，実行段がこのサイクルに次のいずれかの書き込みでAR_SPIへ書き込む
-        && (
-            // 1サイクルで完了する命令の結果
-            (ex_alu_write          && rd_addr_r            == SPI_ADDR)
-            // 2本目のパイプラインの命令の結果
-         || (ex2_alu_write         && ex2_rd_addr_r        == SPI_ADDR)
-            // 複数サイクルかけて得た結果
-         || (late_write_valid      && late_write_addr      == SPI_ADDR)
-            // 割り算の余り
-         || (remainder_write_valid && remainder_write_addr == SPI_ADDR)
-        );
+    // 実行段がこのサイクルに，指定した番地のレジスタへ書き込み，確認段の命令がその番地を読み出すか
+    function automatic util_p::bool_t hits_partial_write(
+        machine_p::addr_t addr  // 調べるレジスタの番地
+    );
+        hits_partial_write =
+            // 確認段の命令が，第1・第2オペランドのどちらかでその番地を読み出す
+            (command_next1.rs1 == addr || command_next1.rs2 == addr)
+            // かつ，実行段がこのサイクルに次のいずれかの書き込みでその番地へ書き込む
+            && (
+                // 1サイクルで完了する命令の結果
+                (ex_alu_write          && rd_addr_r            == addr)
+                // 2本目のパイプラインの命令の結果
+             || (ex2_alu_write         && ex2_rd_addr_r        == addr)
+                // 複数サイクルかけて得た結果
+             || (late_write_valid      && late_write_addr      == addr)
+                // 割り算の余り
+             || (remainder_write_valid && remainder_write_addr == addr)
+            );
+    endfunction
+
+    // 実行段がこのサイクルに一部だけ反映されるレジスタへ書き込み，確認段の命令がそのレジスタを読み出すか．
+    // 一部だけ反映されるレジスタへ書き込む命令はレジスタ全体(32ビット)の値を書き込むが，書き込んだ値で変わるのは
+    // ピンへ出力するビットだけであり，ピンの値を写すビットと使わないビットは書き込んだ値にならない．
+    // 書き込む32ビットの値を，レジスタへの書き込みを待たずに確認段の命令へ渡す(フォワーディングする)ことはしない．
+    // 渡すと，これらのビットが書き込んだ値になって誤るため．
+    // 正しい値は書き込みを終えたレジスタからしか読めないため，確認段の命令を実行段へ進めず，レジスタを読めるようになるまで1サイクル待たせる．
+    // 書き込み先の番地から一部だけ反映されるかを求めず，該当する番地ごとに定数と比べるのは，
+    // 比較を浅くし，dispatchを経て多数のレジスタの取り込み可否へ至る経路を伸ばさないため
+    util_p::bool_t partial_hazard;
+    always_comb begin
+        // 該当するレジスタがなければ待たせない
+        partial_hazard = 1'b0;
+        // 全番地のうち，一部だけ反映されるレジスタへの書き込みを確認段の命令が読み出すものがあれば待たせる
+        for (int i = 0; i <= REGISTER_MAX_ADDR; i++) begin
+            // 一部だけ反映されるレジスタの番地だけを調べる(番地は定数のため，組み立て時に絞り込まれる)
+            if (is_partially_reflected(i)) begin
+                // その番地への書き込みを確認段の命令が読み出すなら待たせる
+                partial_hazard |= hits_partial_write(i);
+            end
+        end
+    end
 
     // 確認段の命令をこのサイクルに実行段へ渡すか
     logic dispatch;
@@ -1132,8 +1160,8 @@ module alu_sv (
         // かつ，実行段が空いているか，このサイクルに空く．実行段の命令が分岐・ジャンプで後の命令を捨てる場合も渡して
         // から捨てる(捨てるかを条件に含めると，分岐の比較結果から多数のレジスタの取り込み可否までの経路ができるため)
         && (!ex_occupied || ex_completes)
-        // かつ，AR_SPIへの書き込みが終わるのを待つ必要がない
-        && !spi_hazard;
+        // かつ，一部だけ反映されるレジスタへの書き込みが終わるのを待つ必要がない
+        && !partial_hazard;
 
     // 確認段の命令が実行段へ渡すオペランドの値を，番地で指定したレジスタから読み出す．読み出しアドレスが，このサイクルに完了する
     // 複数サイクル命令の書き込み先と重なる場合は，レジスタから読んだ値ではなく書き込む値をそのまま使う(フォワーディング)
@@ -1211,8 +1239,8 @@ module alu_sv (
         ja = register[PMOD_A_ADDR][7:0];
         jb = register[PMOD_B_ADDR][7:0];
 
-        // Arduino．AR0〜AR7とAR8〜AR13はレジスタが分かれているため，ビット位置をAR番号にそのまま合わせている
-        ar = {register[AR_HIGH_ADDR][5:0], register[AR_LOW_ADDR][7:0]};
+        // Arduino
+        ar = register[AR0_7_ADDR][7:0];
         a       = register[AR_MISC_ADDR][2];
         ar_sda  = register[AR_MISC_ADDR][1];
         ar_scl  = register[AR_MISC_ADDR][0];
@@ -1221,6 +1249,12 @@ module alu_sv (
         ck_mosi = register[SPI_ADDR][1];
         ck_sck  = register[SPI_ADDR][2];
         ck_ss   = register[SPI_ADDR][0];
+
+        // Ethernetモジュール．INTn・MISOは「IOからレジスタへの取り込み・使わないビットの0固定」でレジスタへ取り込む
+        eth_rstn = register[AR8_13_ADDR][1];
+        eth_csn  = register[AR8_13_ADDR][2];
+        eth_mosi = register[AR8_13_ADDR][3];
+        eth_sck  = register[AR8_13_ADDR][5];
 
         // ラズパイヘッダー．GPIOn(n=8〜26)はgpio[n]に対応する．GPIO0〜7はヘッダーへ出力しない
         gpio = {register[GPIO3_ADDR][2:0], register[GPIO2_ADDR][7:0], register[GPIO1_ADDR][7:0]};
@@ -1246,6 +1280,9 @@ module alu_sv (
         sw_sync <= {sw_sync[0], sw};
         // Arduino SPIのMISO
         miso_sync <= {miso_sync[0], ck_miso};
+        // EthernetモジュールのINTn・MISO
+        eth_intn_sync <= {eth_intn_sync[0], eth_intn};
+        eth_miso_sync <= {eth_miso_sync[0], eth_miso};
     end
 
     // メインの順序回路
@@ -1858,15 +1895,17 @@ module alu_sv (
             // ===== IOからレジスタへの取り込み・使わないビットの0固定 =====
             // 同じクロックで同じ変数へ複数のノンブロッキング代入を行うと，代入する値はどれも代入前の値から求まるが，
             // 変数に残るのは後に実行した代入の値になる．この性質を使い，以下の代入は命令による書き込みより後に置いている．
-            // これにより，命令が同じサイクルに書き込んでも，AR_SPIのMISOビットにはピンの値が残り，使わないビットは0になる
+            // これにより，命令が同じサイクルに書き込んでも，ピンの値を写すビットにはピンの値が残り，使わないビットは0になる
 
             // タクトスイッチ・DIPスイッチは同期化後の値で，ピンの値が届くまでこの1段と合わせて3サイクルかかる
             register[BTN_ADDR] <= {4'b0, btn_sync[1]};
             register[SW_ADDR] <= {6'b0, sw_sync[1]};
-            // Arduino SPIのMISOビットは外部ピンを毎サイクル取り込む
+            // Arduino SPIのMISOビットと，EthernetモジュールのINTn・MISOビットは外部ピンを毎サイクル取り込む
             // 取り込むのは同期化後の値で，ピンの値が届くまでこの1段と合わせて3サイクルかかる
             register[SPI_ADDR][3] <= miso_sync[1];
-            // AR_SPIのSCK・MOSI・SSビットには，ここでは触れない
+            register[AR8_13_ADDR][0] <= eth_intn_sync[1];
+            register[AR8_13_ADDR][4] <= eth_miso_sync[1];
+            // AR_SPI・AR8_13のピンへ出力するビットには，ここでは触れない
             // 命令が書き込んだ値をそのまま保持するため
 
             // 各レジスタの使わないビットは，命令が書き込んだ値によらず毎サイクル0にする

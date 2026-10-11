@@ -65,7 +65,7 @@ module mother_board(
     output wire [7:0] jb,
 
     // Arduino
-    output wire [13:0] ar,
+    output wire [7:0] ar,
     output wire         a,
     output wire         ar_sda,
     output wire         ar_scl,
@@ -73,6 +73,14 @@ module mother_board(
     output wire         ck_sck,
     output wire         ck_ss,
     input  wire         ck_miso,
+
+    // Ethernetモジュール(W5100S)
+    input  wire         eth_intn,
+    output wire         eth_rstn,
+    output wire         eth_csn,
+    output wire         eth_mosi,
+    input  wire         eth_miso,
+    output wire         eth_sck,
 
     // ラズパイヘッダー
     output wire [26:8] gpio
@@ -122,6 +130,12 @@ module mother_board(
         .ck_sck(ck_sck),
         .ck_ss(ck_ss),
         .ck_miso(ck_miso),
+        .eth_intn(eth_intn),
+        .eth_rstn(eth_rstn),
+        .eth_csn(eth_csn),
+        .eth_mosi(eth_mosi),
+        .eth_miso(eth_miso),
+        .eth_sck(eth_sck),
         .gpio(gpio)
     );
 
