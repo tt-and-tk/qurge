@@ -1915,7 +1915,7 @@ module cpu_tb;
     endtask
 
     // 連続した2命令を同じサイクルに実行段へ渡す同時実行の条件と，同時実行した命令の結果の受け渡し
-    task automatic test_dual_issue();
+    task automatic test_simultaneous_execution();
         int pair;  // 同時実行できる2命令の所要サイクル数
         int base;  // 比べる基準とする実行の所要サイクル数
 
@@ -2126,7 +2126,7 @@ module cpu_tb;
         test_common();
         test_code_area();
         test_pipeline();
-        test_dual_issue();
+        test_simultaneous_execution();
         // 最後のテストケースを数える
         finish_test();
 
