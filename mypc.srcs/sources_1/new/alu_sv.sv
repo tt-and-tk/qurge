@@ -740,7 +740,7 @@ module alu_sv (
     // 命令キューとは別に宣言する．
     // 1つ目の添字は，今のサイクルに確認段の命令を実行段へ渡すかを表す．
     // 添字0: 渡さない場合(実行段が空くのを待つ間など．渡さない命令は命令キューに残り，後のサイクルに渡す)
-    // 添字1: 実行段へ渡す場合
+    // 添字1: 渡す場合(同時実行するなら先頭と2番目の2命令，それ以外は先頭の1命令を渡して取り除く)
     machine_p::machine_t queue_instruction_next[2][QUEUE_DEPTH];  // 命令キューの機械語
     register_t           queue_pc_next[2][QUEUE_DEPTH];           // 命令キューの命令のプログラムカウンタ
     logic                queue_pc_valid_next[2][QUEUE_DEPTH];     // 命令を置ける番地から取得できたか
