@@ -1241,7 +1241,7 @@ module alu_sv (
         ck_sck  = register[SPI_ADDR][2];
         ck_ss   = register[SPI_ADDR][0];
 
-        // Ethernetモジュール．INTn・MISOは下のIO取り込みでレジスタへミラーする
+        // Ethernetモジュール．INTn・MISOは「IOからレジスタへの取り込み・使わないビットの0固定」でレジスタへ取り込む
         eth_rstn = register[AR8_13_ADDR][1];
         eth_csn  = register[AR8_13_ADDR][2];
         eth_mosi = register[AR8_13_ADDR][3];
