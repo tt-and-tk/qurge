@@ -39,7 +39,7 @@ unsigned char eth_spi_transfer(char data) {
 
     unsigned char received = 0;                  // MISOから上位ビット順に組み立てる受信バイト
     int held = (eth_csn << 2) | (eth_rstn << 1);  // 転送の間変えないCSnとRSTnの出力
-    int level;                                   // heldにMOSIを反映したETH_SPIへの書き込み値(SCKはLow)
+    int level;                                   // CSnとRSTnの出力にMOSIを加えたETH_SPIへの書き込み値(SCKはLow)
 
     for (int i = 7; i >= 0; i--) {
         // SPI上の送信順は上位ビットからのため，iビット目を取り出してMOSI(bit3)へ置く
