@@ -1139,6 +1139,7 @@ module alu_sv (
     always_comb begin
         // 該当するレジスタがなければ待たせない
         partial_hazard = 1'b0;
+        // 全番地のうち，一部だけ反映されるレジスタへの書き込みを確認段の命令が読み出すものがあれば待たせる
         for (int i = 0; i <= REGISTER_MAX_ADDR; i++) begin
             // 一部だけ反映されるレジスタの番地だけを調べる(番地は定数のため，組み立て時に絞り込まれる)
             if (is_partially_reflected(i)) begin
