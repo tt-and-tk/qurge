@@ -500,7 +500,12 @@ int boot(void) {
         print("Network is not available. Check the Ethernet module and run reboot.\n");
     }
     // いずれかが失敗していれば，起動の失敗とする
-    if (mounted == 0 || networked == 0) {
+    if (
+        // ファイルシステムをマウントできなかった
+        mounted == 0
+        // ネットワークを設定できなかった
+        || networked == 0
+    ) {
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;
