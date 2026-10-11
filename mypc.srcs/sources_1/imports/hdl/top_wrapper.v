@@ -2,7 +2,7 @@
 //Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //--------------------------------------------------------------------------------
 //Tool Version: Vivado v.2023.2.2 (win64) Build 4126759 Thu Feb  8 23:53:51 MST 2024
-//Date        : Sun Sep  6 09:17:15 2026
+//Date        : Sun Oct 11 15:25:20 2026
 //Host        : owner running 64-bit major release  (build 9200)
 //Command     : generate_target top_wrapper.bd
 //Design      : top_wrapper
@@ -41,6 +41,12 @@ module top_wrapper
     ck_mosi,
     ck_sck,
     ck_ss,
+    eth_csn,
+    eth_intn,
+    eth_miso,
+    eth_mosi,
+    eth_rstn,
+    eth_sck,
     gpio,
     ja,
     jb,
@@ -69,7 +75,7 @@ module top_wrapper
   inout FIXED_IO_ps_porb;
   inout FIXED_IO_ps_srstb;
   output a;
-  output [13:0]ar;
+  output [7:0]ar;
   output ar_scl;
   output ar_sda;
   input [3:0]btn;
@@ -77,6 +83,12 @@ module top_wrapper
   output ck_mosi;
   output ck_sck;
   output ck_ss;
+  output eth_csn;
+  input eth_intn;
+  input eth_miso;
+  output eth_mosi;
+  output eth_rstn;
+  output eth_sck;
   output [26:8]gpio;
   output [7:0]ja;
   output [7:0]jb;
@@ -106,7 +118,7 @@ module top_wrapper
   wire FIXED_IO_ps_porb;
   wire FIXED_IO_ps_srstb;
   wire a;
-  wire [13:0]ar;
+  wire [7:0]ar;
   wire ar_scl;
   wire ar_sda;
   wire [3:0]btn;
@@ -114,6 +126,12 @@ module top_wrapper
   wire ck_mosi;
   wire ck_sck;
   wire ck_ss;
+  wire eth_csn;
+  wire eth_intn;
+  wire eth_miso;
+  wire eth_mosi;
+  wire eth_rstn;
+  wire eth_sck;
   wire [26:8]gpio;
   wire [7:0]ja;
   wire [7:0]jb;
@@ -152,6 +170,12 @@ module top_wrapper
         .ck_mosi(ck_mosi),
         .ck_sck(ck_sck),
         .ck_ss(ck_ss),
+        .eth_csn(eth_csn),
+        .eth_intn(eth_intn),
+        .eth_miso(eth_miso),
+        .eth_mosi(eth_mosi),
+        .eth_rstn(eth_rstn),
+        .eth_sck(eth_sck),
         .gpio(gpio),
         .ja(ja),
         .jb(jb),
