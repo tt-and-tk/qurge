@@ -1143,6 +1143,7 @@ module alu_sv (
         for (int i = 0; i <= REGISTER_MAX_ADDR; i++) begin
             // 一部だけ反映されるレジスタの番地だけを調べる(番地は定数のため，組み立て時に絞り込まれる)
             if (is_partially_reflected(i)) begin
+                // その番地への書き込みを確認段の命令が読み出すなら待たせる
                 partial_hazard |= hits_partial_write(i);
             end
         end
