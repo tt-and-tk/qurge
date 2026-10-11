@@ -72,8 +72,11 @@ package alu_p;
         // Pmod B
         else if (addr == 6'h25)
             is_readable = util_p::FALSE;
-        // AR
-        else if (addr == 6'h26 || addr == 6'h28)
+        // AR8〜AR13
+        else if (addr == 6'h26)
+            is_readable = util_p::TRUE;
+        // AR0〜AR7
+        else if (addr == 6'h28)
             is_readable = util_p::FALSE;
         // I2C
         else if (addr == 6'h27)
@@ -142,8 +145,11 @@ package alu_p;
         // Pmod B
         else if (addr == 6'h25)
             is_writable = util_p::TRUE;
-        // AR
-        else if (addr == 6'h26 || addr == 6'h28)
+        // AR8〜AR13
+        else if (addr == 6'h26)
+            is_writable = util_p::TRUE;
+        // AR0〜AR7
+        else if (addr == 6'h28)
             is_writable = util_p::TRUE;
         // I2C
         else if (addr == 6'h27)
@@ -251,6 +257,13 @@ package alu_p;
         // 定義されていない
         else
             used_bits = '0;
+    endfunction
+    function util_p::bool_t is_partially_reflected(  // そのアドレスのレジスタが，読み書きの両方ができ，書き込んだ値の一部のビットだけが反映されるレジスタか
+        machine_p::addr_t addr
+    );
+        // 書き込んだ値のうち，使わないビットは0になり反映されない
+        // ピンの値を写すビットも反映されないが，そのビットを持つレジスタはどれも使わないビットを持つため，使わないビットの有無だけで判定できる
+        is_partially_reflected = is_readable(addr) && is_writable(addr) && used_bits(addr) != '1;
     endfunction
 
     // 命令のデコード時点で分かる情報(命令種別・func・レジスタ番地)から，その命令が実行可能かを

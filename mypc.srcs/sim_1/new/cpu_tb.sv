@@ -66,10 +66,13 @@ module cpu_tb;
     logic [ 3:0] led;                                      // LED
     logic [ 5:0] rgb_led;                                  // RGB LED
     logic [ 7:0] ja, jb;                                   // Pmod A・Pmod B
-    logic [13:0] ar;                                       // Arduinoのデジタル入出力0〜13番ピン
+    logic [ 7:0] ar;                                       // Arduinoのデジタル入出力0〜7番ピン
     logic        a, ar_sda, ar_scl;                        // Arduinoの単体デジタルピン・I2CのSDA/SCL
     logic        ck_mosi, ck_sck, ck_ss;                   // Arduino SPIのMOSI・SCK・SS
     logic        ck_miso = 1'b0;                           // Arduino SPIのMISO
+    logic        eth_rstn, eth_csn, eth_mosi, eth_sck;     // EthernetモジュールのRSTn・CSn・MOSI・SCK
+    logic        eth_intn = 1'b0;                          // EthernetモジュールのINTn
+    logic        eth_miso = 1'b0;                          // EthernetモジュールのMISO
     logic [26:8] gpio;                                     // ラズパイヘッダーのGPIO8〜GPIO26
 
     // 試験対象のCPU
@@ -115,6 +118,12 @@ module cpu_tb;
         .ck_sck(ck_sck),
         .ck_ss(ck_ss),
         .ck_miso(ck_miso),
+        .eth_intn(eth_intn),
+        .eth_rstn(eth_rstn),
+        .eth_csn(eth_csn),
+        .eth_mosi(eth_mosi),
+        .eth_miso(eth_miso),
+        .eth_sck(eth_sck),
         .gpio(gpio)
     );
 
@@ -1160,7 +1169,7 @@ module cpu_tb;
     // 仕様(register.md)の表に基づき，その番地のレジスタを命令のオペランドとして読めるかを返す
     function automatic bit spec_readable(input addr_t addr);
         case (addr) inside
-            [6'h00:6'h10], [6'h1c:6'h21], 6'h2a: return 1'b1;
+            [6'h00:6'h10], [6'h1c:6'h21], 6'h26, 6'h2a: return 1'b1;
             default: return 1'b0;
         endcase
     endfunction
@@ -1267,7 +1276,7 @@ module cpu_tb;
         // 出力用の各レジスタへ値を書き込む
         `BEGIN_TEST("出力用のレジスタへの書き込みが対応するピンに出る");
         run('{movi(LED_ADDR, 32'h5), movi(RGB_LED_ADDR, 32'h2a), movi(PMOD_A_ADDR, 32'ha5), movi(PMOD_B_ADDR, 32'h5a),
-              movi(AR_LOW_ADDR, 32'h81), movi(AR_HIGH_ADDR, 32'h21), movi(AR_MISC_ADDR, 32'b101),
+              movi(AR0_7_ADDR, 32'h81), movi(AR8_13_ADDR, 32'b101010), movi(AR_MISC_ADDR, 32'b101),
               movi(SPI_ADDR, 32'b0110), movi(GPIO1_ADDR, 32'h81), movi(GPIO2_ADDR, 32'h42), movi(GPIO3_ADDR, 32'h5)});
         // 正常終了する
         expect_end();
@@ -1278,9 +1287,12 @@ module cpu_tb;
             fail($sformatf("RGB LED: 期待値0x2a，実際0x%h", rgb_led));
         if (ja !== 8'ha5 || jb !== 8'h5a)
             fail($sformatf("Pmod A・B: 期待値0xa5・0x5a，実際0x%h・0x%h", ja, jb));
-        // AR0〜AR7とAR8〜AR13へ書いた値が，AR番号の順に並んで出る
-        if (ar !== 14'h2181)
-            fail($sformatf("AR0〜AR13: 期待値0x2181，実際0x%h", ar));
+        // AR0〜AR7へ書いた値がそのまま出る
+        if (ar !== 8'h81)
+            fail($sformatf("AR0〜AR7: 期待値0x81，実際0x%h", ar));
+        // AR8〜AR13へ書いた値が，ビットごとに対応するEthernetモジュールのピンに出る
+        if ({eth_sck, eth_mosi, eth_csn, eth_rstn} !== 4'b1101)
+            fail($sformatf("Ethernetモジュール(SCK,MOSI,CSn,RSTn): 期待値1101，実際%b", {eth_sck, eth_mosi, eth_csn, eth_rstn}));
         // Arduinoの単体ピン・I2C・SPIへ書いた値が，ビットごとに対応するピンに出る
         if ({a, ar_sda, ar_scl} !== 3'b101)
             fail($sformatf("A・AR_SDA・AR_SCL: 期待値101，実際%b", {a, ar_sda, ar_scl}));
@@ -1293,16 +1305,17 @@ module cpu_tb;
         // 出力用の各レジスタとGPIO0へ，全ビットが1の値を書き込む
         `BEGIN_TEST("出力用のレジスタは使うビットだけが書き込んだ値になり，使わないビットは0になる");
         run('{movi(LED_ADDR, '1), movi(RGB_LED_ADDR, '1), movi(PMOD_A_ADDR, '1), movi(PMOD_B_ADDR, '1),
-              movi(AR_LOW_ADDR, '1), movi(AR_HIGH_ADDR, '1), movi(AR_MISC_ADDR, '1),
+              movi(AR0_7_ADDR, '1), movi(AR8_13_ADDR, '1), movi(AR_MISC_ADDR, '1),
               movi(GPIO0_ADDR, '1), movi(GPIO1_ADDR, '1), movi(GPIO2_ADDR, '1), movi(GPIO3_ADDR, '1)});
-        // 仕様で使うとされたビットだけが1で残る．どのピンにも出ないGPIO0は全ビット0になる
+        // 仕様で使うとされたビットだけが1で残る．どのピンにも出ないGPIO0は全ビット0になる．
+        // AR8〜AR13のINTn・MISOのビットは，書き込んだ値ではなくピンの0になる
         expect_end();
         expect_reg(LED_ADDR,     32'hf);
         expect_reg(RGB_LED_ADDR, 32'h3f);
         expect_reg(PMOD_A_ADDR,  32'hff);
         expect_reg(PMOD_B_ADDR,  32'hff);
-        expect_reg(AR_LOW_ADDR,  32'hff);
-        expect_reg(AR_HIGH_ADDR, 32'h3f);
+        expect_reg(AR0_7_ADDR,   32'hff);
+        expect_reg(AR8_13_ADDR,  32'h2e);
         expect_reg(AR_MISC_ADDR, 32'h7);
         expect_reg(GPIO0_ADDR,   32'h0);
         expect_reg(GPIO1_ADDR,   32'hff);
@@ -1391,6 +1404,32 @@ module cpu_tb;
         // 上位28ビットが0，ビット3がMISOの0，ほかのビットが余りの1になる
         expect_end();
         expect_reg(4, 32'b0111);
+
+        // INTn・MISOピンを1にした状態で，AR8〜AR13のレジスタを読み出す
+        `BEGIN_TEST("INTn・MISOピンの値がAR8〜AR13のレジスタのビット0・4に読める");
+        eth_intn = 1'b1;
+        eth_miso = 1'b1;
+        run('{movr(1, AR8_13_ADDR)});
+        // 後のテストケースへ影響しないよう，INTn・MISOピンを0へ戻す
+        eth_intn = 1'b0;
+        eth_miso = 1'b0;
+        // ビット0・4がピンの1，ビット1・2がRSTn・CSnの初期値1になる
+        expect_end();
+        expect_reg(1, 32'b010111);
+
+        // INTn・MISOピンを1にした状態で，上位ビットとビット0・4以外を立てた値をAR8〜AR13のレジスタへ書き込み，
+        // 直後の命令で第1オペランドとして，2つ後の命令で第2オペランドとして読み出す
+        `BEGIN_TEST("AR8〜AR13のレジスタへ書き込んだ直後と2つ後の命令もINTn・MISOの値を読み，上位26ビットは0で読める");
+        eth_intn = 1'b1;
+        eth_miso = 1'b1;
+        run('{movi(AR8_13_ADDR, 32'hffff_ffea), movr(1, AR8_13_ADDR), or_(0, AR8_13_ADDR, 2)});
+        // 後のテストケースへ影響しないよう，INTn・MISOピンを0へ戻す
+        eth_intn = 1'b0;
+        eth_miso = 1'b0;
+        // どちらも上位26ビットが0，ビット0・4がピンの1，ほかのビットが書き込んだ値になる
+        expect_end();
+        expect_reg(1, 32'b111011);
+        expect_reg(2, 32'b111011);
     endtask
 
     // 命令の種類によらない停止の条件と，停止後の挙動
@@ -2026,6 +2065,14 @@ module cpu_tb;
         expect_reg(2, 32'd1);
         expect_cycles(pair + 1);
 
+        // 代入の後に，AR8〜AR13を読む代入を置く
+        `BEGIN_TEST("2番目がAR8〜AR13を読むなら同時実行されない");
+        run('{movi(1, 32'd1), movr(2, AR8_13_ADDR)});
+        // RSTn・CSnの初期値1を読み，同時実行できる場合より1サイクル多くかかる
+        expect_end();
+        expect_reg(2, 32'b000110);
+        expect_cycles(pair + 1);
+
         // 代入の後に，プログラムカウンタを読む代入を置く
         `BEGIN_TEST("同時実行した2番目の命令はプログラムカウンタとして自身の番地を読む");
         run('{movi(1, 32'd1), movr(2, PC_ADDR)});
@@ -2107,6 +2154,18 @@ module cpu_tb;
         // 上位28ビットが0，ビット3がMISOの1，ほかのビットが書き込んだ値になる
         expect_end();
         expect_reg(2, 32'b1110);
+
+        // INTn・MISOピンを1にした状態で，代入と，上位ビットを立てた値をAR8〜AR13へ書き込む代入を同時実行し，直後の命令でAR8〜AR13を読む
+        `BEGIN_TEST("同時実行した2番目の命令がAR8〜AR13へ書き込んだ直後の命令もINTn・MISOの値を読める");
+        eth_intn = 1'b1;
+        eth_miso = 1'b1;
+        run('{movi(1, 32'd1), movi(AR8_13_ADDR, 32'hffff_ffea), movr(2, AR8_13_ADDR)});
+        // 後のテストケースへ影響しないよう，INTn・MISOピンを0へ戻す
+        eth_intn = 1'b0;
+        eth_miso = 1'b0;
+        // 上位26ビットが0，ビット0・4がピンの1，ほかのビットが書き込んだ値になる
+        expect_end();
+        expect_reg(2, 32'b111011);
     endtask
 
     initial begin

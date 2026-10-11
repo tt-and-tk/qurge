@@ -68,7 +68,7 @@ module mother_board_sv(
     output logic [7:0] jb,
 
     // Arduino
-    output logic [13:0] ar,
+    output logic [7:0] ar,
     output logic         a,
     output logic         ar_sda,
     output logic         ar_scl,
@@ -76,6 +76,14 @@ module mother_board_sv(
     output logic         ck_sck,
     output logic         ck_ss,
     input  logic         ck_miso,
+
+    // Ethernetモジュール(W5100S)
+    input  logic         eth_intn,
+    output logic         eth_rstn,
+    output logic         eth_csn,
+    output logic         eth_mosi,
+    input  logic         eth_miso,
+    output logic         eth_sck,
 
     // ラズパイヘッダー
     output logic [26:8] gpio
@@ -147,6 +155,12 @@ module mother_board_sv(
         .ck_sck(ck_sck),
         .ck_ss(ck_ss),
         .ck_miso(ck_miso),
+        .eth_intn(eth_intn),
+        .eth_rstn(eth_rstn),
+        .eth_csn(eth_csn),
+        .eth_mosi(eth_mosi),
+        .eth_miso(eth_miso),
+        .eth_sck(eth_sck),
         .gpio(gpio)
     );
 
