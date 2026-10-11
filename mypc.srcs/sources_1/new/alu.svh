@@ -261,9 +261,15 @@ package alu_p;
     function util_p::bool_t is_partially_reflected(  // そのアドレスのレジスタが，読み書きの両方ができ，書き込んだ値の一部のビットだけが反映されるレジスタか
         machine_p::addr_t addr
     );
-        // 書き込んだ値のうち，使わないビットは0になり反映されない
+        // 使わないビットは書き込んだ値によらず0になるため，読み書きの両方ができて使わないビットを持つレジスタが該当する
         // ピンの値を写すビットも反映されないが，そのビットを持つレジスタはどれも使わないビットを持つため，使わないビットの有無だけで判定できる
-        is_partially_reflected = is_readable(addr) && is_writable(addr) && used_bits(addr) != '1;
+        is_partially_reflected =
+            // 読み出せる
+            is_readable(addr)
+            // かつ，書き込める
+            && is_writable(addr)
+            // かつ，使わないビットを持つ
+            && used_bits(addr) != '1;
     endfunction
 
     // 命令のデコード時点で分かる情報(命令種別・func・レジスタ番地)から，その命令が実行可能かを
