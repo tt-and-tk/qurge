@@ -1,5 +1,6 @@
 // SDカードのドライバ．Arduino互換ヘッダのSPIピン(AR_SPI)をソフトウェアで駆動してカードを初期化し，ブロックを読み書きする
 #pragma once
+#include "hex.pn"
 
 const int SD_BLOCK_SIZE = 512;  // 1ブロックのバイト数(扱うSDHC/SDXCカードはこの長さに固定されている)
 
@@ -8,35 +9,6 @@ const int SD_BLOCK_SIZE = 512;  // 1ブロックのバイト数(扱うSDHC/SDXC�
 int spi_ss = 1;  // 初期値はハードウェアのリセット値(非選択)と揃える
 
 int sd_ready = 0;  // カードの初期化が完了しているか(0:未完了，1:完了)
-
-// 0〜15の値を16進数1桁の文字へ変換する
-char hex(int value) {
-    // 0〜9は数字，10〜15は英小文字のa〜fで表す
-    if (value < 10) {
-        return '0' + value;
-    }
-    return 'a' + value - 10;
-}
-
-// valueを"0x??"の形式で出力する(改行は付けない)
-void print_hex(char value) {
-    char hex_buf[5];  // 出力用の一時バッファ
-    // "0x"に続けて上位・下位の4ビットを1桁ずつ並べ，終端して出力する
-    hex_buf[0] = '0';
-    hex_buf[1] = 'x';
-    hex_buf[2] = hex((value >> 4) & 0x0f);  // 上位4ビット
-    hex_buf[3] = hex(value & 0x0f);         // 下位4ビット
-    hex_buf[4] = '\0';
-    print(hex_buf);
-}
-
-// 初期化に失敗した段階の行の末尾へ，判定に使った応答値を" (0x??)"の形で添えて改行する
-void print_response(char value) {
-    // 応答値を括弧で囲んで出力し，行を終える
-    print(" (");
-    print_hex(value);
-    print(")\n");
-}
 
 // SPIモード0のビットバンギングで1バイトを送信し，同時に受信した1バイトを返す
 // SPIは全二重で送信と受信が常に対になるため，受信だけしたい場合は0xffを渡すこと
