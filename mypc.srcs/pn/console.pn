@@ -114,8 +114,13 @@ void console_write(char *data, int length) {
         if (data[i] == '\0') {
             continue;
         }
-        // 改行の直前が復帰でなければ，復帰を補う
-        if (data[i] == '\n' && console_last_output != '\r') {
+        // 直前が復帰ではない改行であれば，復帰を補う
+        if (
+            // 改行である
+            data[i] == '\n'
+            // 直前に出力した文字が復帰ではない
+            && console_last_output != '\r'
+        ) {
             console_put('\r');
         }
         // バイトを加える
