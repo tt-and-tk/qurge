@@ -1,0 +1,166 @@
+// Ethernetモジュール(W5100S)のドライバ．ETH_SPIのピンをソフトウェアで駆動してモジュールをリセットし，ネットワークの設定を書き込む
+// 画面への出力は行わない(結果の伝え方は呼び出し元が決める)
+//
+// W5100Sは，ネットワークの設定などをチップ内部のレジスタ(CPUのレジスタとは別物)に保持する
+// CPUはこのレジスタをSPIで1バイトずつ読み書きしてモジュールを制御する．レジスタは16ビットの番地で指定する
+// SPIでの1回の読み書き(以下SPIフレーム)は，CSnをLowにしている間に次の4バイトを送ることで行う
+//   1バイト目: OPコード(SPIフレームで行う操作が読み出しか書き込みかを表す値)
+//   2・3バイト目: 読み書きするレジスタの番地(上位バイトから)
+//   4バイト目: 書き込みでは書き込む値を送る．読み出しではダミーを送り，同時に受信した値がレジスタの値になる
+#pragma once
+
+const int ETH_VERSION = 0x51;  // VERRが返すW5100Sのバージョン
+
+// W5100Sのレジスタのうち，モジュール全体の設定を保持するもの(共通レジスタ)の番地
+// 複数バイトのものは先頭の番地で，値は上位バイトから順に並ぶ
+const int ETH_GAR = 0x0001;   // ゲートウェイのIPアドレス(4バイト)
+const int ETH_SUBR = 0x0005;  // サブネットマスク(4バイト)
+const int ETH_SHAR = 0x0009;  // MACアドレス(6バイト)
+const int ETH_SIPR = 0x000f;  // 自身のIPアドレス(4バイト)
+const int ETH_VERR = 0x0080;  // チップのバージョン(1バイト)
+
+// SPIフレームの1バイト目に送るOPコード
+const int ETH_OP_READ = 0x0f;   // 読み出し
+const int ETH_OP_WRITE = 0xf0;  // 書き込み
+
+// リセットの待ちに使う空ループの反復回数
+// タイマーが無いため，空ループ1反復の命令数から最短の時間を見積もる
+// 1反復はコンパイル結果で8命令であり，CPUは1サイクル(100MHzで10ns)に多くとも2命令しか実行しないため，40ns以上かかる
+const int ETH_RESET_HOLD_LOOPS = 20;       // RSTnをLowに保つ回数(800ns以上．データシートの560nsを上回る)
+const int ETH_RESET_WAIT_LOOPS = 1600000;  // RSTnをHighへ戻してから待つ回数(64ms以上．データシートの60.3msを上回る)
+
+// CSn(チップセレクト)とRSTn(リセット)の出力レベル(いずれもアクティブLowで，0:選択中・リセット中，1:非選択・非リセット)
+// ETH_SPIへの書き込みは常に全ビットを同時に置き換える
+// このため，SCK・MOSIだけを変えるときもCSn・RSTnを書き込み直す必要があり，その出力レベルを変数に記録しておく
+int eth_csn = 1;   // 初期値はハードウェアのリセット値(非選択)と揃える
+int eth_rstn = 1;  // 初期値はハードウェアのリセット値(非リセット)と揃える
+
+// CSnとRSTnのピンを，変数に記録した出力レベルにする(SCK・MOSIはLowにする)
+void eth_output_control(void) {
+    // CSn(bit2)とRSTn(bit1)を並べて書き込む
+    ETH_SPI = (eth_csn << 2) | (eth_rstn << 1);
+}
+
+// SPIモード0のビットバンギングで1バイトを送信し，同時に受信した1バイトを返す
+// SPIは全二重で送信と受信が常に対になるため，受信だけしたい場合は0xffを渡すこと
+unsigned char eth_spi_transfer(char data) {
+    // ETH_SPIのビット割り当て(bit5:SCK / bit4:MISO(入力) / bit3:MOSI / bit2:CSn / bit1:RSTn / bit0:INTn(入力))
+
+    unsigned char received = 0;                   // MISOから上位ビット順に組み立てる受信バイト
+    int held = (eth_csn << 2) | (eth_rstn << 1);  // 転送の間変えないCSnとRSTnの出力
+    int level;                                    // CSnとRSTnの出力にMOSIを加えたETH_SPIへの書き込み値(SCKはLow)
+
+    // 1ビットずつSCKを1周期動かして，送信と受信を8ビット分行う(SPI上の送信順は上位ビットから)
+    for (int i = 7; i >= 0; i--) {
+        // 送信するバイトから今回送るビットを取り出し，MOSI(bit3)へ置く
+        level = held | (((data >> i) & 1) << 3);
+        // SCKをLowに保ったままMOSIを確定させる．モジュールはこの立ち下がりでMISOへ次のビットを載せる
+        ETH_SPI = level;
+        // SCK(bit5)をHighへ上げる．モジュールはこの立ち上がりでMOSIを取り込む
+        ETH_SPI = level | 0x20;
+        // MISO(bit4)を読み，受信バイトの下位へ積む
+        // ETH_SPIのMISOは同期化を挟むためピンより3サイクル遅れるが，値を載せた立ち下がりから
+        // ここまでに複数の命令を挟んでおり，読む時点では確定した値が現れている
+        received = (received << 1) | ((ETH_SPI >> 4) & 1);
+    }
+    // 8ビット送り終えたらSCKとMOSIをLowへ戻す
+    eth_output_control();
+    return received;
+}
+
+// 1つのSPIフレーム(OPコード・番地2バイト・データ1バイト)を送り，データの位置で受信した1バイトを返す
+// モジュールはCSnを下げてから上げるまでを1つのSPIフレームとして扱うため，SPIフレームごとにCSnを上げ下げする
+unsigned char eth_frame(char op, unsigned short addr, char data) {
+    unsigned char received;  // データの位置で受信した1バイト
+
+    // モジュールを選択する(CSnは次の転送の書き込みからピンに現れる)
+    eth_csn = 0;
+    // OPコードを送る
+    eth_spi_transfer(op);
+    // 16ビットの番地を上位バイトから送る
+    eth_spi_transfer(addr >> 8);  // 上位バイト
+    eth_spi_transfer(addr);       // 下位バイト(1バイトを送る関数は，渡した値の下位8ビットだけを受け取る)
+    // データを送り，同時に受信する
+    received = eth_spi_transfer(data);
+    // 選択を解除してSPIフレームを終える
+    eth_csn = 1;
+    eth_output_control();
+    return received;
+}
+
+// 指定した番地のレジスタから1バイトを読み出す
+unsigned char eth_read(unsigned short addr) {
+    // 読み出しのSPIフレームを送る．データの位置は受信だけを行うため0xffを送る
+    return eth_frame(ETH_OP_READ, addr, 0xff);
+}
+
+// 指定した番地のレジスタへ1バイトを書き込む
+void eth_write(unsigned short addr, char value) {
+    // 書き込みのSPIフレームを送る(受信した値は使わない)
+    eth_frame(ETH_OP_WRITE, addr, value);
+}
+
+// 値の下位の指定したバイト数(4以下)を，指定した番地から始まるレジスタへ上位バイトから順に書き込む
+void eth_write_bytes(unsigned short addr, unsigned int value, int length) {
+    // 上位のバイトから1バイトずつ取り出して書き込む
+    for (int i = 0; i < length; i++) {
+        eth_write(addr + i, value >> ((length - 1 - i) << 3));
+    }
+}
+
+// 指定した番地から始まる，指定したバイト数(4以下)のレジスタを読み出し，先頭を上位バイトとした値を返す
+unsigned int eth_read_bytes(unsigned short addr, int length) {
+    unsigned int value = 0;  // 読み出したバイトを上位から順に組み立てる値
+    // 1バイトずつ読み出し，下位へ積む
+    for (int i = 0; i < length; i++) {
+        value = (value << 8) | eth_read(addr + i);
+    }
+    return value;
+}
+
+// モジュールをハードウェアリセットし，動き出すまで待ってからバージョン(VERR)を読み出して返す
+// モジュールが接続されていなければ，MISOのプルアップにより0xffが返る
+int eth_reset(void) {
+    // 前の処理の途中で止まっていてもSPIフレームの途中にならないよう，選択を解除しておく
+    eth_csn = 1;
+    // RSTnをLowにしてリセットを始める
+    eth_rstn = 0;
+    eth_output_control();
+    // 何もしないループを回し，RSTnをLowのままデータシートの定める時間以上保つ
+    for (int i = 0; i < ETH_RESET_HOLD_LOOPS; i++) {
+    }
+    // RSTnをHighへ戻してリセットを終える
+    eth_rstn = 1;
+    eth_output_control();
+    // 何もしないループを回し，内部のクロックが安定するまでデータシートの定める時間以上待つ
+    for (int i = 0; i < ETH_RESET_WAIT_LOOPS; i++) {
+    }
+    // 動き出したモジュールのバージョンを読み出す
+    return eth_read(ETH_VERR);
+}
+
+// MACアドレス・IPアドレス・サブネットマスク・ゲートウェイを書き込み，読み出して書き込んだとおりかを確かめる
+// MACアドレスは6バイトを1つの値に収められないため，上位2バイト(mac_high)と下位4バイト(mac_low)に分けて渡す
+// 戻り値: 1(全て書き込んだ値のとおり) / 0(読み出した値が1つでも異なる)
+int eth_configure(unsigned int mac_high, unsigned int mac_low, unsigned int ip, unsigned int subnet, unsigned int gateway) {
+    // 各レジスタへ書き込む
+    eth_write_bytes(ETH_SHAR, mac_high, 2);     // MACアドレスの上位2バイト
+    eth_write_bytes(ETH_SHAR + 2, mac_low, 4);  // MACアドレスの下位4バイト
+    eth_write_bytes(ETH_SIPR, ip, 4);           // IPアドレス
+    eth_write_bytes(ETH_SUBR, subnet, 4);       // サブネットマスク
+    eth_write_bytes(ETH_GAR, gateway, 4);       // ゲートウェイ
+
+    // 書き込んだレジスタを読み出し，書き込んだとおりの値になっているかを返す
+    // 配線の不良などで書き込みがモジュールへ届いていないことを，起動時に見つけるため
+    return
+        // MACアドレスの上位2バイト
+        eth_read_bytes(ETH_SHAR, 2) == mac_high
+        // MACアドレスの下位4バイト
+        && eth_read_bytes(ETH_SHAR + 2, 4) == mac_low
+        // IPアドレス
+        && eth_read_bytes(ETH_SIPR, 4) == ip
+        // サブネットマスク
+        && eth_read_bytes(ETH_SUBR, 4) == subnet
+        // ゲートウェイ
+        && eth_read_bytes(ETH_GAR, 4) == gateway;
+}
