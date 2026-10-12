@@ -439,10 +439,11 @@ void print_banner(void) {
 void print_welcome(void) {
     // OS名を出力する
     print_banner();
-    // 失敗してもrebootでやり直せるよう，シェルはそのまま動かし，失敗したものごとにやり直し方を伝える
+    // ファイルシステムをマウントしていなければ，カードを差してrebootでやり直すよう伝える
     if (fat_mounted == 0) {
         console_print("Storage is not available. Insert a card and run reboot.\n");
     }
+    // ネットワークを設定していなければ，モジュールを確かめてrebootでやり直すよう伝える
     if (eth_ready == 0) {
         console_print("Network is not available. Check the Ethernet module and run reboot.\n");
     }
