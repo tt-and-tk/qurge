@@ -36,7 +36,6 @@ int eth_csn = 1;   // 初期値はハードウェアのリセット値(非選択
 int eth_rstn = 1;  // 初期値はハードウェアのリセット値(非リセット)と揃える
 
 // CSnとRSTnのピンを，変数に記録した出力レベルにする(SCK・MOSIはLowにする)
-// 選択の解除やリセットの開始・終了など，CSn・RSTnの変数を書き換えた後にピンへ反映するために呼ぶ
 void eth_output_control(void) {
     // CSn(bit2)とRSTn(bit1)を並べて書き込む
     ETH_SPI = (eth_csn << 2) | (eth_rstn << 1);
