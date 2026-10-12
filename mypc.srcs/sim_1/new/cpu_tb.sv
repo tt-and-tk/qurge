@@ -2247,6 +2247,19 @@ module cpu_tb;
         // 上位26ビットが0，ビット0・4がピンの1，ほかのビットが書き込んだ値になる
         expect_end();
         expect_reg(2, 32'b111011);
+
+        // INTn・MISOピンを1にした状態で，代入と，上位ビットを立てた値をAR8〜AR13へ書き込む代入を同時実行し，
+        // 次のサイクルに単独で実行段へ渡す代入をはさんで，その次の命令でAR8〜AR13を読む
+        `BEGIN_TEST("同時実行した2番目の命令がAR8〜AR13へ書き込んだ1命令後の命令もINTn・MISOの値を読める");
+        eth_intn = 1'b1;
+        eth_miso = 1'b1;
+        run('{movi(1, 32'd1), movi(AR8_13_ADDR, 32'hffff_ffea), movi(6, 32'd1), movr(2, AR8_13_ADDR)});
+        // 後のテストケースへ影響しないよう，INTn・MISOピンを0へ戻す
+        eth_intn = 1'b0;
+        eth_miso = 1'b0;
+        // 上位26ビットが0，ビット0・4がピンの1，ほかのビットが書き込んだ値になる
+        expect_end();
+        expect_reg(2, 32'b111011);
     endtask
 
     initial begin
