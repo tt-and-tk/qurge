@@ -161,7 +161,7 @@ unsigned int tcp_peer_address(void) {
     return eth_read_bytes(TCP_DIPR, 4);
 }
 
-// 受信したデータを，指定したバイト数までbufへ読み出し，読み出したバイト数をlengthへ書き込む
+// 受信したデータを，指定したバイト数まで配列へ読み出し，読み出したバイト数を指定した変数へ書き込む
 // 受信したデータが無ければ待たずに0バイトとして返す
 // 戻り値: TCP_OK / TCP_CLOSED(受信したデータを全て読み出し終えており，相手が切断したか接続が切れた)
 int tcp_recv(char *buf, int size, int *length) {
@@ -202,7 +202,7 @@ int tcp_recv(char *buf, int size, int *length) {
     return TCP_OK;
 }
 
-// bufの先頭から指定したバイト数を送信し，相手に届くまで待つ
+// 配列の先頭から指定したバイト数を送信し，相手に届くまで待つ
 // 戻り値: TCP_OK / TCP_CLOSED(接続が切れた) / TCP_ERR_TOO_LONG(送信バッファより長い)
 int tcp_send(char *buf, int length) {
     unsigned int position;  // 送信バッファの書き込み位置
