@@ -3,8 +3,8 @@
 //
 // W5100Sは，ネットワークの設定などをチップ内部のレジスタ(CPUのレジスタとは別物)に保持する
 // CPUはこのレジスタをSPIで1バイトずつ読み書きしてモジュールを制御する．レジスタは16ビットの番地で指定する
-// SPIでの1回の読み書き(フレーム)は，CSnをLowにしている間に次の4バイトを送ることで行う
-//   1バイト目: OPコード(フレームで行う操作が読み出しか書き込みかを表す値)
+// SPIでの1回の読み書き(以下SPIフレーム)は，CSnをLowにしている間に次の4バイトを送ることで行う
+//   1バイト目: OPコード(SPIフレームで行う操作が読み出しか書き込みかを表す値)
 //   2・3バイト目: 読み書きするレジスタの番地(上位バイトから)
 //   4バイト目: 書き込みでは書き込む値を送る．読み出しではダミーを送り，同時に受信した値がレジスタの値になる
 #pragma once
@@ -19,7 +19,7 @@ const int ETH_SHAR = 0x0009;  // MACアドレス(6バイト)
 const int ETH_SIPR = 0x000f;  // 自身のIPアドレス(4バイト)
 const int ETH_VERR = 0x0080;  // チップのバージョン(1バイト)
 
-// SPIのフレームの1バイト目に送るOPコード
+// SPIフレームの1バイト目に送るOPコード
 const int ETH_OP_READ = 0x0f;   // 読み出し
 const int ETH_OP_WRITE = 0xf0;  // 書き込み
 
@@ -70,7 +70,7 @@ unsigned char eth_spi_transfer(char data) {
 }
 
 // 1つのSPIフレーム(OPコード・番地2バイト・データ1バイト)を送り，データの位置で受信した1バイトを返す
-// モジュールはCSnを下げてから上げるまでを1フレームとして扱うため，フレームごとにCSnを上げ下げする
+// モジュールはCSnを下げてから上げるまでを1つのSPIフレームとして扱うため，SPIフレームごとにCSnを上げ下げする
 unsigned char eth_frame(char op, unsigned short addr, char data) {
     unsigned char received;  // データの位置で受信した1バイト
 
@@ -82,7 +82,7 @@ unsigned char eth_frame(char op, unsigned short addr, char data) {
     eth_spi_transfer(addr);
     // データを送り，同時に受信する
     received = eth_spi_transfer(data);
-    // 選択を解除してフレームを終える
+    // 選択を解除してSPIフレームを終える
     eth_csn = 1;
     eth_output_control();
     return received;
@@ -90,13 +90,13 @@ unsigned char eth_frame(char op, unsigned short addr, char data) {
 
 // 指定した番地のレジスタから1バイトを読み出す
 unsigned char eth_read(unsigned short addr) {
-    // 読み出しのフレームを送る．データの位置は受信だけを行うため0xffを送る
+    // 読み出しのSPIフレームを送る．データの位置は受信だけを行うため0xffを送る
     return eth_frame(ETH_OP_READ, addr, 0xff);
 }
 
 // 指定した番地のレジスタへ1バイトを書き込む
 void eth_write(unsigned short addr, char value) {
-    // 書き込みのフレームを送る(受信した値は使わない)
+    // 書き込みのSPIフレームを送る(受信した値は使わない)
     eth_frame(ETH_OP_WRITE, addr, value);
 }
 
@@ -121,7 +121,7 @@ unsigned int eth_read_bytes(unsigned short addr, int length) {
 // モジュールをハードウェアリセットし，動き出すまで待ってからバージョン(VERR)を読み出して返す
 // モジュールが接続されていなければ，MISOのプルアップにより0xffが返る
 int eth_reset(void) {
-    // 前の処理の途中で止まっていてもフレームの途中にならないよう，選択を解除しておく
+    // 前の処理の途中で止まっていてもSPIフレームの途中にならないよう，選択を解除しておく
     eth_csn = 1;
     // RSTnをLowにしてリセットを始める
     eth_rstn = 0;
