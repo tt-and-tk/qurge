@@ -2,7 +2,9 @@
 // 同時に扱う接続は1つで，モジュールのソケット0だけを使う．画面への出力は行わない(結果の伝え方は呼び出し元が決める)
 //
 // W5100Sは，TCPの処理(接続の確立・再送・切断)をチップ内部で行い，その状態と送受信のデータをソケットごとのレジスタとバッファに置く
-// CPUはレジスタへコマンドを書き込んで操作を指示し，状態のレジスタを繰り返し読んで変化を待つ(INTnによる割り込みは使わない)
+// CPUはレジスタへコマンドを書き込んで操作を指示し，状態のレジスタと通知のレジスタを繰り返し読んで変化を待つ
+// 通知のレジスタは，送信の完了など，ソケットで起きた出来事を1ビットずつ記録する
+// (データシートでは割り込みのレジスタと呼び，INTnのピンからCPUへ割り込みを出すこともできるが，ここでは割り込みを使わず読んで確かめる)
 // 送受信のデータは，ソケットごとに2KBずつ割り当てられたリングバッファに置かれ，書き込み位置と読み出し位置のレジスタで管理する
 #pragma once
 #include "eth.pn"
@@ -17,7 +19,7 @@ const int TCP_ERR_TOO_LONG = 4;   // 送信するデータが送信バッファ�
 // ソケット0のレジスタの番地(複数バイトのものは先頭の番地で，値は上位バイトから順に並ぶ)
 const int TCP_MR = 0x0400;      // モード(1バイト)
 const int TCP_CR = 0x0401;      // コマンド(1バイト．書き込むと実行し，受け付けると0に戻る)
-const int TCP_IR = 0x0402;      // 割り込みの要因(1バイト．立ったビットは1を書き込むと消える)
+const int TCP_IR = 0x0402;      // 通知(1バイト．立ったビットは1を書き込むと消える)
 const int TCP_SR = 0x0403;      // 状態(1バイト)
 const int TCP_PORT = 0x0404;    // 自身のポート番号(2バイト)
 const int TCP_DIPR = 0x040c;    // 相手のIPアドレス(4バイト)
@@ -44,7 +46,7 @@ const int TCP_CMD_CLOSE = 0x10;   // 相手へ伝えずにソケットを閉じ�
 const int TCP_CMD_SEND = 0x20;    // 送信バッファの書き込み位置までを送信する
 const int TCP_CMD_RECV = 0x40;    // 受信バッファの読み出し位置までを読み終えたことを伝える
 
-// 割り込みの要因のビット
+// 通知のレジスタの各ビットが表す出来事
 const int TCP_IR_TIMEOUT = 0x08;  // 再送のタイムアウト(ソケットは閉じた状態になる)
 const int TCP_IR_SEND_OK = 0x10;  // 送信の完了
 
@@ -115,7 +117,7 @@ int tcp_listen(int port) {
     }
     // 前の接続が残っていても使えるよう，ソケットを閉じる
     tcp_close_socket();
-    // 前の接続で立った割り込みの要因が送信の完了と誤認されないよう，全ビットを消す
+    // 前の接続で立った通知を，この接続での送信の完了と取り違えないよう，全ビットを消す
     eth_write(TCP_IR, 0xff);
     // TCPで通信するモードにする
     eth_write(TCP_MR, TCP_MODE_TCP);
@@ -205,7 +207,7 @@ int tcp_recv(char *buf, int size, int *length) {
 // 戻り値: TCP_OK / TCP_CLOSED(接続が切れた) / TCP_ERR_TOO_LONG(送信バッファより長い)
 int tcp_send(char *buf, int length) {
     unsigned int position;  // 送信バッファの書き込み位置
-    int interrupt;          // 割り込みの要因
+    int events;             // 通知のレジスタから読み出した値
 
     // 送信バッファより長いデータは，空きを待っても送れないため，待つ前に失敗とする
     if (length > TCP_BUFFER_SIZE) {
@@ -227,17 +229,18 @@ int tcp_send(char *buf, int length) {
     eth_write_bytes(TCP_TX_WR, position + length, 2);
     // 書き込み位置までの送信を指示する
     tcp_command(TCP_CMD_SEND);
-    // 送信の完了か，接続が切れるまで待つ
+    // 送信の完了か，接続が切れたことが通知されるまで待つ
+    // 前の送信を終える前に次の送信を指示すると正しく送れず，また送れたかどうかを呼び出し元へ返すため，戻る前に確かめる
     while (1) {
-        // 割り込みの要因を読み出す
-        interrupt = eth_read(TCP_IR);
-        // 送信が完了すれば，次の送信で完了を判定できるよう要因を消して終える
-        if ((interrupt & TCP_IR_SEND_OK) != 0) {
+        // 通知のレジスタを読み出す
+        events = eth_read(TCP_IR);
+        // 送信が完了すれば，次の送信で完了を判定できるよう通知を消して終える
+        if ((events & TCP_IR_SEND_OK) != 0) {
             eth_write(TCP_IR, TCP_IR_SEND_OK);
             return TCP_OK;
         }
-        // 再送のタイムアウトになれば，要因を消して終える
-        if ((interrupt & TCP_IR_TIMEOUT) != 0) {
+        // 再送のタイムアウトになれば，通知を消して終える
+        if ((events & TCP_IR_TIMEOUT) != 0) {
             eth_write(TCP_IR, TCP_IR_TIMEOUT);
             return TCP_CLOSED;
         }
