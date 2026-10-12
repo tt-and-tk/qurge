@@ -75,9 +75,11 @@ unsigned char eth_frame(char op, unsigned short addr, char data) {
 
     // モジュールを選択する(CSnは次の転送の書き込みからピンに現れる)
     eth_csn = 0;
-    // OPコードに続けて，16ビットの番地を上位バイトから送る(1バイトを送る関数の引数がcharのため，下位8ビットだけが渡る)
+    // OPコードを送る
     eth_spi_transfer(op);
+    // 16ビットの番地の上位バイトを送る
     eth_spi_transfer(addr >> 8);
+    // 番地の下位バイトを送る(1バイトを送る関数は，渡した値の下位8ビットだけを受け取る)
     eth_spi_transfer(addr);
     // データを送り，同時に受信する
     received = eth_spi_transfer(data);
