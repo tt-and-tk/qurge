@@ -139,18 +139,19 @@ int eth_reset(void) {
     return eth_read(ETH_VERR);
 }
 
-// MACアドレス・IPアドレス・サブネットマスク・ゲートウェイを書き込み，読み戻して確かめる
+// MACアドレス・IPアドレス・サブネットマスク・ゲートウェイを書き込み，読み出して書き込んだとおりかを確かめる
 // MACアドレスは6バイトを1つの値に収められないため，上位2バイト(mac_high)と下位4バイト(mac_low)に分けて渡す
 // 戻り値: 1(全て書き込んだ値のとおり) / 0(読み戻した値が1つでも異なる)
 int eth_configure(unsigned int mac_high, unsigned int mac_low, unsigned int ip, unsigned int subnet, unsigned int gateway) {
     // 各レジスタへ書き込む
-    eth_write_bytes(ETH_SHAR, mac_high, 2);
-    eth_write_bytes(ETH_SHAR + 2, mac_low, 4);
-    eth_write_bytes(ETH_SIPR, ip, 4);
-    eth_write_bytes(ETH_SUBR, subnet, 4);
-    eth_write_bytes(ETH_GAR, gateway, 4);
+    eth_write_bytes(ETH_SHAR, mac_high, 2);     // MACアドレスの上位
+    eth_write_bytes(ETH_SHAR + 2, mac_low, 4);  // MACアドレスの下位
+    eth_write_bytes(ETH_SIPR, ip, 4);           // IPアドレス
+    eth_write_bytes(ETH_SUBR, subnet, 4);       // サブネットマスク
+    eth_write_bytes(ETH_GAR, gateway, 4);       // ゲートウェイ
 
-    // 読み戻した値が書き込んだ値と一致するかを返す
+    // 書き込んだレジスタを読み出し，書き込んだとおりの値になっているかを返す
+    // 配線の不良などで書き込みがモジュールへ届いていないことを，起動時に見つけるため
     return
         // MACアドレスの上位2バイト
         eth_read_bytes(ETH_SHAR, 2) == mac_high
