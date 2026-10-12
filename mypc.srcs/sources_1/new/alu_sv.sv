@@ -1128,9 +1128,9 @@ module alu_sv (
         && (is_branch_taken || (is_jumping && !ex_early_jump));
 
     // 2本目のパイプラインの命令が，このサイクルに完了し結果を求めるか．求めた結果は次のサイクルにレジスタへ書き込む．
-    // 1本目の命令が完了するサイクルに完了し，1本目の命令が停止した場合は完了しないため書き込まない
-    logic ex2_alu_write;
-    assign ex2_alu_write = ex2_occupied && ex_completes;
+    // 1本目の命令と同じサイクルに完了する．1本目の命令が停止した場合は，2本目の命令も完了しない
+    logic ex2_completes;
+    assign ex2_completes = ex2_occupied && ex_completes;
 
     // ===== 確認段から実行段への受け渡し(組み合わせ回路) =====
 
@@ -1146,7 +1146,7 @@ module alu_sv (
                 // 1サイクルで完了する命令の結果(このサイクルに書き込む)
                 (ex_alu_write          && rd_addr_r            == addr)
                 // このサイクルに完了する2本目のパイプラインの命令の結果(次のサイクルに書き込む)
-             || (ex2_alu_write         && ex2_rd_addr_r        == addr)
+             || (ex2_completes         && ex2_rd_addr_r        == addr)
                 // 前のサイクルに完了した2本目のパイプラインの命令の結果(このサイクルに書き込む)
              || (ex2_write_pending     && ex2_pending_addr     == addr)
                 // 複数サイクルかけて得た結果(このサイクルに書き込む)
@@ -1510,15 +1510,15 @@ module alu_sv (
                     rs1_val_r <= read_operand(command_next1.rs1, queue_pc[0]);
                     rs2_val_r <= read_operand(command_next1.rs2, queue_pc[0]);
                     // 確認段の命令が，実行段の命令の演算結果を使うかを，第1・第2オペランドごとに印として渡す．
-                    // 実行段の1本目・2本目のパイプラインの命令がこのサイクルに1サイクルで求めた結果を書き込み，
+                    // 実行段の1本目・2本目のパイプラインの命令がこのサイクルに1サイクルで結果を求めてレジスタへ書き込む命令であり，
                     // その書き込み先が読み出しアドレスと同じなら使う(プログラムカウンタは書き込み先にならないため重ならない)．
                     // 結果そのものは，実行段がこのサイクルに演算してex1_alu_result_r・ex2_alu_result_rへ保持し，次のサイクルに
                     // 実行段の入口で読み出し値と差し替える．複数サイクル命令の結果のようにread_operand()でここで受け取らないのは，
                     // 演算回路からここまでの経路が1クロックに収まらないため
                     rs1_from_ex1_alu_r <= ex_alu_write  && (rd_addr_r     == command_next1.rs1);
                     rs2_from_ex1_alu_r <= ex_alu_write  && (rd_addr_r     == command_next1.rs2);
-                    rs1_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next1.rs1);
-                    rs2_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next1.rs2);
+                    rs1_from_ex2_alu_r <= ex2_completes && (ex2_rd_addr_r == command_next1.rs1);
+                    rs2_from_ex2_alu_r <= ex2_completes && (ex2_rd_addr_r == command_next1.rs2);
                     rd_addr_r <= command_next1.rd;
                     func_r    <= command_next1.func;
                     imm_r     <= command_next1.imm;
@@ -1533,8 +1533,8 @@ module alu_sv (
                         ex2_rs2_val_r         <= read_operand(command_next2.rs2, queue_pc[1]);
                         ex2_rs1_from_ex1_alu_r <= ex_alu_write  && (rd_addr_r     == command_next2.rs1);
                         ex2_rs2_from_ex1_alu_r <= ex_alu_write  && (rd_addr_r     == command_next2.rs2);
-                        ex2_rs1_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next2.rs1);
-                        ex2_rs2_from_ex2_alu_r <= ex2_alu_write && (ex2_rd_addr_r == command_next2.rs2);
+                        ex2_rs1_from_ex2_alu_r <= ex2_completes && (ex2_rd_addr_r == command_next2.rs1);
+                        ex2_rs2_from_ex2_alu_r <= ex2_completes && (ex2_rd_addr_r == command_next2.rs2);
                         ex2_m_type_r  <= command_next2.m_type;
                         ex2_func_r    <= command_next2.func;
                         ex2_rd_addr_r <= command_next2.rd;
@@ -1885,8 +1885,8 @@ module alu_sv (
             // ===== 実行段: 完了した命令の結果の書き込み =====
 
             // 2本目のパイプラインの命令の結果を，次の命令が受け取れるよう，また次のサイクルにレジスタへ書き込めるよう，書き込み先とともに保持する
-            ex2_write_pending <= ex2_alu_write;
-            if (ex2_alu_write) begin
+            ex2_write_pending <= ex2_completes;
+            if (ex2_completes) begin
                 ex2_alu_result_r <= ex2_write_value;
                 ex2_pending_addr <= ex2_rd_addr_r;
             end
