@@ -435,7 +435,7 @@ void print_banner(void) {
     console_print("   order out of chaos, on Qurge\n");
 }
 
-// OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，ネットワークを設定してOS名を出力する
+// OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，TCPの接続を閉じてからネットワークを設定して，OS名を出力する
 // 呼ぶたびにハードウェアの初期化からやり直すため，再起動にもそのまま使える．全て成功すればEXIT_SUCCESS，いずれかが失敗すればEXIT_FAILUREを返す
 int boot(void) {
     int mounted;    // ファイルシステムをマウントできたか(0:失敗，1:成功)
