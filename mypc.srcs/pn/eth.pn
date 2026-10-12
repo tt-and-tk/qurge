@@ -35,8 +35,9 @@ const int ETH_RESET_WAIT_LOOPS = 1600000;  // RSTnをHighへ戻してから待�
 int eth_csn = 1;   // 初期値はハードウェアのリセット値(非選択)と揃える
 int eth_rstn = 1;  // 初期値はハードウェアのリセット値(非リセット)と揃える
 
-// SCK・MOSIをLowにし，CSnとRSTnを変数に記録した出力レベルにする
-void eth_set_pins(void) {
+// CSnとRSTnのピンを，変数に記録した出力レベルにする(SCK・MOSIはLowにする)
+// 選択の解除やリセットの開始・終了など，CSn・RSTnの変数を書き換えた後にピンへ反映するために呼ぶ
+void eth_output_control(void) {
     // CSn(bit2)とRSTn(bit1)を並べて書き込む
     ETH_SPI = (eth_csn << 2) | (eth_rstn << 1);
 }
@@ -63,7 +64,7 @@ unsigned char eth_spi_transfer(char data) {
         received = (received << 1) | ((ETH_SPI >> 4) & 1);
     }
     // 8ビット送り終えたらSCKとMOSIをLowへ戻す
-    eth_set_pins();
+    eth_output_control();
     return received;
 }
 
@@ -82,7 +83,7 @@ unsigned char eth_frame(int op, int addr, int data) {
     received = eth_spi_transfer(data);
     // 選択を解除してフレームを終える
     eth_csn = 1;
-    eth_set_pins();
+    eth_output_control();
     return received;
 }
 
@@ -123,12 +124,12 @@ int eth_reset(void) {
     eth_csn = 1;
     // RSTnをLowにしてリセットを始め，データシートの定める時間以上保つ
     eth_rstn = 0;
-    eth_set_pins();
+    eth_output_control();
     for (int i = 0; i < ETH_RESET_HOLD_LOOPS; i++) {
     }
     // RSTnをHighへ戻してリセットを終え，内部のクロックが安定するまでデータシートの定める時間以上待つ
     eth_rstn = 1;
-    eth_set_pins();
+    eth_output_control();
     for (int i = 0; i < ETH_RESET_WAIT_LOOPS; i++) {
     }
     // 動き出したモジュールのバージョンを読み出す
