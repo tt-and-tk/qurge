@@ -56,11 +56,21 @@ const int TCP_SR_ESTABLISHED = 0x17;  // 接続している
 const int TCP_SR_CLOSE_WAIT = 0x1c;   // 相手から切断を伝えられた(受信バッファに残ったデータは読み出せ，送信もできる)
 
 // コマンドを書き込み，モジュールが受け付けるまで待つ
+// 受け付けた時点ではコマンドの処理を終えていないため，処理の結果は呼び出し元が状態のレジスタで確かめる
 void tcp_command(int command) {
     // コマンドのレジスタへ書き込む
     eth_write(TCP_CR, command);
     // 受け付けると0に戻るため，それまで読み直す
     while (eth_read(TCP_CR) != 0) {
+    }
+}
+
+// 相手へ伝えずにソケットを閉じ，閉じた状態になるまで待つ
+void tcp_close_socket(void) {
+    // 閉じるコマンドを書き込む
+    tcp_command(TCP_CMD_CLOSE);
+    // 閉じた状態になるまで読み直す
+    while (eth_read(TCP_SR) != TCP_SR_CLOSED) {
     }
 }
 
@@ -102,18 +112,26 @@ int tcp_listen(int port) {
         return TCP_ERR_NOT_READY;
     }
     // 前の接続が残っていても使えるよう，ソケットを閉じる
-    tcp_command(TCP_CMD_CLOSE);
+    tcp_close_socket();
     // 前の接続で立った割り込みの要因が送信の完了と誤認されないよう，全ビットを消す
     eth_write(TCP_IR, 0xff);
-    // TCPのモードとポート番号を書き込み，ソケットを開く
+    // TCPで通信するモードにする
     eth_write(TCP_MR, TCP_MODE_TCP);
+    // 待ち受けるポート番号を書き込む
     eth_write_bytes(TCP_PORT, port, 2);
+    // ソケットを開き，閉じた状態から変わるまで待つ
     tcp_command(TCP_CMD_OPEN);
+    while (eth_read(TCP_SR) == TCP_SR_CLOSED) {
+    }
+    // TCPで開いた状態になっていなければ，待ち受けを始められない
     if (eth_read(TCP_SR) != TCP_SR_INIT) {
         return TCP_ERR_SOCKET;
     }
-    // 待ち受けを始める
+    // 待ち受けを始め，開いた状態から変わるまで待つ
     tcp_command(TCP_CMD_LISTEN);
+    while (eth_read(TCP_SR) == TCP_SR_INIT) {
+    }
+    // 待ち受けの状態になっていなければ，待ち受けを始められない
     if (eth_read(TCP_SR) != TCP_SR_LISTEN) {
         return TCP_ERR_SOCKET;
     }
@@ -232,5 +250,5 @@ void tcp_close(void) {
         }
     }
     // 待ち受け中など接続していない状態も含め，ソケットを閉じる
-    tcp_command(TCP_CMD_CLOSE);
+    tcp_close_socket();
 }
