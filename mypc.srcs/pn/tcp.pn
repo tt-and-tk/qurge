@@ -84,8 +84,11 @@ unsigned int tcp_read_word(unsigned short addr) {
     current = eth_read_bytes(addr, 2);
     // 前回と一致するまで読み直す
     while (1) {
+        // 直前に読み出した値を，比べる相手として控える
         previous = current;
+        // もう一度読み出す
         current = eth_read_bytes(addr, 2);
+        // 2回続けて同じ値であれば，その値を返す
         if (current == previous) {
             return current;
         }
@@ -227,6 +230,7 @@ int tcp_send(char *buf, int length) {
     tcp_command(TCP_CMD_SEND);
     // 送信の完了か，接続が切れるまで待つ
     while (1) {
+        // 割り込みの要因を読み出す
         interrupt = eth_read(TCP_IR);
         // 送信が完了すれば，次の送信で完了を判定できるよう要因を消して終える
         if ((interrupt & TCP_IR_SEND_OK) != 0) {
