@@ -1485,12 +1485,14 @@ module cpu_tb;
         expect_halt(2);
         expect_mem32(32'h100, 32'h1);
 
-        // r1・SPを書き換えてから，書き込み不可のPCへの書き込みで停止させる
+        // r1・SPを書き換えてから，書き込み不可のPCへの書き込みで停止させる．
+        // 同時実行したSPへの代入はその次のサイクルに書き込まれるため，書き込まれてから停止するようNOPをはさむ
         `BEGIN_TEST("停止するとレジスタが初期値へ戻り，リセットまで停止が続く");
-        run('{movi(1, 32'd5), movi(SP_ADDR, 32'h100), movi(PC_ADDR, 32'd0)});
-        // 停止した番地と，停止した時点のr1の値を確かめる
-        expect_halt(2);
+        run('{movi(1, 32'd5), movi(SP_ADDR, 32'h100), nop(), movi(PC_ADDR, 32'd0)});
+        // 停止した番地と，停止した時点のr1・SPの値を確かめる
+        expect_halt(3);
         expect_reg(1, 32'd5);
+        expect_reg(SP_ADDR, 32'h100);
         // 次のクロックまで進めてから，レジスタの値を写し取る
         @(posedge clk);
         #1;
