@@ -4,6 +4,7 @@
 #include "hex.pn"
 #include "sd.pn"
 #include "eth.pn"
+#include "tcp.pn"
 #include "fat.pn"
 #include "syscall_dispatch.pn"
 
@@ -24,6 +25,8 @@ const unsigned int NET_MAC_LOW = 0x00000001;      // MACアドレスの下位4�
 const unsigned int NET_IP_ADDRESS = 0xc0a80ac8;   // 自身のIPアドレス(192.168.10.200)
 const unsigned int NET_SUBNET_MASK = 0xffffff00;  // サブネットマスク(255.255.255.0)
 const unsigned int NET_GATEWAY = 0xc0a80a01;      // ゲートウェイのIPアドレス(192.168.10.1)
+const int NET_ECHO_PORT = 7;                      // tcpechoコマンドが待ち受けるポート番号(エコーサービスの標準のポート番号)
+const int NET_ECHO_BUFFER_SIZE = 64;              // tcpechoコマンドが1回に読み出して送り返すバイト数の上限
 
 char input[INPUT_SIZE];  // 1行分の入力バッファ
 char cmd[INPUT_SIZE];    // 入力の先頭トークン(コマンド名)
@@ -522,6 +525,64 @@ int handle_reboot(int pos) {
     return boot();
 }
 
+// tcpechoコマンド: TCPの接続を1つ受け付け，受信したデータをそのまま送り返す．相手が切断したら接続を閉じて終える
+// 待ち受け中と接続中は，この処理の中にとどまる(キー入力は，届くまで待つ方法でしか確かめられないため)
+int handle_tcpecho(int pos) {
+    char buf[NET_ECHO_BUFFER_SIZE];  // 受信したデータ
+    int length;                      // 受信したデータのバイト数
+    int status;                      // TCPの各関数の結果
+
+    // 引数を取らないコマンドのため，引数が指定されていれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return EXIT_FAILURE;
+    }
+    // 待ち受けを始める
+    status = tcp_listen(NET_ECHO_PORT);
+    // 起動時のネットワークの設定に失敗していれば，ネットワークを使えないことを出力する
+    if (status == TCP_ERR_NOT_READY) {
+        print_error("network is not available\n");
+        return EXIT_FAILURE;
+    }
+    // モジュールが待ち受けの状態にならなければ，待ち受けを始められないことを出力する
+    if (status != TCP_OK) {
+        print_error("cannot listen\n");
+        return EXIT_FAILURE;
+    }
+    // 待ち受けを始めたことを，ポート番号を添えて出力する
+    print("listening on port ");
+    print_decimal(NET_ECHO_PORT);
+    print("\n");
+
+    // 相手が接続するまで待つ
+    status = tcp_accept();
+    // 確立できれば，相手のIPアドレスを出力する
+    if (status == TCP_OK) {
+        print("connected from ");
+        print_ipv4(tcp_peer_address());
+        print("\n");
+    }
+    // 接続が閉じるまで，受信したデータをそのまま送り返す(確立の途中で相手が中断した場合は送り返さずに終える)
+    while (status == TCP_OK) {
+        // 受信したデータを読み出す
+        status = tcp_recv(buf, NET_ECHO_BUFFER_SIZE, &length);
+        // 読み出したデータがあれば送り返す
+        if (
+            // 接続が続いている
+            status == TCP_OK
+            // 1バイト以上読み出した
+            && length > 0
+        ) {
+            status = tcp_send(buf, length);
+        }
+    }
+    // 接続を閉じる
+    tcp_close();
+    // 閉じたことを出力する
+    print("disconnected\n");
+    return EXIT_SUCCESS;
+}
+
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 int handle_help(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
@@ -544,6 +605,7 @@ int handle_help(int pos) {
     print("cd\n");
     print("pwd\n");
     print("reboot\n");
+    print("tcpecho\n");
     return EXIT_SUCCESS;
 }
 
@@ -694,6 +756,8 @@ int dispatch(int pos) {
         return handle_pwd(pos);
     } else if (streq(cmd, "reboot")) {
         return handle_reboot(pos);
+    } else if (streq(cmd, "tcpecho")) {
+        return handle_tcpecho(pos);
     }
     return run_executable();
 }
