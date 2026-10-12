@@ -435,6 +435,20 @@ void print_banner(void) {
     console_print("   order out of chaos, on Qurge\n");
 }
 
+// OS名を出力し，直前の起動で失敗した項目ごとにやり直し方を伝える
+// 起動時に加え，TCPで新たに接続した相手にも使う(起動時の出力はPSへ出ており，相手は失敗を知らないため)
+void print_welcome(void) {
+    // OS名を出力する
+    print_banner();
+    // 失敗してもrebootでやり直せるよう，シェルはそのまま動かし，失敗したものごとにやり直し方を伝える
+    if (fat_mounted == 0) {
+        console_print("Storage is not available. Insert a card and run reboot.\n");
+    }
+    if (eth_ready == 0) {
+        console_print("Network is not available. Check the Ethernet module and run reboot.\n");
+    }
+}
+
 // OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，TCPの接続を閉じてからネットワークを設定して，OS名を出力する
 // 呼ぶたびにハードウェアの初期化からやり直すため，再起動にもそのまま使える．全て成功すればEXIT_SUCCESS，いずれかが失敗すればEXIT_FAILUREを返す
 int boot(void) {
@@ -447,15 +461,8 @@ int boot(void) {
     console_close();
     // SDカードとEthernetモジュールは互いに依存しないため，マウントの成否によらずネットワークを設定する
     networked = init_network();
-    // 成否によらずOS名を出力する
-    print_banner();
-    // 失敗してもrebootでやり直せるよう，シェルはそのまま起動し，失敗したものごとにやり直し方を伝える
-    if (mounted == 0) {
-        console_print("Storage is not available. Insert a card and run reboot.\n");
-    }
-    if (networked == 0) {
-        console_print("Network is not available. Check the Ethernet module and run reboot.\n");
-    }
+    // 成否によらずOS名を出力し，失敗した項目があればやり直し方を伝える
+    print_welcome();
     // いずれかが失敗していれば，起動の失敗とする
     if (
         // ファイルシステムをマウントできなかった
@@ -665,9 +672,9 @@ void main(void) {
     boot();
     // 1行受け取るごとに，先頭のトークンをコマンド名として取り出して処理を呼び出す
     while (1) {
-        // TCPの接続が無ければ受け付け，新たに接続した相手にはOS名を出力する
+        // TCPの接続が無ければ受け付け，新たに接続した相手にはOS名と起動に失敗した項目のやり直し方を出力する
         if (console_accept()) {
-            print_banner();
+            print_welcome();
         }
         // 受け取り先をプロンプトの出力より前に決める(出力中に接続が切れた場合に，PSからの入力を待ち続けないため)
         remote = console_connected;
