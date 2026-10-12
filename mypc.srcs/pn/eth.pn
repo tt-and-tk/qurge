@@ -70,12 +70,12 @@ unsigned char eth_spi_transfer(char data) {
 
 // 1つのSPIフレーム(OPコード・番地2バイト・データ1バイト)を送り，データの位置で受信した1バイトを返す
 // モジュールはCSnを下げてから上げるまでを1フレームとして扱うため，フレームごとにCSnを上げ下げする
-unsigned char eth_frame(int op, int addr, int data) {
+unsigned char eth_frame(char op, unsigned short addr, char data) {
     unsigned char received;  // データの位置で受信した1バイト
 
     // モジュールを選択する(CSnは次の転送の書き込みからピンに現れる)
     eth_csn = 0;
-    // OPコードに続けて，番地を上位バイトから送る(下位8ビット以外は引数の型が切り捨てる)
+    // OPコードに続けて，16ビットの番地を上位バイトから送る(1バイトを送る関数の引数がcharのため，下位8ビットだけが渡る)
     eth_spi_transfer(op);
     eth_spi_transfer(addr >> 8);
     eth_spi_transfer(addr);
@@ -88,19 +88,19 @@ unsigned char eth_frame(int op, int addr, int data) {
 }
 
 // 指定した番地のレジスタから1バイトを読み出す
-unsigned char eth_read(int addr) {
+unsigned char eth_read(unsigned short addr) {
     // 読み出しのフレームを送る．データの位置は受信だけを行うため0xffを送る
     return eth_frame(ETH_OP_READ, addr, 0xff);
 }
 
 // 指定した番地のレジスタへ1バイトを書き込む
-void eth_write(int addr, int value) {
+void eth_write(unsigned short addr, char value) {
     // 書き込みのフレームを送る(受信した値は使わない)
     eth_frame(ETH_OP_WRITE, addr, value);
 }
 
 // 値の下位の指定したバイト数(4以下)を，指定した番地から始まるレジスタへ上位バイトから順に書き込む
-void eth_write_bytes(int addr, unsigned int value, int length) {
+void eth_write_bytes(unsigned short addr, unsigned int value, int length) {
     // 上位のバイトから1バイトずつ取り出して書き込む
     for (int i = 0; i < length; i++) {
         eth_write(addr + i, value >> ((length - 1 - i) << 3));
@@ -108,7 +108,7 @@ void eth_write_bytes(int addr, unsigned int value, int length) {
 }
 
 // 指定した番地から始まる，指定したバイト数(4以下)のレジスタを読み出し，先頭を上位バイトとした値を返す
-unsigned int eth_read_bytes(int addr, int length) {
+unsigned int eth_read_bytes(unsigned short addr, int length) {
     unsigned int value = 0;  // 読み出したバイトを上位から順に組み立てる値
     // 1バイトずつ読み出し，下位へ積む
     for (int i = 0; i < length; i++) {
