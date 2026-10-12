@@ -77,9 +77,9 @@ unsigned char eth_frame(char op, unsigned short addr, char data) {
     eth_csn = 0;
     // OPコードを送る
     eth_spi_transfer(op);
-    // 16ビットの番地を上位バイトから送る(1バイトを送る関数は，渡した値の下位8ビットだけを受け取る)
+    // 16ビットの番地を上位バイトから送る
     eth_spi_transfer(addr >> 8);  // 上位バイト
-    eth_spi_transfer(addr);       // 下位バイト
+    eth_spi_transfer(addr);       // 下位バイト(1バイトを送る関数は，渡した値の下位8ビットだけを受け取る)
     // データを送り，同時に受信する
     received = eth_spi_transfer(data);
     // 選択を解除してSPIフレームを終える
