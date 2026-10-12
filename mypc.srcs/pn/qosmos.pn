@@ -567,7 +567,12 @@ int handle_tcpecho(int pos) {
         // 受信したデータを読み出す
         status = tcp_recv(buf, NET_ECHO_BUFFER_SIZE, &length);
         // 読み出したデータがあれば送り返す
-        if (status == TCP_OK && length > 0) {
+        if (
+            // 接続が続いている
+            status == TCP_OK
+            // 1バイト以上読み出した
+            && length > 0
+        ) {
             status = tcp_send(buf, length);
         }
     }
