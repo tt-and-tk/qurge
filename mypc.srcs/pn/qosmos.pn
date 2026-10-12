@@ -367,7 +367,7 @@ int init_storage(void) {
         return 0;
     }
     // 初期化できたカードのファイルシステムをマウントし，その成否を出力する
-    // print_errorを使わないのは，起動時はコマンド名が入っておらず，行もprint_errorのバッファに収まらないため
+    // コマンド名を前置するエラーの出力を使わないのは，起動時はコマンド名が入っていないため
     status = fat_mount();
     if (status != FAT_OK) {
         console_print("[FAIL] FAT32: mount: ");
