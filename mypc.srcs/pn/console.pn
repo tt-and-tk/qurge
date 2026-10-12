@@ -99,14 +99,9 @@ void console_write_ps(char *data, int length) {
     print(chunk);
 }
 
-// バイト列をコンソールへ出力する．TCPで接続していればその接続へ，していなければPSへ出す
-// 値0のバイトは出力しない．TCPへは，改行(LF)の直前が復帰(CR)でなければ復帰を補う(端末が改行だけでは行頭へ戻らないため)
-void console_write(char *data, int length) {
-    // 接続していなければPSへ出す
-    if (console_connected == 0) {
-        console_write_ps(data, length);
-        return;
-    }
+// バイト列を，TCPの接続へ送る出力に加える．途中で接続が切れれば，残りはPSを経由して出力する
+// 値0のバイトは出力しない．改行(LF)の直前が復帰(CR)でなければ復帰を補う(端末が改行だけでは行頭へ戻らないため)
+void console_write_tcp(char *data, int length) {
     // 1バイトずつ送る前の出力へ加える
     for (int i = 0; i < length; i++) {
         // 値0のバイトは加えない
@@ -130,6 +125,16 @@ void console_write(char *data, int length) {
         }
         // バイトを加える
         console_put(data[i]);
+    }
+}
+
+// バイト列をコンソールへ出力する．TCPで接続していればその接続へ，していなければPSへ出す
+void console_write(char *data, int length) {
+    // 接続していればTCPの接続へ，していなければPSへ出す
+    if (console_connected) {
+        console_write_tcp(data, length);
+    } else {
+        console_write_ps(data, length);
     }
 }
 
