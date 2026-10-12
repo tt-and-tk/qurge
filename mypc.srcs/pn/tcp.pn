@@ -125,7 +125,7 @@ int tcp_listen(int port) {
     tcp_command(TCP_CMD_OPEN);
     while (eth_read(TCP_SR) == TCP_SR_CLOSED) {
     }
-    // TCPで開いた状態になっていなければ，待ち受けを始められない
+    // TCPで開いた状態以外に変わった場合は，失敗とする
     if (eth_read(TCP_SR) != TCP_SR_INIT) {
         return TCP_ERR_SOCKET;
     }
@@ -133,7 +133,7 @@ int tcp_listen(int port) {
     tcp_command(TCP_CMD_LISTEN);
     while (eth_read(TCP_SR) == TCP_SR_INIT) {
     }
-    // 待ち受けの状態になっていなければ，待ち受けを始められない
+    // 待ち受けの状態以外に変わった場合は，失敗とする
     if (eth_read(TCP_SR) != TCP_SR_LISTEN) {
         return TCP_ERR_SOCKET;
     }
