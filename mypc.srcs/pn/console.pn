@@ -8,6 +8,7 @@ const int CONSOLE_PORT = 23;            // 接続を待ち受けるポート番�
 const int CONSOLE_OUTPUT_SIZE = 256;    // TCPへ送る前の出力をためるバッファのバイト数
 const int CONSOLE_INPUT_SIZE = 64;      // TCPから受信したデータを置くバッファのバイト数
 const int CONSOLE_PS_CHUNK_SIZE = 32;   // PSへ出力する一時バッファの要素数(ヌル終端の分を含む)
+const int CONSOLE_DECIMAL_SIZE = 12;    // 10進数を出力する一時バッファの要素数(intで最も長い"-2147483648"とヌル終端の分)
 
 // 1行の編集に使う文字コード
 const int CONSOLE_BS = 0x08;   // BS(バックスペース)
@@ -134,6 +135,40 @@ void console_print(char *text) {
     console_write(text, length);
 }
 
+// valueを符号付きの10進数でコンソールへ出力する(改行は付けない)
+void console_print_decimal(int value) {
+    char text[CONSOLE_DECIMAL_SIZE];          // 出力する文字列
+    char reversed[CONSOLE_DECIMAL_SIZE];      // 数字を下の桁から順に並べたもの
+    unsigned int rest = (unsigned int)value;  // まだ数字にしていない上位の桁の値
+    int count = 0;                            // reversedに並べた桁数
+    int length = 0;                           // textに書いた文字数
+
+    // 負の数は符号を書き，符号なしのまま反転して絶対値にする(intの最小値を符号付きで反転すると桁あふれするため)
+    if (value < 0) {
+        text[length] = '-';
+        length++;
+        rest = 0 - rest;
+    }
+    // 下の桁から1桁ずつ数字にする(値が0でも1桁は出力するため，判定は1桁作った後に行う)
+    while (1) {
+        reversed[count] = '0' + rest % 10;
+        count++;
+        rest = rest / 10;
+        if (rest == 0) {
+            break;
+        }
+    }
+    // 上の桁から順になるよう並べ直す
+    while (count > 0) {
+        count--;
+        text[length] = reversed[count];
+        length++;
+    }
+    // 終端して出力する
+    text[length] = '\0';
+    console_print(text);
+}
+
 // TCPの接続が無ければ，待ち受けて相手が接続するまで待つ
 // 起動時のネットワークの設定に失敗しているか待ち受けを始められなければ，接続せずに戻る(入出力はPSを経由する)
 // 戻り値: 1(新たに接続した) / 0(既に接続しているか，接続せずに戻った)
@@ -152,13 +187,15 @@ int console_accept(void) {
         if (status == TCP_ERR_NOT_READY) {
             return 0;
         }
-        // モジュールが待ち受けの状態にならなければ，そのことをPSへ出力して，PSを経由する
+        // モジュールが待ち受けの状態にならなければ，そのことを出力して(接続していないためPSへ出る)，PSを経由する
         if (status != TCP_OK) {
-            print("console: cannot listen\n");
+            console_print("console: cannot listen\n");
             return 0;
         }
-        // 待ち受けを始めたことを，PSへポート番号を添えて出力する(番号は待ち受けるポート番号の定数と揃える)
-        print("listening on port 23\n");
+        // 待ち受けを始めたことを，ポート番号を添えて出力する(接続していないためPSへ出る)
+        console_print("listening on port ");
+        console_print_decimal(CONSOLE_PORT);
+        console_print("\n");
         // 相手が接続するまで待ち，確立すれば待ち受けを終える(確立の途中で相手が中断すれば，待ち受けからやり直す)
         if (tcp_accept() == TCP_OK) {
             break;

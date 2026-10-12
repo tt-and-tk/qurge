@@ -15,7 +15,6 @@ const int CODE_SIZE = SYSCALL_ENTRY_ADDRESS - CODE_ADDRESS;  // 読み込める�
 const int CODE_PC = 0x4000;         // メモリの後半の先頭の命令を指すPC(実行ファイルを呼び出す先)
 const int INSTRUCTION_SIZE = 8;     // 1命令のバイト数(実行ファイルの大きさはこの倍数になる)
 const int ARGV_SIZE = INPUT_SIZE / 2 + 1;  // 実行ファイルへ渡すargvの要素数(1行から取り出せる引数の最大数と，末尾のnullptrの分)
-const int DECIMAL_TEXT_SIZE = 12;   // 10進数を出力する一時バッファの要素数(intで最も長い"-2147483648"とヌル終端の分)
 const int EXIT_SUCCESS = 0;         // 組み込みコマンドが成功した場合の終了状態
 const int EXIT_FAILURE = 1;         // 組み込みコマンドがエラーになった場合と，実行ファイルを実行できなかった場合の終了状態
 
@@ -42,40 +41,6 @@ void print_error(char *msg) {
     // 前置きに続けてメッセージを出力する
     print_error_head();
     console_print(msg);
-}
-
-// valueを符号付きの10進数で出力する(改行は付けない)
-void print_decimal(int value) {
-    char text[DECIMAL_TEXT_SIZE];             // 出力する文字列
-    char reversed[DECIMAL_TEXT_SIZE];         // 数字を下の桁から順に並べたもの
-    unsigned int rest = (unsigned int)value;  // まだ数字にしていない上位の桁の値
-    int count = 0;                            // reversedに並べた桁数
-    int length = 0;                           // textに書いた文字数
-
-    // 負の数は符号を書き，符号なしのまま反転して絶対値にする(intの最小値を符号付きで反転すると桁あふれするため)
-    if (value < 0) {
-        text[length] = '-';
-        length++;
-        rest = 0 - rest;
-    }
-    // 下の桁から1桁ずつ数字にする(値が0でも1桁は出力するため，判定は1桁作った後に行う)
-    while (1) {
-        reversed[count] = '0' + rest % 10;
-        count++;
-        rest = rest / 10;
-        if (rest == 0) {
-            break;
-        }
-    }
-    // 上の桁から順になるよう並べ直す
-    while (count > 0) {
-        count--;
-        text[length] = reversed[count];
-        length++;
-    }
-    // 終端して出力する
-    text[length] = '\0';
-    console_print(text);
 }
 
 // FAT32の各関数が返した失敗を，実行中のコマンドのエラーとして出力する
@@ -417,7 +382,7 @@ int init_storage(void) {
 void print_ipv4(unsigned int address) {
     // 上位のバイトから順に10進数で出力し，間を'.'で区切る
     for (int i = 3; i >= 0; i--) {
-        print_decimal((address >> (i << 3)) & 0xff);
+        console_print_decimal((address >> (i << 3)) & 0xff);
         // 最後のバイトの後には区切りを付けない
         if (i > 0) {
             console_print(".");
@@ -548,7 +513,7 @@ int handle_status(int pos) {
         return exit_status;
     }
     // 終了状態を1行で出力する
-    print_decimal(exit_status);
+    console_print_decimal(exit_status);
     console_print("\n");
     return exit_status;
 }
