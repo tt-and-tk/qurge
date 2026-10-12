@@ -130,6 +130,7 @@ void console_write_tcp(char *data, int length) {
 }
 
 // バイト列をコンソールへ出力する．TCPで接続していればその接続へ，していなければPSへ出す
+// どちらへ出す場合も値0のバイトは出力しない．TCPへは改行の前に復帰を補う
 void console_write(char *data, int length) {
     // 接続していればTCPの接続へ，していなければPSへ出す
     if (console_connected) {
