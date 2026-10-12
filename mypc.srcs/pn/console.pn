@@ -122,7 +122,7 @@ void console_write(char *data, int length) {
     }
 }
 
-// ヌル終端の文字列をコンソールへ出力する(出力先と変換はconsole_writeと同じ)
+// ヌル終端の文字列をコンソールへ出力する(出力先と変換は，バイト列を出力する場合と同じ)
 void console_print(char *text) {
     int length = 0;  // 文字列のバイト数
 
