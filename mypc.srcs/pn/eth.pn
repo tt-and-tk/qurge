@@ -47,12 +47,13 @@ void eth_output_control(void) {
 unsigned char eth_spi_transfer(char data) {
     // ETH_SPIのビット割り当て(bit5:SCK / bit4:MISO(入力) / bit3:MOSI / bit2:CSn / bit1:RSTn / bit0:INTn(入力))
 
-    unsigned char received = 0;                  // MISOから上位ビット順に組み立てる受信バイト
+    unsigned char received = 0;                   // MISOから上位ビット順に組み立てる受信バイト
     int held = (eth_csn << 2) | (eth_rstn << 1);  // 転送の間変えないCSnとRSTnの出力
-    int level;                                   // CSnとRSTnの出力にMOSIを加えたETH_SPIへの書き込み値(SCKはLow)
+    int level;                                    // CSnとRSTnの出力にMOSIを加えたETH_SPIへの書き込み値(SCKはLow)
 
+    // 1ビットずつSCKを1周期動かして，送信と受信を8ビット分行う(SPI上の送信順は上位ビットから)
     for (int i = 7; i >= 0; i--) {
-        // SPI上の送信順は上位ビットからのため，iビット目を取り出してMOSI(bit3)へ置く
+        // iビット目を取り出してMOSI(bit3)へ置く
         level = held | (((data >> i) & 1) << 3);
         // SCKをLowに保ったままMOSIを確定させる．モジュールはこの立ち下がりでMISOへ次のビットを載せる
         ETH_SPI = level;
@@ -122,14 +123,16 @@ unsigned int eth_read_bytes(unsigned short addr, int length) {
 int eth_reset(void) {
     // 前の処理の途中で止まっていてもフレームの途中にならないよう，選択を解除しておく
     eth_csn = 1;
-    // RSTnをLowにしてリセットを始め，データシートの定める時間以上保つ
+    // RSTnをLowにしてリセットを始める
     eth_rstn = 0;
     eth_output_control();
+    // 何もしないループを回し，RSTnをLowのままデータシートの定める時間以上保つ
     for (int i = 0; i < ETH_RESET_HOLD_LOOPS; i++) {
     }
-    // RSTnをHighへ戻してリセットを終え，内部のクロックが安定するまでデータシートの定める時間以上待つ
+    // RSTnをHighへ戻してリセットを終える
     eth_rstn = 1;
     eth_output_control();
+    // 何もしないループを回し，内部のクロックが安定するまでデータシートの定める時間以上待つ
     for (int i = 0; i < ETH_RESET_WAIT_LOOPS; i++) {
     }
     // 動き出したモジュールのバージョンを読み出す
