@@ -110,7 +110,7 @@ int tcp_connected(void) {
 // 指定したポート番号で接続の待ち受けを始める．前の接続が残っていれば閉じてから始める
 // 戻り値: TCP_OK / TCP_ERR_NOT_READY / TCP_ERR_SOCKET
 int tcp_listen(int port) {
-    // モジュールが応答しない状態でコマンドを書くと受け付けを待ち続けるため，設定に成功していなければ何もしない
+    // モジュールが応答しない状態でコマンドを書くと受け付けを待ち続けるため，設定に成功した場合に限りソケットを操作する
     if (eth_ready == 0) {
         return TCP_ERR_NOT_READY;
     }
@@ -162,7 +162,7 @@ unsigned int tcp_peer_address(void) {
 }
 
 // 受信したデータを，指定したバイト数まで配列へ読み出し，読み出したバイト数を指定した変数へ書き込む
-// 受信したデータが無ければ待たずに0バイトとして返す
+// 受信したデータが無ければ，すぐに0バイトとして返す
 // 戻り値: TCP_OK / TCP_CLOSED(受信したデータを全て読み出し終えており，相手が切断したか接続が切れた)
 int tcp_recv(char *buf, int size, int *length) {
     unsigned int received;  // 受信バッファに溜まったバイト数
@@ -208,7 +208,7 @@ int tcp_send(char *buf, int length) {
     unsigned int position;  // 送信バッファの書き込み位置
     int interrupt;          // 割り込みの要因
 
-    // 送信バッファより長いデータは空きが足りることが無く待ち続けるため，送信しない
+    // 送信バッファより長いデータは，空きを待っても送れないため，待つ前に失敗とする
     if (length > TCP_BUFFER_SIZE) {
         return TCP_ERR_TOO_LONG;
     }
