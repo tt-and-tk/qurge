@@ -176,6 +176,7 @@ int tcp_recv(char *buf, int size, int *length) {
         }
         // 溜まったバイト数を読んでから状態を読むまでに，相手がデータに続けて切断を送った場合に取りこぼさないよう，もう一度読む
         received = tcp_read_word(TCP_RX_RSR);
+        // 読み直してもデータが無ければ，全て読み出し終えて接続が閉じている
         if (received == 0) {
             return TCP_CLOSED;
         }
@@ -189,9 +190,11 @@ int tcp_recv(char *buf, int size, int *length) {
     for (int i = 0; i < received; i++) {
         buf[i] = eth_read(TCP_RX_BASE + ((position + i) & TCP_BUFFER_MASK));
     }
-    // 読み出し位置を進め，読み終えたことをモジュールへ伝える(受信バッファの空きとして次の受信に使われる)
+    // 読み出し位置を読み出した分だけ進める
     eth_write_bytes(TCP_RX_RD, position + received, 2);
+    // 読み終えたことをモジュールへ伝える(読み出した分は受信バッファの空きとして次の受信に使われる)
     tcp_command(TCP_CMD_RECV);
+    // 読み出したバイト数を呼び出し元へ渡す
     *length = received;
     return TCP_OK;
 }
@@ -218,8 +221,9 @@ int tcp_send(char *buf, int length) {
     for (int i = 0; i < length; i++) {
         eth_write(TCP_TX_BASE + ((position + i) & TCP_BUFFER_MASK), buf[i]);
     }
-    // 書き込み位置を進め，そこまでの送信を指示する
+    // 書き込み位置を書き込んだ分だけ進める
     eth_write_bytes(TCP_TX_WR, position + length, 2);
+    // 書き込み位置までの送信を指示する
     tcp_command(TCP_CMD_SEND);
     // 送信の完了か，接続が切れるまで待つ
     while (1) {
@@ -243,9 +247,11 @@ int tcp_send(char *buf, int length) {
 
 // 接続を閉じる．接続していれば相手へ切断を伝え，相手の応答か再送のタイムアウトを待ってから閉じる
 void tcp_close(void) {
-    // 接続していれば，相手へ切断を伝えて閉じた状態になるまで待つ(相手が応答しなくても再送のタイムアウトで閉じた状態になる)
+    // 接続していれば，相手へ切断を伝えてから閉じる
     if (tcp_connected()) {
+        // 相手へ切断を伝える
         tcp_command(TCP_CMD_DISCON);
+        // 相手の応答を受けて閉じた状態になるまで待つ(相手が応答しない場合も，再送のタイムアウトで閉じた状態になる)
         while (eth_read(TCP_SR) != TCP_SR_CLOSED) {
         }
     }

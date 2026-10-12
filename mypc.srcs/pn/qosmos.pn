@@ -537,22 +537,26 @@ int handle_tcpecho(int pos) {
         print_error("too many arguments\n");
         return EXIT_FAILURE;
     }
-    // 待ち受けを始め，失敗すればその理由を出力する
+    // 待ち受けを始める
     status = tcp_listen(NET_ECHO_PORT);
+    // 起動時のネットワークの設定に失敗していれば，ネットワークを使えないことを出力する
     if (status == TCP_ERR_NOT_READY) {
         print_error("network is not available\n");
         return EXIT_FAILURE;
     }
+    // モジュールが待ち受けの状態にならなければ，待ち受けを始められないことを出力する
     if (status != TCP_OK) {
         print_error("cannot listen\n");
         return EXIT_FAILURE;
     }
+    // 待ち受けを始めたことを，ポート番号を添えて出力する
     print("listening on port ");
     print_decimal(NET_ECHO_PORT);
     print("\n");
 
-    // 相手が接続するまで待ち，確立できれば相手のIPアドレスを出力する
+    // 相手が接続するまで待つ
     status = tcp_accept();
+    // 確立できれば，相手のIPアドレスを出力する
     if (status == TCP_OK) {
         print("connected from ");
         print_ipv4(tcp_peer_address());
@@ -567,8 +571,9 @@ int handle_tcpecho(int pos) {
             status = tcp_send(buf, length);
         }
     }
-    // 接続を閉じ，閉じたことを出力する
+    // 接続を閉じる
     tcp_close();
+    // 閉じたことを出力する
     print("disconnected\n");
     return EXIT_SUCCESS;
 }
