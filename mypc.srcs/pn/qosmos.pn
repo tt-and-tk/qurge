@@ -456,7 +456,7 @@ int init_network(void) {
     }
     print("[ OK ] Ethernet: reset\n");
 
-    // ネットワークの設定を書き込み，読み戻した値が一致するかを確かめる
+    // ネットワークの設定を書き込み，読み出した値が書き込んだとおりかを確かめる
     if (eth_configure(NET_MAC_HIGH, NET_MAC_LOW, NET_IP_ADDRESS, NET_SUBNET_MASK, NET_GATEWAY) == 0) {
         print("[FAIL] Ethernet: network settings: mismatch\n");
         return 0;

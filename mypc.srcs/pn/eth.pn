@@ -142,7 +142,7 @@ int eth_reset(void) {
 
 // MACアドレス・IPアドレス・サブネットマスク・ゲートウェイを書き込み，読み出して書き込んだとおりかを確かめる
 // MACアドレスは6バイトを1つの値に収められないため，上位2バイト(mac_high)と下位4バイト(mac_low)に分けて渡す
-// 戻り値: 1(全て書き込んだ値のとおり) / 0(読み戻した値が1つでも異なる)
+// 戻り値: 1(全て書き込んだ値のとおり) / 0(読み出した値が1つでも異なる)
 int eth_configure(unsigned int mac_high, unsigned int mac_low, unsigned int ip, unsigned int subnet, unsigned int gateway) {
     // 各レジスタへ書き込む
     eth_write_bytes(ETH_SHAR, mac_high, 2);     // MACアドレスの上位
