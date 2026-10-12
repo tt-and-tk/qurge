@@ -1,0 +1,281 @@
+// シェルの入出力(以下コンソール)を担う関数群．TCPで接続した相手がいればその接続で，いなければPS(ARM)を経由して入出力する
+// TCPの接続では，打った文字の表示(エコー)と1行の編集をこのファイルで行う．PSを経由する場合は，エコーをPS側のプログラムが，編集を組み込み関数scanが行う
+// SCAN命令は入力が届くまで戻らず，PSからの入力とTCPの受信を同時には待てないため，入力はどちらか一方から受け取る
+#pragma once
+#include "tcp.pn"
+
+const int CONSOLE_PORT = 23;            // 接続を待ち受けるポート番号(telnetの標準のポート番号)
+const int CONSOLE_OUTPUT_SIZE = 256;    // TCPへ送る前の出力をためるバッファのバイト数
+const int CONSOLE_INPUT_SIZE = 64;      // TCPから受信したデータを置くバッファのバイト数
+const int CONSOLE_PS_CHUNK_SIZE = 32;   // PSへ出力する一時バッファの要素数(ヌル終端の分を含む)
+
+// 1行の編集に使う文字コード
+const int CONSOLE_BS = 0x08;   // BS(バックスペース)
+const int CONSOLE_DEL = 0x7f;  // DEL(バックスペースキーでBSの代わりに送られることがある)
+
+int console_connected = 0;                // TCPで相手と接続しているか(0:していない，1:している)
+char console_output[CONSOLE_OUTPUT_SIZE]; // TCPへ送る前の出力
+int console_output_length = 0;            // 送る前の出力のバイト数
+int console_last_output = 0;              // TCPへ最後に出力した文字(改行の前に復帰を補うかの判断に使う)
+char console_input[CONSOLE_INPUT_SIZE];   // TCPから受信したデータ
+int console_input_length = 0;             // 受信したデータのバイト数
+int console_input_position = 0;           // 受信したデータのうち，次に処理する位置
+int console_after_cr = 0;                 // 直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
+
+// TCPの接続を閉じ，以降の入出力をPSへ切り替える．送る前の出力と処理する前の受信データは捨てる
+void console_disconnect(void) {
+    // 接続を閉じる
+    tcp_close();
+    // 接続していない状態へ戻す
+    console_connected = 0;
+    // 次の接続へ持ち越さないよう，送る前の出力と受信したデータを捨てる
+    console_output_length = 0;
+    console_input_length = 0;
+    console_input_position = 0;
+    console_after_cr = 0;
+}
+
+// ためた出力をTCPの接続へ送る．送れなければ接続を閉じる
+// 送信は1回ごとに完了を待つため，出力のたびに送らず，ためてまとめて送る
+void console_flush(void) {
+    int status;  // 送信の結果
+
+    // 送るものが無ければ何もしない
+    if (console_output_length == 0) {
+        return;
+    }
+    // ためた出力を送る
+    status = tcp_send(console_output, console_output_length);
+    // 送ったものは捨てる
+    console_output_length = 0;
+    // 送れなければ相手との接続が切れているため，接続を閉じる
+    if (status != TCP_OK) {
+        console_disconnect();
+    }
+}
+
+// TCPへ送る出力の末尾に1文字加える．バッファが満杯になれば送る
+void console_put(int c) {
+    // バッファの末尾に加える
+    console_output[console_output_length] = c;
+    console_output_length++;
+    // 改行の前に復帰を補うかの判断に使うため，加えた文字を控える
+    console_last_output = c;
+    // 満杯になれば送る
+    if (console_output_length == CONSOLE_OUTPUT_SIZE) {
+        console_flush();
+    }
+}
+
+// バイト列を，PSを経由して出力する
+// 値0のバイトは，printがヌル終端とみなすため出力しない
+void console_write_ps(char *data, int length) {
+    char chunk[CONSOLE_PS_CHUNK_SIZE];  // printへ渡す一時バッファ(printは配列変数のみ受け付けるため)
+    int count = 0;                      // 一時バッファに写したバイト数
+
+    // 値0以外のバイトを一時バッファへ写し，満杯になるたびに出力する
+    for (int i = 0; i < length; i++) {
+        // 値0のバイトは写さない
+        if (data[i] == '\0') {
+            continue;
+        }
+        // 一時バッファへ写す
+        chunk[count] = data[i];
+        count++;
+        // ヌル終端の分を残して満杯になれば，終端して出力する
+        if (count == CONSOLE_PS_CHUNK_SIZE - 1) {
+            chunk[count] = '\0';
+            print(chunk);
+            count = 0;
+        }
+    }
+    // 一時バッファに残った分を終端して出力する
+    chunk[count] = '\0';
+    print(chunk);
+}
+
+// バイト列をコンソールへ出力する．TCPで接続していればその接続へ，していなければPSへ出す
+// 値0のバイトは出力しない．TCPへは，改行(LF)の直前が復帰(CR)でなければ復帰を補う(端末が改行だけでは行頭へ戻らないため)
+void console_write(char *data, int length) {
+    // 接続していなければPSへ出す
+    if (console_connected == 0) {
+        console_write_ps(data, length);
+        return;
+    }
+    // 1バイトずつ送る前の出力へ加える
+    for (int i = 0; i < length; i++) {
+        // 途中で接続が切れれば，残りはPSへ出す
+        if (console_connected == 0) {
+            console_write_ps(data + i, length - i);
+            return;
+        }
+        // 値0のバイトは加えない
+        if (data[i] == '\0') {
+            continue;
+        }
+        // 改行の直前が復帰でなければ，復帰を補う
+        if (data[i] == '\n' && console_last_output != '\r') {
+            console_put('\r');
+        }
+        // バイトを加える
+        console_put(data[i]);
+    }
+}
+
+// ヌル終端の文字列をコンソールへ出力する(出力先と変換はconsole_writeと同じ)
+void console_print(char *text) {
+    int length = 0;  // 文字列のバイト数
+
+    // ヌル終端までのバイト数を数える
+    while (text[length] != '\0') {
+        length++;
+    }
+    // 数えたバイト数を出力する
+    console_write(text, length);
+}
+
+// TCPの接続が無ければ，待ち受けて相手が接続するまで待つ
+// 起動時のネットワークの設定に失敗しているか待ち受けを始められなければ，接続せずに戻る(入出力はPSを経由する)
+// 戻り値: 1(新たに接続した) / 0(既に接続しているか，接続せずに戻った)
+int console_accept(void) {
+    int status;  // TCPの各関数の結果
+
+    // 既に接続していれば何もしない
+    if (console_connected) {
+        return 0;
+    }
+    // 相手との接続が確立するまで，待ち受けを繰り返す
+    while (1) {
+        // 待ち受けを始める
+        status = tcp_listen(CONSOLE_PORT);
+        // ネットワークを使えなければ，PSを経由する
+        if (status == TCP_ERR_NOT_READY) {
+            return 0;
+        }
+        // モジュールが待ち受けの状態にならなければ，そのことをPSへ出力して，PSを経由する
+        if (status != TCP_OK) {
+            print("console: cannot listen\n");
+            return 0;
+        }
+        // 待ち受けを始めたことを，PSへポート番号を添えて出力する(番号は待ち受けるポート番号の定数と揃える)
+        print("listening on port 23\n");
+        // 相手が接続するまで待ち，確立すれば待ち受けを終える(確立の途中で相手が中断すれば，待ち受けからやり直す)
+        if (tcp_accept() == TCP_OK) {
+            break;
+        }
+    }
+    // 以降の入出力をTCPの接続へ切り替える
+    console_connected = 1;
+    // 新しい接続では，改行の前の復帰を直前の出力によらず補うようにする
+    console_last_output = 0;
+    return 1;
+}
+
+// ためた出力を送ってから，TCPの接続を閉じる．接続していなければ何もしない
+void console_close(void) {
+    // 接続していなければ何もしない
+    if (console_connected == 0) {
+        return;
+    }
+    // ためた出力を送る(送れなければ，この中で接続が閉じる)
+    console_flush();
+    // まだ接続していれば閉じる
+    if (console_connected) {
+        console_disconnect();
+    }
+}
+
+// TCPの接続から1文字受け取る．受信したデータを処理し終えていれば，次のデータが届くまで待つ
+// 戻り値: 受け取った文字の値(0〜255) / -1(接続が閉じた)
+int console_receive_char(void) {
+    int status;  // 受信の結果
+    int c;       // 受け取った文字の値
+
+    // 受信したデータを処理し終えていれば，次のデータが届くまで受信を繰り返す
+    while (console_input_position == console_input_length) {
+        // 相手が待たずに済むよう，待つ前にエコーなどのためた出力を送る
+        console_flush();
+        // 送れずに接続が閉じていれば，受け取れない
+        if (console_connected == 0) {
+            return -1;
+        }
+        // 受信したデータを読み出す(届いていなければ0バイトになり，読み出し直す)
+        status = tcp_recv(console_input, CONSOLE_INPUT_SIZE, &console_input_length);
+        // 読み出したデータの先頭から処理する
+        console_input_position = 0;
+        // 相手が切断したか接続が切れていれば，接続を閉じる
+        if (status != TCP_OK) {
+            console_disconnect();
+            return -1;
+        }
+    }
+    // 次の1文字を取り出す(符号付きのcharで負になる0x80以上の値を，0〜255として扱う)
+    c = console_input[console_input_position] & 0xff;
+    console_input_position++;
+    return c;
+}
+
+// TCPの接続から改行までの1行を受け取り，ヌル終端付きで配列へ格納する．受け取った文字のエコーと1行の編集を行う
+// - 復帰(CR)か改行(LF)で行を確定する．復帰の直後のLF・NULは，同じ改行の一部として読み捨てる
+// - BSとDELは，格納した直前の1文字を取り消し，画面からも消す(格納した文字が無ければ何もしない)
+// - 印字可能な文字とタブを格納する．配列の要素数-1文字を超える分と，それ以外の文字は捨てる
+// 戻り値: 1(1行を受け取った) / 0(途中で接続が閉じた．配列の内容は不定)
+int console_read_line(char *buf, int size) {
+    int length = 0;  // 格納した文字数
+    int c;           // 受け取った文字の値
+
+    // 行が確定するまで，1文字ずつ受け取って処理する
+    while (1) {
+        // 1文字受け取る
+        c = console_receive_char();
+        // 接続が閉じていれば，受け取れない
+        if (c < 0) {
+            return 0;
+        }
+        // 復帰の直後のLF・NULは読み捨てる
+        if (
+            // 直前に受け取った文字が復帰である
+            console_after_cr
+            // 改行かNULである
+            && (c == '\n' || c == '\0')
+        ) {
+            console_after_cr = 0;
+            continue;
+        }
+        // 次の文字を読み捨てるかの判断に使うため，受け取った文字が復帰かを控える
+        console_after_cr = (c == '\r');
+        // 復帰か改行であれば，終端して行を確定する
+        if (c == '\r' || c == '\n') {
+            buf[length] = '\0';
+            // 次の出力が次の行から始まるよう，改行をエコーする
+            console_print("\n");
+            return 1;
+        }
+        // BSかDELであれば，直前の1文字を取り消す
+        if (c == CONSOLE_BS || c == CONSOLE_DEL) {
+            // 格納した文字が無ければ何もしない
+            if (length > 0) {
+                length--;
+                // カーソルを1つ戻し，空白で上書きして，もう1つ戻すことで画面から消す
+                console_put(CONSOLE_BS);
+                console_put(' ');
+                console_put(CONSOLE_BS);
+            }
+            continue;
+        }
+        // 格納する文字かを判定する
+        if (
+            // 印字可能な文字である
+            (c >= ' ' && c < CONSOLE_DEL)
+            // タブである
+            || c == '\t'
+        ) {
+            // ヌル終端の分を残して空きがあれば，格納してエコーする
+            if (length < size - 1) {
+                buf[length] = c;
+                length++;
+                console_put(c);
+            }
+        }
+    }
+}

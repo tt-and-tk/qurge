@@ -42,6 +42,7 @@
 // MBR・ブートセクタ・FSInfoセクタは，決まった位置に決まった値(署名)を持つ．署名は，読んだセクタが目的の管理情報であることを確かめるために使う．
 // MBRとブートセクタの末尾の2バイトにある署名(0x55，0xaa)をブート署名と呼ぶ
 #pragma once
+#include "console.pn"
 #include "sd.pn"
 
 // 各関数の戻り値
@@ -1630,52 +1631,52 @@ void fat_print_error(int status) {
     // 戻り値ごとに決めたメッセージを出力する(想定外の値もメッセージ無しにはしない)
     switch (status) {
     case FAT_ERR_INIT:
-        print("card not initialized\n");
+        console_print("card not initialized\n");
         break;
     case FAT_ERR_READ:
-        print("cannot read card\n");
+        console_print("cannot read card\n");
         break;
     case FAT_ERR_NOT_FAT32:
-        print("no FAT32 file system\n");
+        console_print("no FAT32 file system\n");
         break;
     case FAT_ERR_BROKEN:
-        print("broken file system\n");
+        console_print("broken file system\n");
         break;
     case FAT_ERR_NOT_MOUNTED:
-        print("not mounted\n");
+        console_print("not mounted\n");
         break;
     case FAT_ERR_BAD_NAME:
-        print("invalid file name\n");
+        console_print("invalid file name\n");
         break;
     case FAT_ERR_NOT_FOUND:
-        print("no such file or directory\n");
+        console_print("no such file or directory\n");
         break;
     case FAT_ERR_IS_DIR:
-        print("is a directory\n");
+        console_print("is a directory\n");
         break;
     case FAT_ERR_WRITE:
-        print("cannot write card\n");
+        console_print("cannot write card\n");
         break;
     case FAT_ERR_FULL:
-        print("no space left\n");
+        console_print("no space left\n");
         break;
     case FAT_ERR_EXISTS:
-        print("file exists\n");
+        console_print("file exists\n");
         break;
     case FAT_ERR_NOT_DIR:
-        print("not a directory\n");
+        console_print("not a directory\n");
         break;
     case FAT_ERR_NOT_EMPTY:
-        print("directory not empty\n");
+        console_print("directory not empty\n");
         break;
     case FAT_ERR_PATH_TOO_LONG:
-        print("path too long\n");
+        console_print("path too long\n");
         break;
     case FAT_ERR_TOO_LARGE:
-        print("file too large\n");
+        console_print("file too large\n");
         break;
     default:
-        print("unexpected error\n");
+        console_print("unexpected error\n");
         break;
     }
 }
