@@ -1,0 +1,236 @@
+// Ethernetモジュール(W5100S)のTCPの機能を使い，接続の待ち受け・受け付け・送受信・切断を行う関数群(OSのソケットに相当する)
+// 同時に扱う接続は1つで，モジュールのソケット0だけを使う．画面への出力は行わない(結果の伝え方は呼び出し元が決める)
+//
+// W5100Sは，TCPの処理(接続の確立・再送・切断)をチップ内部で行い，その状態と送受信のデータをソケットごとのレジスタとバッファに置く
+// CPUはレジスタへコマンドを書き込んで操作を指示し，状態のレジスタを繰り返し読んで変化を待つ(INTnによる割り込みは使わない)
+// 送受信のデータは，ソケットごとに2KBずつ割り当てられたリングバッファに置かれ，書き込み位置と読み出し位置のレジスタで管理する
+#pragma once
+#include "eth.pn"
+
+// 各関数の結果
+const int TCP_OK = 0;             // 成功
+const int TCP_CLOSED = 1;         // 接続が閉じた(相手の切断・再送のタイムアウトなど)
+const int TCP_ERR_NOT_READY = 2;  // 起動時のネットワークの設定に成功していない
+const int TCP_ERR_SOCKET = 3;     // ソケットを待ち受けの状態にできない
+const int TCP_ERR_TOO_LONG = 4;   // 送信するデータが送信バッファより長い
+
+// ソケット0のレジスタの番地(複数バイトのものは先頭の番地で，値は上位バイトから順に並ぶ)
+const int TCP_MR = 0x0400;      // モード(1バイト)
+const int TCP_CR = 0x0401;      // コマンド(1バイト．書き込むと実行し，受け付けると0に戻る)
+const int TCP_IR = 0x0402;      // 割り込みの要因(1バイト．立ったビットは1を書き込むと消える)
+const int TCP_SR = 0x0403;      // 状態(1バイト)
+const int TCP_PORT = 0x0404;    // 自身のポート番号(2バイト)
+const int TCP_DIPR = 0x040c;    // 相手のIPアドレス(4バイト)
+const int TCP_TX_FSR = 0x0420;  // 送信バッファの空きバイト数(2バイト)
+const int TCP_TX_WR = 0x0424;   // 送信バッファの書き込み位置(2バイト)
+const int TCP_RX_RSR = 0x0426;  // 受信バッファに溜まったバイト数(2バイト)
+const int TCP_RX_RD = 0x0428;   // 受信バッファの読み出し位置(2バイト)
+
+// ソケット0の送受信バッファ
+// 書き込み位置・読み出し位置は16ビットで進み続けるため，バッファの大きさで割った余りをバッファ内の位置とする
+const int TCP_TX_BASE = 0x4000;     // 送信バッファの先頭の番地
+const int TCP_RX_BASE = 0x6000;     // 受信バッファの先頭の番地
+const int TCP_BUFFER_SIZE = 2048;   // 送信・受信バッファそれぞれのバイト数
+const int TCP_BUFFER_MASK = 0x07ff; // 位置からバッファ内の位置を取り出すマスク(バッファのバイト数-1)
+
+// モードのレジスタへ書き込む値
+const int TCP_MODE_TCP = 0x01;  // TCPで通信する
+
+// コマンドのレジスタへ書き込む値
+const int TCP_CMD_OPEN = 0x01;    // モードとポート番号に従ってソケットを開く
+const int TCP_CMD_LISTEN = 0x02;  // 接続の待ち受けを始める
+const int TCP_CMD_DISCON = 0x08;  // 相手へ切断を伝える
+const int TCP_CMD_CLOSE = 0x10;   // 相手へ伝えずにソケットを閉じる
+const int TCP_CMD_SEND = 0x20;    // 送信バッファの書き込み位置までを送信する
+const int TCP_CMD_RECV = 0x40;    // 受信バッファの読み出し位置までを読み終えたことを伝える
+
+// 割り込みの要因のビット
+const int TCP_IR_TIMEOUT = 0x08;  // 再送のタイムアウト(ソケットは閉じた状態になる)
+const int TCP_IR_SEND_OK = 0x10;  // 送信の完了
+
+// 状態のレジスタが返す値
+const int TCP_SR_CLOSED = 0x00;       // 閉じている
+const int TCP_SR_INIT = 0x13;         // TCPで開いている
+const int TCP_SR_LISTEN = 0x14;       // 接続を待ち受けている
+const int TCP_SR_ESTABLISHED = 0x17;  // 接続している
+const int TCP_SR_CLOSE_WAIT = 0x1c;   // 相手から切断を伝えられた(受信バッファに残ったデータは読み出せ，送信もできる)
+
+// コマンドを書き込み，モジュールが受け付けるまで待つ
+void tcp_command(int command) {
+    // コマンドのレジスタへ書き込む
+    eth_write(TCP_CR, command);
+    // 受け付けると0に戻るため，それまで読み直す
+    while (eth_read(TCP_CR) != 0) {
+    }
+}
+
+// 2バイトのレジスタを読み出す
+// モジュールが値を更新している途中に上位と下位を別々に読むと食い違った値になりうるため，2回続けて同じ値が読めるまで読み直す
+unsigned int tcp_read_word(unsigned short addr) {
+    unsigned int previous;  // 前回読み出した値
+    unsigned int current;   // 今回読み出した値
+
+    // 1回目を読み出す
+    current = eth_read_bytes(addr, 2);
+    // 前回と一致するまで読み直す
+    while (1) {
+        previous = current;
+        current = eth_read_bytes(addr, 2);
+        if (current == previous) {
+            return current;
+        }
+    }
+}
+
+// 接続しているかを返す(相手から切断を伝えられた後も，こちらが閉じるまでは接続しているとみなす)
+// 戻り値: 1(接続している) / 0(閉じている)
+int tcp_connected(void) {
+    int status = eth_read(TCP_SR);  // ソケットの状態
+    // 接続しているとみなす状態かを返す
+    return
+        // 接続している
+        status == TCP_SR_ESTABLISHED
+        // 相手から切断を伝えられたが，こちらはまだ閉じていない
+        || status == TCP_SR_CLOSE_WAIT;
+}
+
+// 指定したポート番号で接続の待ち受けを始める．前の接続が残っていれば閉じてから始める
+// 戻り値: TCP_OK / TCP_ERR_NOT_READY / TCP_ERR_SOCKET
+int tcp_listen(int port) {
+    // モジュールが応答しない状態でコマンドを書くと受け付けを待ち続けるため，設定に成功していなければ何もしない
+    if (eth_ready == 0) {
+        return TCP_ERR_NOT_READY;
+    }
+    // 前の接続が残っていても使えるよう，ソケットを閉じる
+    tcp_command(TCP_CMD_CLOSE);
+    // 前の接続で立った割り込みの要因が送信の完了と誤認されないよう，全ビットを消す
+    eth_write(TCP_IR, 0xff);
+    // TCPのモードとポート番号を書き込み，ソケットを開く
+    eth_write(TCP_MR, TCP_MODE_TCP);
+    eth_write_bytes(TCP_PORT, port, 2);
+    tcp_command(TCP_CMD_OPEN);
+    if (eth_read(TCP_SR) != TCP_SR_INIT) {
+        return TCP_ERR_SOCKET;
+    }
+    // 待ち受けを始める
+    tcp_command(TCP_CMD_LISTEN);
+    if (eth_read(TCP_SR) != TCP_SR_LISTEN) {
+        return TCP_ERR_SOCKET;
+    }
+    return TCP_OK;
+}
+
+// 待ち受けている接続を相手が確立するまで待つ(待ち受けを始めてから呼ぶこと)
+// 確立の直後に相手が切断した場合も確立として返し，切断はその後の受信で伝える
+// 戻り値: TCP_OK / TCP_CLOSED(確立の途中で相手が中断した)
+int tcp_accept(void) {
+    // 接続しているとみなす状態になるまで読み直す
+    while (tcp_connected() == 0) {
+        // 確立の途中で閉じた状態に戻れば，相手が中断している
+        if (eth_read(TCP_SR) == TCP_SR_CLOSED) {
+            return TCP_CLOSED;
+        }
+    }
+    return TCP_OK;
+}
+
+// 接続している相手のIPアドレスを返す(上位バイトから並べた値)
+unsigned int tcp_peer_address(void) {
+    // 相手のIPアドレスのレジスタを読み出す
+    return eth_read_bytes(TCP_DIPR, 4);
+}
+
+// 受信したデータを，指定したバイト数までbufへ読み出し，読み出したバイト数をlengthへ書き込む
+// 受信したデータが無ければ待たずに0バイトとして返す
+// 戻り値: TCP_OK / TCP_CLOSED(受信したデータを全て読み出し終えており，相手が切断したか接続が切れた)
+int tcp_recv(char *buf, int size, int *length) {
+    unsigned int received;  // 受信バッファに溜まったバイト数
+    unsigned int position;  // 受信バッファの読み出し位置
+
+    // 受信バッファに溜まったバイト数を読み出す
+    received = tcp_read_word(TCP_RX_RSR);
+    // データが無ければ，接続が続いているかを確かめる
+    if (received == 0) {
+        // 接続が続いていれば，読み出すものが無いだけとして返す
+        if (eth_read(TCP_SR) == TCP_SR_ESTABLISHED) {
+            *length = 0;
+            return TCP_OK;
+        }
+        // 溜まったバイト数を読んでから状態を読むまでに，相手がデータに続けて切断を送った場合に取りこぼさないよう，もう一度読む
+        received = tcp_read_word(TCP_RX_RSR);
+        if (received == 0) {
+            return TCP_CLOSED;
+        }
+    }
+    // 指定したバイト数を超える分は，次の呼び出しで読み出す
+    if (received > size) {
+        received = size;
+    }
+    // 読み出し位置から1バイトずつ読み出す(バッファの終わりに達したら先頭へ折り返す)
+    position = tcp_read_word(TCP_RX_RD);
+    for (int i = 0; i < received; i++) {
+        buf[i] = eth_read(TCP_RX_BASE + ((position + i) & TCP_BUFFER_MASK));
+    }
+    // 読み出し位置を進め，読み終えたことをモジュールへ伝える(受信バッファの空きとして次の受信に使われる)
+    eth_write_bytes(TCP_RX_RD, position + received, 2);
+    tcp_command(TCP_CMD_RECV);
+    *length = received;
+    return TCP_OK;
+}
+
+// bufの先頭から指定したバイト数を送信し，相手に届くまで待つ
+// 戻り値: TCP_OK / TCP_CLOSED(接続が切れた) / TCP_ERR_TOO_LONG(送信バッファより長い)
+int tcp_send(char *buf, int length) {
+    unsigned int position;  // 送信バッファの書き込み位置
+    int interrupt;          // 割り込みの要因
+
+    // 送信バッファより長いデータは空きが足りることが無く待ち続けるため，送信しない
+    if (length > TCP_BUFFER_SIZE) {
+        return TCP_ERR_TOO_LONG;
+    }
+    // 送信バッファの空きが足りるまで待つ
+    while (tcp_read_word(TCP_TX_FSR) < length) {
+        // 接続が切れていれば空きは増えない
+        if (tcp_connected() == 0) {
+            return TCP_CLOSED;
+        }
+    }
+    // 書き込み位置から1バイトずつ書き込む(バッファの終わりに達したら先頭へ折り返す)
+    position = tcp_read_word(TCP_TX_WR);
+    for (int i = 0; i < length; i++) {
+        eth_write(TCP_TX_BASE + ((position + i) & TCP_BUFFER_MASK), buf[i]);
+    }
+    // 書き込み位置を進め，そこまでの送信を指示する
+    eth_write_bytes(TCP_TX_WR, position + length, 2);
+    tcp_command(TCP_CMD_SEND);
+    // 送信の完了か，接続が切れるまで待つ
+    while (1) {
+        interrupt = eth_read(TCP_IR);
+        // 送信が完了すれば，次の送信で完了を判定できるよう要因を消して終える
+        if ((interrupt & TCP_IR_SEND_OK) != 0) {
+            eth_write(TCP_IR, TCP_IR_SEND_OK);
+            return TCP_OK;
+        }
+        // 再送のタイムアウトになれば，要因を消して終える
+        if ((interrupt & TCP_IR_TIMEOUT) != 0) {
+            eth_write(TCP_IR, TCP_IR_TIMEOUT);
+            return TCP_CLOSED;
+        }
+        // 相手からの強制的な切断では，タイムアウトにならずに閉じた状態になる
+        if (eth_read(TCP_SR) == TCP_SR_CLOSED) {
+            return TCP_CLOSED;
+        }
+    }
+}
+
+// 接続を閉じる．接続していれば相手へ切断を伝え，相手の応答か再送のタイムアウトを待ってから閉じる
+void tcp_close(void) {
+    // 接続していれば，相手へ切断を伝えて閉じた状態になるまで待つ(相手が応答しなくても再送のタイムアウトで閉じた状態になる)
+    if (tcp_connected()) {
+        tcp_command(TCP_CMD_DISCON);
+        while (eth_read(TCP_SR) != TCP_SR_CLOSED) {
+        }
+    }
+    // 待ち受け中など接続していない状態も含め，ソケットを閉じる
+    tcp_command(TCP_CMD_CLOSE);
+}

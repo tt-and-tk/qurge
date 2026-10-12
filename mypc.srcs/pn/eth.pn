@@ -1,4 +1,5 @@
-// Ethernetモジュール(W5100S)のドライバ．ETH_SPIのピンをソフトウェアで駆動してモジュールをリセットし，ネットワークの設定を書き込む
+// Ethernetモジュール(W5100S)のドライバ．ETH_SPIのピンをソフトウェアで駆動してモジュールのレジスタを読み書きし，
+// モジュールのリセットとネットワークの設定を行う．TCPでの通信はこのレジスタの読み書きを使ってtcp.pnが行う
 // 画面への出力は行わない(結果の伝え方は呼び出し元が決める)
 //
 // W5100Sは，ネットワークの設定などをチップ内部のレジスタ(CPUのレジスタとは別物)に保持する
@@ -34,6 +35,9 @@ const int ETH_RESET_WAIT_LOOPS = 1600000;  // RSTnをHighへ戻してから待�
 // このため，SCK・MOSIだけを変えるときもCSn・RSTnを書き込み直す必要があり，その出力レベルを変数に記録しておく
 int eth_csn = 1;   // 初期値はハードウェアのリセット値(非選択)と揃える
 int eth_rstn = 1;  // 初期値はハードウェアのリセット値(非リセット)と揃える
+
+// リセットからネットワークの設定までを終え，通信に使える状態か(0:使えない，1:使える)．起動直後はまだ設定していないため0から始める
+int eth_ready = 0;
 
 // CSnとRSTnのピンを，変数に記録した出力レベルにする(SCK・MOSIはLowにする)
 void eth_output_control(void) {
@@ -121,6 +125,8 @@ unsigned int eth_read_bytes(unsigned short addr, int length) {
 // モジュールをハードウェアリセットし，動き出すまで待ってからバージョン(VERR)を読み出して返す
 // モジュールが接続されていなければ，MISOのプルアップにより0xffが返る
 int eth_reset(void) {
+    // リセットで設定が消えるため，次に設定に成功するまで通信に使えない状態とする
+    eth_ready = 0;
     // 前の処理の途中で止まっていてもSPIフレームの途中にならないよう，選択を解除しておく
     eth_csn = 1;
     // RSTnをLowにしてリセットを始める
@@ -140,6 +146,7 @@ int eth_reset(void) {
 }
 
 // MACアドレス・IPアドレス・サブネットマスク・ゲートウェイを書き込み，読み出して書き込んだとおりかを確かめる
+// 書き込んだとおりであれば，通信に使える状態とする(リセットの後に呼ぶこと)
 // MACアドレスは6バイトを1つの値に収められないため，上位2バイト(mac_high)と下位4バイト(mac_low)に分けて渡す
 // 戻り値: 1(全て書き込んだ値のとおり) / 0(読み出した値が1つでも異なる)
 int eth_configure(unsigned int mac_high, unsigned int mac_low, unsigned int ip, unsigned int subnet, unsigned int gateway) {
@@ -150,9 +157,9 @@ int eth_configure(unsigned int mac_high, unsigned int mac_low, unsigned int ip, 
     eth_write_bytes(ETH_SUBR, subnet, 4);       // サブネットマスク
     eth_write_bytes(ETH_GAR, gateway, 4);       // ゲートウェイ
 
-    // 書き込んだレジスタを読み出し，書き込んだとおりの値になっているかを返す
+    // 書き込んだレジスタを読み出し，書き込んだとおりの値になっているかを，通信に使える状態かとして記録して返す
     // 配線の不良などで書き込みがモジュールへ届いていないことを，起動時に見つけるため
-    return
+    eth_ready =
         // MACアドレスの上位2バイト
         eth_read_bytes(ETH_SHAR, 2) == mac_high
         // MACアドレスの下位4バイト
@@ -163,4 +170,5 @@ int eth_configure(unsigned int mac_high, unsigned int mac_low, unsigned int ip, 
         && eth_read_bytes(ETH_SUBR, 4) == subnet
         // ゲートウェイ
         && eth_read_bytes(ETH_GAR, 4) == gateway;
+    return eth_ready;
 }

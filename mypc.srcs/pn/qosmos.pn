@@ -4,6 +4,7 @@
 #include "hex.pn"
 #include "sd.pn"
 #include "eth.pn"
+#include "tcp.pn"
 #include "fat.pn"
 #include "syscall_dispatch.pn"
 
@@ -24,6 +25,8 @@ const unsigned int NET_MAC_LOW = 0x00000001;      // MACアドレスの下位4�
 const unsigned int NET_IP_ADDRESS = 0xc0a80ac8;   // 自身のIPアドレス(192.168.10.200)
 const unsigned int NET_SUBNET_MASK = 0xffffff00;  // サブネットマスク(255.255.255.0)
 const unsigned int NET_GATEWAY = 0xc0a80a01;      // ゲートウェイのIPアドレス(192.168.10.1)
+const int NET_ECHO_PORT = 7;                      // tcpechoコマンドが待ち受けるポート番号(エコーサービスの標準のポート番号)
+const int NET_ECHO_BUFFER_SIZE = 64;              // tcpechoコマンドが1回に読み出して送り返すバイト数の上限
 
 char input[INPUT_SIZE];  // 1行分の入力バッファ
 char cmd[INPUT_SIZE];    // 入力の先頭トークン(コマンド名)
@@ -522,6 +525,54 @@ int handle_reboot(int pos) {
     return boot();
 }
 
+// tcpechoコマンド: TCPの接続を1つ受け付け，受信したデータをそのまま送り返す．相手が切断したら接続を閉じて終える
+// 待ち受け中と接続中はシェルへ戻らない(キー入力を待たずに確かめる手段が無いため)
+int handle_tcpecho(int pos) {
+    char buf[NET_ECHO_BUFFER_SIZE];  // 受信したデータ
+    int length;                      // 受信したデータのバイト数
+    int status;                      // TCPの各関数の結果
+
+    // 引数を取らないコマンドのため，引数が指定されていれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return EXIT_FAILURE;
+    }
+    // 待ち受けを始め，失敗すればその理由を出力する
+    status = tcp_listen(NET_ECHO_PORT);
+    if (status == TCP_ERR_NOT_READY) {
+        print_error("network is not available\n");
+        return EXIT_FAILURE;
+    }
+    if (status != TCP_OK) {
+        print_error("cannot listen\n");
+        return EXIT_FAILURE;
+    }
+    print("listening on port ");
+    print_decimal(NET_ECHO_PORT);
+    print("\n");
+
+    // 相手が接続するまで待ち，確立できれば相手のIPアドレスを出力する
+    status = tcp_accept();
+    if (status == TCP_OK) {
+        print("connected from ");
+        print_ipv4(tcp_peer_address());
+        print("\n");
+    }
+    // 接続が閉じるまで，受信したデータをそのまま送り返す(確立の途中で相手が中断した場合は送り返さずに終える)
+    while (status == TCP_OK) {
+        // 受信したデータを読み出す
+        status = tcp_recv(buf, NET_ECHO_BUFFER_SIZE, &length);
+        // 読み出したデータがあれば送り返す
+        if (status == TCP_OK && length > 0) {
+            status = tcp_send(buf, length);
+        }
+    }
+    // 接続を閉じ，閉じたことを出力する
+    tcp_close();
+    print("disconnected\n");
+    return EXIT_SUCCESS;
+}
+
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 int handle_help(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
@@ -544,6 +595,7 @@ int handle_help(int pos) {
     print("cd\n");
     print("pwd\n");
     print("reboot\n");
+    print("tcpecho\n");
     return EXIT_SUCCESS;
 }
 
@@ -694,6 +746,8 @@ int dispatch(int pos) {
         return handle_pwd(pos);
     } else if (streq(cmd, "reboot")) {
         return handle_reboot(pos);
+    } else if (streq(cmd, "tcpecho")) {
+        return handle_tcpecho(pos);
     }
     return run_executable();
 }
