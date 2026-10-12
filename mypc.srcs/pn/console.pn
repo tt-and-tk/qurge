@@ -17,7 +17,7 @@ const int CONSOLE_DEL = 0x7f;  // DEL(バックスペースキーでBSの代わ�
 int console_connected = 0;                // TCPで相手と接続しているか(0:していない，1:している)
 char console_output[CONSOLE_OUTPUT_SIZE]; // TCPへ送る前の出力
 int console_output_length = 0;            // 送る前の出力のバイト数
-int console_last_output = 0;              // TCPへ最後に出力した文字(改行の前に復帰を補うかの判断に使う)
+char console_last_output = 0;             // TCPへ最後に出力した文字(改行の前に復帰を補うかの判断に使う)
 char console_input[CONSOLE_INPUT_SIZE];   // TCPから受信したデータ
 int console_input_length = 0;             // 受信したデータのバイト数
 int console_input_position = 0;           // 受信したデータのうち，次に処理する位置
