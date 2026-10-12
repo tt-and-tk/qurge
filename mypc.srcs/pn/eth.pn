@@ -145,8 +145,7 @@ int eth_reset(void) {
     return eth_read(ETH_VERR);
 }
 
-// MACアドレス・IPアドレス・サブネットマスク・ゲートウェイを書き込み，読み出して書き込んだとおりかを確かめる
-// 書き込んだとおりであれば，通信に使える状態とする(リセットの後に呼ぶこと)
+// MACアドレス・IPアドレス・サブネットマスク・ゲートウェイを書き込み，読み出した値が書き込んだとおりであれば通信に使える状態とする(リセットの後に呼ぶこと)
 // MACアドレスは6バイトを1つの値に収められないため，上位2バイト(mac_high)と下位4バイト(mac_low)に分けて渡す
 // 戻り値: 1(全て書き込んだ値のとおり) / 0(読み出した値が1つでも異なる)
 int eth_configure(unsigned int mac_high, unsigned int mac_low, unsigned int ip, unsigned int subnet, unsigned int gateway) {
