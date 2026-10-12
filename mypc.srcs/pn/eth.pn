@@ -30,11 +30,12 @@ const int ETH_RESET_HOLD_LOOPS = 20;       // RSTnをLowに保つ回数(800ns以
 const int ETH_RESET_WAIT_LOOPS = 1600000;  // RSTnをHighへ戻してから待つ回数(64ms以上．データシートの60.3msを上回る)
 
 // CSn(チップセレクト)とRSTn(リセット)の出力レベル(いずれもアクティブLowで，0:選択中・リセット中，1:非選択・非リセット)
-// ETH_SPIへの書き込みは常に全ビットを同時に置き換えるため，この2つを別に保ち回す
+// ETH_SPIへの書き込みは常に全ビットを同時に置き換える
+// このため，SCK・MOSIだけを変えるときもCSn・RSTnを書き込み直す必要があり，その出力レベルを変数に記録しておく
 int eth_csn = 1;   // 初期値はハードウェアのリセット値(非選択)と揃える
 int eth_rstn = 1;  // 初期値はハードウェアのリセット値(非リセット)と揃える
 
-// SCK・MOSIをLowにし，CSnとRSTnを保ち回している出力レベルにする
+// SCK・MOSIをLowにし，CSnとRSTnを変数に記録した出力レベルにする
 void eth_set_pins(void) {
     // CSn(bit2)とRSTn(bit1)を並べて書き込む
     ETH_SPI = (eth_csn << 2) | (eth_rstn << 1);
