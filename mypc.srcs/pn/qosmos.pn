@@ -435,8 +435,7 @@ void print_banner(void) {
     console_print("   order out of chaos, on Qurge\n");
 }
 
-// OS名を出力し，直前の起動で失敗した項目ごとにやり直し方を伝える
-// 起動時に加え，TCPで新たに接続した相手にも使う(起動時の出力はPSへ出ており，相手は失敗を知らないため)
+// OS名を出力し，直前の起動で失敗した項目があれば，項目ごとにやり直し方を出力する
 void print_welcome(void) {
     // OS名を出力する
     print_banner();
