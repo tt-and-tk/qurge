@@ -156,7 +156,7 @@ void console_write_tcp(char *data, int length) {
             console_put(TELNET_IAC);
         }
         // ここまでの送信で接続が切れていれば，このバイトから後はPSへ出す
-        // 復帰や0xFFを先に加える送信で切れた場合にもこのバイトを失わないよう，加えた後に確かめる
+        // このバイトの前に加えたバイトの送信で切れた場合にもこのバイトを失わないよう，加えた後に確かめる
         if (console_connected == 0) {
             console_write_ps(data + i, length - i);
             return;
