@@ -466,6 +466,7 @@ int console_read_line(char *buf, int size) {
         if (c == '\r' || c == '\n') {
             buf[length] = '\0';
             // 次の出力が次の行から始まるよう，改行をエコーする
+            // エコーのオプションが無効な間は，端末が表示するため送らない
             if (console_echo) {
                 console_print("\n");
             }
@@ -477,6 +478,7 @@ int console_read_line(char *buf, int size) {
             if (length > 0) {
                 length--;
                 // カーソルを1つ戻し，空白で上書きして，もう1つ戻すことで画面から消す
+                // エコーのオプションが無効な間は，端末が表示するため送らない
                 if (console_echo) {
                     console_put(CONSOLE_BS);
                     console_put(' ');
@@ -496,6 +498,7 @@ int console_read_line(char *buf, int size) {
             if (length < size - 1) {
                 buf[length] = c;
                 length++;
+                // エコーのオプションが無効な間は，端末が表示するため送らない
                 if (console_echo) {
                     console_put(c);
                 }
