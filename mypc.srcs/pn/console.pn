@@ -104,7 +104,9 @@ void console_write_ps(char *data, int length) {
 void console_write_tcp(char *data, int length) {
     // 1バイトずつ送る前の出力へ加える
     for (int i = 0; i < length; i++) {
-        // 実行ファイルなどの内容に含まれる値0のバイトは，PSへ出す場合に表示を合わせて読み飛ばす(PSへは出力できないため)
+        // 値0のバイトは読み飛ばす
+        // PSへは出力できない値のため，PSへ出す場合と表示を合わせる
+        // 値0のバイトは，ファイルの内容を出力するコマンドで値0を含むファイルを指定すると渡される
         if (data[i] == '\0') {
             continue;
         }
