@@ -29,7 +29,7 @@ const int TELNET_SB = 0xfa;    // SB(サブネゴシエーションの始まり)
 const int TELNET_SE = 0xf0;    // SE(サブネゴシエーションの終わり)
 
 // telnetのオプションの番号
-const int TELNET_ECHO = 1;  // エコー(送り手が，受け取った文字を相手へ送り返して表示させる)
+const int TELNET_ECHO = 1;  // エコー(相手が打った文字の表示を，こちらが行う)
 const int TELNET_SGA = 3;   // SGA(Suppress Go Ahead．送り終えるたびに送るGAというコマンドを省き，1文字ずつ送り合えるようにする)
 
 // telnetの受信の状態(受信したバイトをデータとして扱うかコマンドとして扱うかの判断に使う)
