@@ -48,7 +48,7 @@ int console_input_length = 0;                 // 受信したデータのバイ�
 int console_input_position = 0;               // 受信したデータのうち，次に処理する位置
 int console_after_cr = 0;                     // 直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
 int console_telnet_state = TELNET_STATE_DATA; // telnetの受信の状態
-int console_telnet_command = 0;               // 受け取った交渉のコマンド(オプションの番号を待つ間に控える)
+unsigned char console_telnet_command = 0;     // 受け取った交渉のコマンド(オプションの番号を待つ間に控える)
 int console_echo = 0;                         // エコーのオプションが有効か(0:無効，1:有効．有効な間だけ打った文字を表示する)
 int console_sga = 0;                          // SGAのオプションが有効か(0:無効，1:有効．GAは有効・無効によらず送らない)
 
@@ -225,7 +225,7 @@ void console_print_decimal(int value) {
 
 // telnetの交渉のコマンドを，オプションの番号を添えて送る前の出力へ加える
 // 加えたIACはコマンドの始まりを表すため，データの0xFFのように2つ並べることはしない
-void console_telnet_send(int command, int option) {
+void console_telnet_send(unsigned char command, unsigned char option) {
     // IAC，コマンド，オプションの番号の順に加える
     console_put(TELNET_IAC);
     console_put(command);
@@ -325,7 +325,7 @@ int console_receive_byte(void) {
 
 // 自分の側のオプションを，相手の要求(DO:有効にする，DONT:無効にする)どおりに切り替え，切り替えたことを応答する
 // 既に要求どおりであれば，自分の申し出への同意か重複した要求のため応答しない(応答し合いが続かないようにするため)
-void console_telnet_switch(int *enabled, int command, int option) {
+void console_telnet_switch(int *enabled, unsigned char command, unsigned char option) {
     int requested = (command == TELNET_DO);  // 要求された状態(0:無効，1:有効)
 
     // 既に要求どおりであれば何もしない
@@ -344,7 +344,7 @@ void console_telnet_switch(int *enabled, int command, int option) {
 
 // 相手から受け取った交渉のコマンドに応じて，自分の側のオプションを切り替えるか，要求・申し出を断る
 // 相手の同意や拒否には応答しない(応答し合いが続かないようにするため)
-void console_telnet_negotiate(int command, int option) {
+void console_telnet_negotiate(unsigned char command, unsigned char option) {
     // 相手の側のオプションを有効にする申し出(WILL)は，すべて断る
     if (command == TELNET_WILL) {
         console_telnet_send(TELNET_DONT, option);
