@@ -408,13 +408,8 @@ int console_receive_char(void) {
                 // IACが2つ並んでいれば，データの0xFFとする
                 console_telnet_state = TELNET_STATE_DATA;
                 return b;
-            } else if (
-                // 交渉のコマンドの値の範囲(WILL〜DONT)の下限以上である
-                b >= TELNET_WILL
-                // 上限以下である
-                && b <= TELNET_DONT
-            ) {
-                // 交渉のコマンドであれば，控えて続くオプションの番号を待つ
+            } else if (b >= TELNET_WILL && b <= TELNET_DONT) {
+                // 交渉のコマンド(値が連続するWILL〜DONTの範囲)であれば，控えて続くオプションの番号を待つ
                 console_telnet_command = b;
                 console_telnet_state = TELNET_STATE_OPTION;
             } else if (b == TELNET_SB) {
