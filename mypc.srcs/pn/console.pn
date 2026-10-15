@@ -365,7 +365,7 @@ void console_telnet_negotiate(unsigned char command, unsigned char option) {
     if (command == TELNET_WONT) {
         return;
     }
-    // 自分の側のオプションについての要求(DO・DONT)は，対応するオプションであれば切り替え，それ以外は断る
+    // 自分の側のオプションについての要求(DO・DONT)は，Qosmosが使えるオプションであれば切り替え，それ以外は断る
     if (option == TELNET_ECHO) {
         // エコーを切り替える
         console_telnet_switch(&console_echo, command, option);
@@ -373,7 +373,7 @@ void console_telnet_negotiate(unsigned char command, unsigned char option) {
         // SGAを切り替える
         console_telnet_switch(&console_sga, command, option);
     } else if (command == TELNET_DO) {
-        // 対応しないオプションを有効にする要求は断る(無効にする要求には，既に無効のため応答しない)
+        // Qosmosが使えないオプションを有効にする要求は断る(無効にする要求には，既に無効のため応答しない)
         console_telnet_send(TELNET_WONT, option);
     }
 }
