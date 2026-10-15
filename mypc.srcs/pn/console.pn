@@ -20,17 +20,17 @@ const int CONSOLE_BS = 0x08;   // BS(バックスペース)
 const int CONSOLE_DEL = 0x7f;  // DEL(バックスペースキーでBSの代わりに送られることがある)
 
 // telnetのコマンドの値
-const int TELNET_IAC = 0xff;   // IAC(続くバイトがコマンドであることを示す)
-const int TELNET_DONT = 0xfe;  // DONT
-const int TELNET_DO = 0xfd;    // DO
-const int TELNET_WONT = 0xfc;  // WONT
-const int TELNET_WILL = 0xfb;  // WILL
-const int TELNET_SB = 0xfa;    // SB(サブネゴシエーションの始まり)
-const int TELNET_SE = 0xf0;    // SE(サブネゴシエーションの終わり)
+const unsigned char TELNET_IAC = 0xff;   // IAC(続くバイトがコマンドであることを示す)
+const unsigned char TELNET_DONT = 0xfe;  // DONT
+const unsigned char TELNET_DO = 0xfd;    // DO
+const unsigned char TELNET_WONT = 0xfc;  // WONT
+const unsigned char TELNET_WILL = 0xfb;  // WILL
+const unsigned char TELNET_SB = 0xfa;    // SB(サブネゴシエーションの始まり)
+const unsigned char TELNET_SE = 0xf0;    // SE(サブネゴシエーションの終わり)
 
 // telnetのオプションの番号
-const int TELNET_ECHO = 1;  // エコー(相手が打った文字の表示を，こちらが行う)
-const int TELNET_SGA = 3;   // SGA(Suppress Go Ahead．送り終えるたびに送るGAというコマンドを省き，1文字ずつ送り合えるようにする)
+const unsigned char TELNET_ECHO = 1;  // エコー(相手が打った文字の表示を，こちらが行う)
+const unsigned char TELNET_SGA = 3;   // SGA(Suppress Go Ahead．送り終えるたびに送るGAというコマンドを省き，1文字ずつ送り合えるようにする)
 
 // telnetの受信の状態(受信したバイトをデータとして扱うかコマンドとして扱うかの判断に使う)
 const int TELNET_STATE_DATA = 0;     // データを受け取っている
