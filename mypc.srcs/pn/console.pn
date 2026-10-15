@@ -409,8 +409,11 @@ int console_receive_char(void) {
                 console_telnet_state = TELNET_STATE_DATA;
                 return b;
             } else if (b >= TELNET_WILL && b <= TELNET_DONT) {
-                // 交渉のコマンド(値が連続するWILL〜DONTの範囲)であれば，控えて続くオプションの番号を待つ
+                // 交渉のコマンド(値が連続するWILL〜DONTの範囲)であれば，オプションの番号を受け取るまで待つ
+                // コマンドに応じるには，次のバイトで届くオプションの番号が要るため
+                // 番号を受け取ったときに使うため，受け取ったコマンドを変数に保存する
                 console_telnet_command = b;
+                // 次のバイトをオプションの番号として扱う
                 console_telnet_state = TELNET_STATE_OPTION;
             } else if (b == TELNET_SB) {
                 // サブネゴシエーションの始まりであれば，終わりまで読み捨てる
