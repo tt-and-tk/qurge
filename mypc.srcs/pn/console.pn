@@ -355,7 +355,8 @@ void console_telnet_switch(int *enabled, unsigned char command, unsigned char op
 // 相手から受け取った交渉のコマンドに応じて，自分の側のオプションを切り替えるか，要求・申し出を断る
 // 相手の同意や拒否には応答しない(応答し合いが続かないようにするため)
 void console_telnet_negotiate(unsigned char command, unsigned char option) {
-    // 相手の側のオプションを有効にする申し出(WILL)は，すべて断る
+    // 相手が自分の側でオプションを使うと申し出てきた(WILL)ときは，DONTを返してすべて断る
+    // 相手の端末は端末の種類や画面の大きさを伝える機能などを申し出てくるが，Qosmosはそれらの値を使わないため
     if (command == TELNET_WILL) {
         console_telnet_send(TELNET_DONT, option);
         return;
