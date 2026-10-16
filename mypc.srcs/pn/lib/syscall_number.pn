@@ -16,7 +16,7 @@ const int SYS_CONSOLE_READ = 4;   // コンソールから1行を受け取って
 
 // エラーを表す戻り値
 const int SYSCALL_ERR_UNKNOWN = -1;       // 未定義の番号を渡した
-const int SYSCALL_ERR_INVALID = -2;       // 引数の値が不正(番地にnullptr，負のバイト数，1未満の格納先のバイト数を渡した)
+const int SYSCALL_ERR_INVALID = -2;       // 引数の値が不正(番地にnullptrを渡したか，バイト数に機能が受け付けない値を渡した)
 const int SYSCALL_ERR_TOO_LARGE = -3;     // ファイルが読み込み先に収まらないか，大きさがintで表せない
 const int SYSCALL_ERR_NOT_FOUND = -4;     // 指定した名前のファイルが無い
 const int SYSCALL_ERR_IS_DIR = -5;        // 指定した名前がディレクトリを指す
