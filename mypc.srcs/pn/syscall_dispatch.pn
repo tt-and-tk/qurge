@@ -118,6 +118,9 @@ int syscall_console_read(int a, int b) {
             // 途中で接続が閉じれば，受け取れない
             return SYSCALL_ERR_DISCONNECTED;
         }
+        // 行を確定したときの改行のエコーを送る(送れなければ，この中で接続が閉じる)
+        // ためた出力はシェルが次に入力を待つまで送られないため，実行ファイルが受け取った後に長く計算すると，カーソルが打った行の末尾に残る
+        console_flush();
     } else {
         // PSから1行読み込む
         scan(syscall_line);
