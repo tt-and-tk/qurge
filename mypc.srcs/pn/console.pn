@@ -376,7 +376,7 @@ void console_telnet_negotiate(unsigned char command, unsigned char option) {
         // SGAを切り替える
         console_telnet_switch(&console_sga, command, option);
     } else if (command == TELNET_DO) {
-        // Qosmosが対応しないオプションを有効にする要求は断る(無効にする要求には，既に無効のため応答しない)
+        // Qosmosが対応しないオプションを有効にする要求は断る(無効にする要求は，既に無効のため応答を省く)
         console_telnet_send(TELNET_WONT, option);
     }
 }
