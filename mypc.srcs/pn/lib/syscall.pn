@@ -52,7 +52,7 @@ int console_print(char *text) {
 }
 
 // コンソールから改行までの1行を受け取り，sizeバイトの配列bufへヌル終端付きで格納し，格納した文字数を返す(改行は格納しない)
-// TCPで接続していれば，打った文字の表示と1行の編集をQosmosが行う．途中で接続が切れればSYSCALL_ERR_DISCONNECTEDを返す
+// TCPで接続していれば，打った文字の表示と1行の編集をQosmosが行う．受け取り終える前に接続が切れればSYSCALL_ERR_DISCONNECTEDを返す
 int console_read(char *buf, int size) {
     // 番号SYS_CONSOLE_READのシステムコールを呼び出す
     return syscall(SYS_CONSOLE_READ, (int)buf, size, 0, 0);

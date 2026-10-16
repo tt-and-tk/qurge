@@ -23,4 +23,4 @@ const int SYSCALL_ERR_IS_DIR = -5;        // 指定した名前がディレク�
 const int SYSCALL_ERR_BAD_NAME = -6;      // 名前が8.3形式に収まらないか，名前に使えない文字を含む
 const int SYSCALL_ERR_FULL = -7;          // SDカードに空きが無い
 const int SYSCALL_ERR_IO = -8;            // SDカードを読み書きできないか，ファイルシステムの記録が壊れている
-const int SYSCALL_ERR_DISCONNECTED = -9;  // 1行を受け取る途中で，コンソールのTCPの接続が切れた
+const int SYSCALL_ERR_DISCONNECTED = -9;  // 1行を受け取り終える前に，コンソールのTCPの接続が切れた(呼び出す前に切れていた場合を含む)
