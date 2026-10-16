@@ -3,7 +3,7 @@
 // SCAN命令は入力が届くまで待ち続け，その間はTCPの受信を確かめられないため，入力はどちらか一方から受け取る
 //
 // telnetは，TCPの接続の上で文字をやり取りする取り決めである．送るバイトの大半は文字のデータで，その間に，相手との取り決めや指示を表すコマンドを混ぜる
-// コマンドは値0xFFのバイト(IAC)で始まり，続くバイトがコマンドの種類を表す．データの0xFFは，コマンドと区別するためIACを2つ並べて送る
+// コマンドは値0xFFのバイト(IAC)で始まり，続くバイトがコマンドの種類を表す．値0xFFのデータは，IACと区別するため0xFFを2つ並べて送り，受け手は並んだ2バイトを1バイトのデータ0xFFとして受け取る
 // コマンドには次の3種類がある(各コマンドの値は，定数の「telnetのコマンドの値」を参照)
 // - 交渉のコマンド: IAC，種類を表すバイト，オプションの番号の3バイトで送り，オプションと呼ぶ機能(エコーなど)を使うかを取り決める
 //   - WILL: 送り手の側でその機能を使うと申し出る(相手のDOへの返事としては，同意を表す)
@@ -405,7 +405,7 @@ int console_receive_char(void) {
         } else if (console_telnet_state == TELNET_STATE_COMMAND) {
             // IACの直後では，バイトの値に応じてコマンドを判別する
             if (b == TELNET_IAC) {
-                // IACが2つ並んでいれば，データの0xFFとする
+                // 0xFFが2つ並んでいれば，1バイトのデータ0xFFとする
                 console_telnet_state = TELNET_STATE_DATA;
                 return b;
             } else if (b >= TELNET_WILL && b <= TELNET_DONT) {
@@ -432,7 +432,7 @@ int console_receive_char(void) {
                 console_telnet_state = TELNET_STATE_SUB_IAC;
             }
         } else {
-            // サブネゴシエーションの中のIACの直後では，SEであれば終わりとし，それ以外(IACを2つ並べた0xFFなど)は続きとする
+            // サブネゴシエーションの中のIACの直後では，SEであれば終わりとし，それ以外(0xFFを2つ並べたデータの0xFFなど)は続きとする
             if (b == TELNET_SE) {
                 console_telnet_state = TELNET_STATE_DATA;
             } else {
