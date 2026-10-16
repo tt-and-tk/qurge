@@ -5,17 +5,22 @@
 
 const int SYSCALL_ENTRY_ADDRESS = 0xFFFC;  // 入口の番地(メモリの後半の末尾のワード)
 
-// 各機能の番号．名前はいずれも，シェルの現在のディレクトリの直下にあるファイルの"NAME.EXT"形式の名前(パスは指定できない)
-const int SYS_FILE_SIZE = 0;   // ファイルの大きさ(バイト数)を返す(a: 名前)
-const int SYS_FILE_READ = 1;   // ファイルの内容を丸ごと読み込み，そのバイト数を返す(a: 名前，b: 読み込み先，c: 読み込み先のバイト数)
-const int SYS_FILE_WRITE = 2;  // ファイルの内容を丸ごと置き換え，0を返す．ファイルが無ければ作成する(a: 名前，b: 書き込む内容，c: そのバイト数)
+// 各機能の番号
+// ファイルの機能に渡す名前はいずれも，シェルの現在のディレクトリの直下にあるファイルの"NAME.EXT"形式の名前(パスは指定できない)
+// コンソールはシェルと同じもの(TCPで接続していればその接続，していなければPSを経由した端末)を使う
+const int SYS_FILE_SIZE = 0;      // ファイルの大きさ(バイト数)を返す(a: 名前)
+const int SYS_FILE_READ = 1;      // ファイルの内容を丸ごと読み込み，そのバイト数を返す(a: 名前，b: 読み込み先，c: 読み込み先のバイト数)
+const int SYS_FILE_WRITE = 2;     // ファイルの内容を丸ごと置き換え，0を返す．ファイルが無ければ作成する(a: 名前，b: 書き込む内容，c: そのバイト数)
+const int SYS_CONSOLE_WRITE = 3;  // バイト列をコンソールへ出力し，0を返す(a: 出力するバイト列，b: そのバイト数)
+const int SYS_CONSOLE_READ = 4;   // コンソールから1行を受け取ってヌル終端付きで格納し，格納した文字数を返す(a: 格納先，b: 格納先のバイト数)
 
 // エラーを表す戻り値
-const int SYSCALL_ERR_UNKNOWN = -1;    // 未定義の番号を渡した
-const int SYSCALL_ERR_INVALID = -2;    // 引数の値が不正(番地にnullptr，負のバイト数を渡した)
-const int SYSCALL_ERR_TOO_LARGE = -3;  // ファイルが読み込み先に収まらないか，大きさがintで表せない
-const int SYSCALL_ERR_NOT_FOUND = -4;  // 指定した名前のファイルが無い
-const int SYSCALL_ERR_IS_DIR = -5;     // 指定した名前がディレクトリを指す
-const int SYSCALL_ERR_BAD_NAME = -6;   // 名前が8.3形式に収まらないか，名前に使えない文字を含む
-const int SYSCALL_ERR_FULL = -7;       // SDカードに空きが無い
-const int SYSCALL_ERR_IO = -8;         // SDカードを読み書きできないか，ファイルシステムの記録が壊れている
+const int SYSCALL_ERR_UNKNOWN = -1;       // 未定義の番号を渡した
+const int SYSCALL_ERR_INVALID = -2;       // 引数の値が不正(番地にnullptr，負のバイト数，1未満の格納先のバイト数を渡した)
+const int SYSCALL_ERR_TOO_LARGE = -3;     // ファイルが読み込み先に収まらないか，大きさがintで表せない
+const int SYSCALL_ERR_NOT_FOUND = -4;     // 指定した名前のファイルが無い
+const int SYSCALL_ERR_IS_DIR = -5;        // 指定した名前がディレクトリを指す
+const int SYSCALL_ERR_BAD_NAME = -6;      // 名前が8.3形式に収まらないか，名前に使えない文字を含む
+const int SYSCALL_ERR_FULL = -7;          // SDカードに空きが無い
+const int SYSCALL_ERR_IO = -8;            // SDカードを読み書きできないか，ファイルシステムの記録が壊れている
+const int SYSCALL_ERR_DISCONNECTED = -9;  // 1行を受け取る途中で，コンソールのTCPの接続が切れた

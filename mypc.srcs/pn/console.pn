@@ -20,6 +20,7 @@
 #include "tcp.pn"
 
 const int CONSOLE_PORT = 23;            // 接続を待ち受けるポート番号(telnetの標準のポート番号)
+const int CONSOLE_LINE_SIZE = 64;       // コンソールから受け取る1行を置く配列の要素数(ヌル終端の分を含む．シェルの入力と，実行ファイルがPSを経由して受け取る1行に使う)
 const int CONSOLE_OUTPUT_SIZE = 256;    // TCPへ送る前の出力をためるバッファのバイト数
 const int CONSOLE_INPUT_SIZE = 64;      // TCPから受信したデータを置くバッファのバイト数
 const int CONSOLE_PS_CHUNK_SIZE = 32;   // PSへ出力する一時バッファの要素数(ヌル終端の分を含む)
