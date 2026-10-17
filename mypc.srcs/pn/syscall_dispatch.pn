@@ -129,8 +129,8 @@ int syscall_console_read(int a, int b) {
 int syscall_console_write(int a, int b) {
     char *data = (char *)a;  // 出力するバイト列
 
-    // バイト列を読めないか，バイト数が負であれば出力できない
-    if (data == nullptr || b < 0) {
+    // バイト列を読めないか，出力するバイトが1つも無ければ出力しない(0バイトの出力は呼び出す意味が無いため，誤りとして知らせる)
+    if (data == nullptr || b < 1) {
         return SYSCALL_ERR_INVALID;
     }
     // コンソールへ出力する
