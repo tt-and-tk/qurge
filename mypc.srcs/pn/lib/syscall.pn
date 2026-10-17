@@ -32,7 +32,8 @@ int file_write(char *name, char *data, int length) {
     return syscall(SYS_FILE_WRITE, (int)name, (int)data, length, 0);
 }
 
-// コンソールから改行までの1行を受け取り，sizeバイトの配列bufへヌル終端付きで格納し，格納した文字数を返す(改行は格納しない)
+/// コンソールから改行までの1行を受け取り，sizeバイトの配列bufへヌル終端付きで格納し，格納した文字数を返す(改行は格納しない)
+// 1行がsize-1文字を超えれば，超えた分は捨てる
 // TCPで接続していれば，打った文字の表示と1行の編集をQosmosが行う．接続が切れていて受け取れなければSYSCALL_ERR_DISCONNECTEDを返す
 int console_read(char *buf, int size) {
     // 番号SYS_CONSOLE_READのシステムコールを呼び出す
