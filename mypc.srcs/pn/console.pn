@@ -1,6 +1,5 @@
-// シェルと実行ファイルの入出力(以下コンソール．実行ファイルはシステムコールを通してコンソールを使う)を担う関数群．TCPで接続した相手がいればその接続でtelnetのプロトコルに従って，いなければPS(ARM)を経由して入出力する
-// TCPの接続では，打った文字の表示(エコー)と1行の編集をこのファイルで行う．PSを経由する場合は，エコーをPS側のプログラムが，編集を組み込み関数scanが行う
-// SCAN命令は入力が届くまで待ち続け，その間はTCPの受信を確かめられないため，入力はどちらか一方から受け取る
+// シェルと実行ファイルの入出力(以下コンソール．実行ファイルはシステムコールを通してコンソールを使う)を担う関数群．TCPで接続した相手と，telnetのプロトコルに従って入出力する
+// 打った文字の表示(エコー)と1行の編集もこのファイルで行う．接続していない間の出力は，受け取る相手がいないため捨てる
 //
 // telnetは，TCPの接続の上で文字をやり取りする取り決めである．送るバイトの大半は文字のデータで，その間に，相手との取り決めや指示を表すコマンドを混ぜる
 // コマンドは値0xFFのバイト(IAC)で始まり，続くバイトがコマンドの種類を表す．値0xFFのデータは，IACと区別するため0xFFを2つ並べて送り，受け手は並んだ2バイトを1バイトのデータ0xFFとして受け取る
@@ -23,7 +22,6 @@ const int CONSOLE_PORT = 23;            // 接続を待ち受けるポート番�
 const int CONSOLE_LINE_SIZE = 64;       // コンソールから受け取る1行を置く配列の要素数(ヌル終端の分を含む)
 const int CONSOLE_OUTPUT_SIZE = 256;    // TCPへ送る前の出力をためるバッファのバイト数
 const int CONSOLE_INPUT_SIZE = 64;      // TCPから受信したデータを置くバッファのバイト数
-const int CONSOLE_PS_CHUNK_SIZE = 32;   // PSへ出力する一時バッファの要素数(ヌル終端の分を含む)
 const int CONSOLE_DECIMAL_SIZE = 12;    // 10進数を出力する一時バッファの要素数(intで最も長い"-2147483648"とヌル終端の分)
 
 // 1行の編集に使う文字コード
@@ -63,7 +61,7 @@ unsigned char console_telnet_command = 0;     // 受け取った交渉のコマ�
 int console_echo = 0;                         // エコーのオプションが有効か(0:無効，1:有効．有効な間だけ打った文字を表示する)
 int console_sga = 0;                          // SGAのオプションが有効か(0:無効，1:有効．GAは有効・無効によらず送らない)
 
-// TCPの接続を閉じ，以降の入出力をPSへ切り替える．送る前の出力と処理する前の受信データは捨てる
+// TCPの接続を閉じる．送る前の出力と処理する前の受信データは捨てる
 void console_disconnect(void) {
     // 接続を閉じる
     tcp_close();
@@ -114,41 +112,18 @@ void console_put(char c) {
     }
 }
 
-// バイト列を，PSを経由して出力する
-// 値0のバイトは，printがヌル終端とみなすため出力しない
-void console_write_ps(char *data, int length) {
-    char chunk[CONSOLE_PS_CHUNK_SIZE];  // printへ渡す一時バッファ(printは配列変数のみ受け付けるため)
-    int count = 0;                      // 一時バッファに写したバイト数
-
-    // 値0以外のバイトを一時バッファへ写し，満杯になるたびに出力する
-    for (int i = 0; i < length; i++) {
-        // 値0のバイトは写さない
-        if (data[i] == '\0') {
-            continue;
-        }
-        // 一時バッファへ写す
-        chunk[count] = data[i];
-        count++;
-        // ヌル終端の分を残して満杯になれば，終端して出力する
-        if (count == CONSOLE_PS_CHUNK_SIZE - 1) {
-            chunk[count] = '\0';
-            print(chunk);
-            count = 0;
-        }
-    }
-    // 一時バッファに残った分を終端して出力する
-    chunk[count] = '\0';
-    print(chunk);
-}
-
-// バイト列を，TCPの接続へ送るため送信前のバッファへ加える．途中で接続が切れれば，残りはPSを経由して出力する
+// バイト列をコンソールへ出力するため，TCPの接続へ送る前の出力へ加える．接続していないか途中で接続が切れれば，残りは捨てる
 // 値0のバイトは出力しない．値0xFFのバイトは，telnetのコマンドと区別するため2つ並べる
 // 改行(LF)の直前が復帰(CR)でなければ復帰を補う(端末が改行だけでは行頭へ戻らないため)
-void console_write_tcp(char *data, int length) {
+void console_write(char *data, int length) {
     // 1バイトずつ送る前の出力へ加える
     for (int i = 0; i < length; i++) {
+        // 接続していないか，ここまでの送信で接続が切れていれば，受け取る相手がいないため残りは捨てる
+        if (console_connected == 0) {
+            return;
+        }
         // 値0のバイトは読み飛ばす
-        // PSへは出力できない値のため，PSへ出す場合と表示を合わせる
+        // telnetの端末は値0のバイトを何も表示しない文字として扱うため，送らずに省く
         // 値0のバイトは，ファイルの内容を出力するコマンドで値0を含むファイルを指定すると渡される
         if (data[i] == '\0') {
             continue;
@@ -166,29 +141,12 @@ void console_write_tcp(char *data, int length) {
         if ((data[i] & 0xff) == TELNET_IAC) {
             console_put(TELNET_IAC);
         }
-        // ここまでの送信で接続が切れていれば，このバイトから後はPSへ出す
-        // このバイトの前に加えたバイトの送信で切れた場合にもこのバイトを失わないよう，加えた後に確かめる
-        if (console_connected == 0) {
-            console_write_ps(data + i, length - i);
-            return;
-        }
         // バイトを加える
         console_put(data[i]);
     }
 }
 
-// バイト列をコンソールへ出力する．TCPで接続していればその接続へ，していなければPSへ出す
-// どちらへ出す場合も値0のバイトは出力しない．TCPへ出す場合は，さらにtelnetの端末に合わせて変換する(バイト列をTCPへ出力する関数を参照)
-void console_write(char *data, int length) {
-    // 接続していればTCPの接続へ，していなければPSへ出す
-    if (console_connected) {
-        console_write_tcp(data, length);
-    } else {
-        console_write_ps(data, length);
-    }
-}
-
-// ヌル終端の文字列をコンソールへ出力する(出力先と変換は，バイト列を出力する場合と同じ)
+// ヌル終端の文字列をコンソールへ出力する(変換は，バイト列を出力する場合と同じ)
 void console_print(char *text) {
     int length = 0;  // 文字列のバイト数
 
@@ -244,7 +202,7 @@ void console_telnet_send(unsigned char command, unsigned char option) {
 }
 
 // TCPの接続が無ければ，待ち受けて相手が接続するまで待ち，接続した相手へtelnetのオプションを申し出る
-// 起動時のネットワークの設定に失敗しているか待ち受けを始められなければ，接続せずに戻る(入出力はPSを経由する)
+// ネットワークを設定していないか待ち受けを始められなければ，接続せずに戻る
 // 戻り値: 1(新たに接続した) / 0(既に接続しているか，接続せずに戻った)
 int console_accept(void) {
     int status;  // TCPの各関数の結果
@@ -257,19 +215,10 @@ int console_accept(void) {
     while (1) {
         // 待ち受けを始める
         status = tcp_listen(CONSOLE_PORT);
-        // ネットワークを使えなければ，PSを経由する
-        if (status == TCP_ERR_NOT_READY) {
-            return 0;
-        }
-        // モジュールが待ち受けの状態にならなければ，そのことを出力して(接続していないためPSへ出る)，PSを経由する
+        // ネットワークを設定していないか，モジュールが待ち受けの状態にならなければ，接続せずに戻る
         if (status != TCP_OK) {
-            console_print("console: cannot listen\n");
             return 0;
         }
-        // 待ち受けを始めたことを，ポート番号を添えて出力する(接続していないためPSへ出る)
-        console_print("listening on port ");
-        console_print_decimal(CONSOLE_PORT);
-        console_print("\n");
         // 相手が接続するまで待ち，確立すれば待ち受けを終える(確立の途中で相手が中断すれば，待ち受けからやり直す)
         if (tcp_accept() == TCP_OK) {
             break;

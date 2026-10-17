@@ -1,5 +1,5 @@
 // 自作OS Qosmosの本体(ROMに書き込むプログラムの入口)．起動時にハードウェアを初期化してOS名を表示した後，シェルとして動く
-// シェルはコンソール(TCPの接続かPS)から1行受け取り，先頭のトークンをコマンド名として解析し，対応する処理を呼び出す
+// シェルはコンソール(TCPで接続した相手)から1行受け取り，先頭のトークンをコマンド名として解析し，対応する処理を呼び出す
 #include "args.pn"
 #include "console.pn"
 #include "hex.pn"
@@ -435,7 +435,8 @@ void print_banner(void) {
     console_print("   order out of chaos, on Qurge\n");
 }
 
-// OS名を出力し，直前の起動で失敗した項目があれば，項目ごとにやり直し方を出力する
+// OS名を出力し，ファイルシステムをマウントしていなければ，やり直し方を出力する
+// ネットワークの設定の失敗は伝えない(この出力を受け取れるのは，ネットワークを設定できた後に接続した相手だけのため)
 void print_welcome(void) {
     // OS名を出力する
     print_banner();
@@ -443,13 +444,9 @@ void print_welcome(void) {
     if (fat_mounted == 0) {
         console_print("Storage is not available. Insert a card and run reboot.\n");
     }
-    // ネットワークを設定していなければ，モジュールを確かめてrebootでやり直すよう伝える
-    if (eth_ready == 0) {
-        console_print("Network is not available. Check the Ethernet module and run reboot.\n");
-    }
 }
 
-// OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，TCPの接続を閉じてからネットワークを設定して，OS名と失敗した項目のやり直し方を出力する
+// OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，TCPの接続を閉じてからネットワークを設定する
 // 呼ぶたびにハードウェアの初期化からやり直すため，再起動にもそのまま使える．全て成功すればEXIT_SUCCESS，いずれかが失敗すればEXIT_FAILUREを返す
 int boot(void) {
     int mounted;    // ファイルシステムをマウントできたか(0:失敗，1:成功)
@@ -457,12 +454,11 @@ int boot(void) {
 
     // ハードウェアを初期化し，ファイルシステムをマウントする
     mounted = init_storage();
-    // ネットワークの設定でモジュールをリセットすると接続が切れるため，先に相手へ切断を伝えて閉じる(以降の出力はPSへ出る)
+    // ネットワークの設定でモジュールをリセットすると接続が切れるため，先に相手へ切断を伝えて閉じる
+    // 閉じた後の出力は，受け取る相手がいないため捨てられる
     console_close();
     // SDカードとEthernetモジュールは互いに依存しないため，マウントの成否によらずネットワークを設定する
     networked = init_network();
-    // 成否によらずOS名を出力し，失敗した項目があればやり直し方を伝える
-    print_welcome();
     // いずれかが失敗していれば，起動の失敗とする
     if (
         // ファイルシステムをマウントできなかった
@@ -482,7 +478,8 @@ int handle_reboot(int pos) {
         print_error("too many arguments\n");
         return EXIT_FAILURE;
     }
-    // 起動処理をやり直す(失敗も各段階の行で伝わるため，コマンド名を前置したエラーは出さない)
+    // 起動処理をやり直す
+    // コマンド名を前置したエラーは出さない．マウントの失敗は各段階の行で伝わり，ネットワークの成否は接続し直してstatusで確かめられるため
     return boot();
 }
 
@@ -493,7 +490,7 @@ int handle_exit(int pos) {
         print_error("too many arguments\n");
         return EXIT_FAILURE;
     }
-    // PSを経由した端末から実行した場合は，閉じる接続が無いことを伝える
+    // コマンドを受け取った後の出力の送信で接続が切れていれば，閉じる接続が無いため失敗とする
     if (console_connected == 0) {
         print_error("not connected\n");
         return EXIT_FAILURE;
@@ -685,34 +682,30 @@ int dispatch(int pos) {
 }
 
 void main(void) {
-    int pos;     // コマンド名の直後の位置(引数の取り出し開始位置)
-    int remote;  // 1行をTCPの接続から受け取るか(0:PSから受け取る，1:TCPの接続から受け取る)
+    int pos;  // コマンド名の直後の位置(引数の取り出し開始位置)
 
     // OSを起動する(まだコマンドを実行していないため，起動の成否は終了状態に含めない)
     boot();
     // 1行受け取るごとに，先頭のトークンをコマンド名として取り出して処理を呼び出す
     while (1) {
         // TCPの接続が無ければ受け付け，新たに接続した相手はルートディレクトリから始め，起動時と同じ案内を出力する
-        if (console_accept()) {
+        if (console_connected == 0) {
+            // 接続を受け付けられなければ，ネットワークの設定からやり直す
+            // 起動時にモジュールのリセットに失敗した場合や，モジュールが待ち受けの状態にならない場合にも，操作できる状態へ戻れるようにするため
+            if (console_accept() == 0) {
+                init_network();
+                continue;
+            }
             // 前の接続で移った現在のディレクトリを捨て，ルートディレクトリへ戻す
             // 起動時のマウントに失敗した場合は戻せないが，ファイルを扱うコマンドがすべてエラーになるため，結果は確かめない
             fat_chdir_root();
-            // 起動時の出力はPSへ出ており，相手は見ていないため，案内を出し直す
+            // 起動時の出力は接続より前で相手に届いていないため，案内を出力する
             print_welcome();
         }
-        // プロンプトを出力する前の接続の有無を変数に控え，入力する1行をTCPとPSのどちらから受け取るかの判断に使う
-        // プロンプトの送信で接続が切れると，接続の有無が変わるため
-        // 切れた後の値で判断すると，PSからの入力を待ち続け，次の接続を受け付けられなくなる
-        remote = console_connected;
         console_print("> ");  // 入力待ちであることを示すプロンプト
-        // 接続していればTCPの接続から，していなければPSから1行受け取る
-        if (remote) {
-            // 途中で接続が閉じれば，その行は捨てて次の接続を待つ
-            if (console_read_line(input, INPUT_SIZE) == 0) {
-                continue;
-            }
-        } else {
-            scan(input);
+        // TCPの接続から1行受け取る(プロンプトの送信や受け取る途中で接続が閉じれば，その行は捨てて次の接続を待つ)
+        if (console_read_line(input, INPUT_SIZE) == 0) {
+            continue;
         }
         pos = extract_arg(input, 0, cmd, INPUT_SIZE);
         // コマンド名が無い行(改行だけ・空白だけの行など)は何もせず次のプロンプトへ戻る

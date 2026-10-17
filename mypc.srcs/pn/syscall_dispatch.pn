@@ -5,8 +5,6 @@
 #include "fat.pn"
 #include "lib/syscall_number.pn"
 
-char syscall_line[CONSOLE_LINE_SIZE];  // PSを経由して受け取った1行(組み込み関数scanは配列変数のみ受け付けるため，格納先へ直接は読み込まない)
-
 // FAT32の各関数が返した失敗を，実行ファイルへ返すエラーの値に変換する
 // 実行ファイルへはFAT32の内部の区別を見せず，実行ファイルが対処を変えうる種類だけに分けて返す
 int syscall_fat_error(int status) {
@@ -95,30 +93,16 @@ int syscall_console_read(int a, int b) {
     if (buf == nullptr || b < 1) {
         return SYSCALL_ERR_INVALID;
     }
-    // TCPで接続していればその接続から，していなければPSから1行受け取る
-    if (console_connected) {
-        // エコーと1行の編集をしながら受け取る
-        if (console_read_line(buf, b) == 0) {
-            // 途中で接続が閉じれば，受け取れない
-            return SYSCALL_ERR_DISCONNECTED;
-        }
-        // 行を確定したときの改行のエコーを送る(送れなければ，この中で接続が閉じる)
-        // ためた出力は，シェルが次に入力を待つまで送られない
-        // ここで送らないと，実行ファイルが受け取った後に長く計算する間，相手の端末のカーソルが入力した行の末尾に残る
-        console_flush();
-    } else {
-        // PSから1行読み込む
-        scan(syscall_line);
-        // 格納先の大きさからヌル終端の分を除いた文字数まで写し，入りきらない分は捨てる
-        while (length < b - 1 && syscall_line[length] != '\0') {
-            buf[length] = syscall_line[length];
-            length++;
-        }
-        // 写した文字列を終端する
-        buf[length] = '\0';
+    // TCPの接続から，エコーと1行の編集をしながら受け取る
+    if (console_read_line(buf, b) == 0) {
+        // 接続していないか途中で接続が閉じれば，受け取れない
+        return SYSCALL_ERR_DISCONNECTED;
     }
+    // 行を確定したときの改行のエコーを送る(送れなければ，この中で接続が閉じる)
+    // ためた出力は，シェルが次に入力を待つまで送られない
+    // ここで送らないと，実行ファイルが受け取った後に長く計算する間，相手の端末のカーソルが入力した行の末尾に残る
+    console_flush();
     // ヌル終端までの文字数を数える
-    length = 0;
     while (buf[length] != '\0') {
         length++;
     }
@@ -134,7 +118,7 @@ int syscall_console_write(int a, int b) {
         return SYSCALL_ERR_INVALID;
     }
     // コンソールへ出力する
-    // TCPの接続が切れたことは送るときに分かり，そのときまでにためていた出力は失われる．分かった後の出力はPSへ出る
+    // TCPの接続が切れたことは送るときに分かり，そのときまでにためていた出力と，分かった後の出力は失われる
     console_write(data, b);
     // ためた出力を送る(送れなければ，この中で接続が閉じる)
     // ためた出力はシェルが次に入力を待つまで送られないため，実行ファイルが出力の後に長く計算すると表示が遅れる
