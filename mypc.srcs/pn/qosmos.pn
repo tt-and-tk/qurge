@@ -486,6 +486,23 @@ int handle_reboot(int pos) {
     return boot();
 }
 
+// exitコマンド: ためた出力を送ってからTCPの接続を閉じる
+int handle_exit(int pos) {
+    // 引数を取らないコマンドのため，引数が指定されていれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return EXIT_FAILURE;
+    }
+    // PSを経由した端末から実行した場合は，閉じる接続が無いことを伝える
+    if (console_connected == 0) {
+        print_error("not connected\n");
+        return EXIT_FAILURE;
+    }
+    // ためた出力を送ってから接続を閉じる(切断したことは相手の端末で分かるため，閉じる前の表示はしない)
+    console_close();
+    return EXIT_SUCCESS;
+}
+
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 int handle_help(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
@@ -508,6 +525,7 @@ int handle_help(int pos) {
     console_print("cd\n");
     console_print("pwd\n");
     console_print("reboot\n");
+    console_print("exit\n");
     return EXIT_SUCCESS;
 }
 
@@ -660,6 +678,8 @@ int dispatch(int pos) {
         return handle_pwd(pos);
     } else if (streq(cmd, "reboot")) {
         return handle_reboot(pos);
+    } else if (streq(cmd, "exit")) {
+        return handle_exit(pos);
     }
     return run_executable();
 }
@@ -672,9 +692,12 @@ void main(void) {
     boot();
     // 1行受け取るごとに，先頭のトークンをコマンド名として取り出して処理を呼び出す
     while (1) {
-        // TCPの接続が無ければ受け付け，新たに接続した相手には起動時と同じ案内を出力する
-        // 起動時の出力はPSへ出ており，相手は見ていないため
+        // TCPの接続が無ければ受け付け，新たに接続した相手はルートディレクトリから始め，起動時と同じ案内を出力する
         if (console_accept()) {
+            // 前の接続で移った現在のディレクトリを捨て，ルートディレクトリへ戻す
+            // 起動時のマウントに失敗した場合は戻せないが，ファイルを扱うコマンドがすべてエラーになるため，結果は確かめない
+            fat_chdir_root();
+            // 起動時の出力はPSへ出ており，相手は見ていないため，案内を出し直す
             print_welcome();
         }
         // プロンプトを出力する前の接続の有無を変数に控え，入力する1行をTCPとPSのどちらから受け取るかの判断に使う
