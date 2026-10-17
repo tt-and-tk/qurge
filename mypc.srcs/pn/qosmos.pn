@@ -486,6 +486,23 @@ int handle_reboot(int pos) {
     return boot();
 }
 
+// exitコマンド: ためた出力を送ってからTCPの接続を閉じる(シェルへ戻ると，次の接続を待ち受ける)
+int handle_exit(int pos) {
+    // 引数を取らないコマンドのため，引数が指定されていれば何もしない
+    if (has_extra_args(input, pos)) {
+        print_error("too many arguments\n");
+        return EXIT_FAILURE;
+    }
+    // PSを経由した端末から実行した場合は，閉じる接続が無いことを伝える
+    if (console_connected == 0) {
+        print_error("not connected\n");
+        return EXIT_FAILURE;
+    }
+    // ためた出力を送ってから接続を閉じる(切断したことは相手の端末で分かるため，閉じる前の表示はしない)
+    console_close();
+    return EXIT_SUCCESS;
+}
+
 // helpコマンド: 利用可能なコマンドの一覧を表示する
 int handle_help(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
@@ -508,6 +525,7 @@ int handle_help(int pos) {
     console_print("cd\n");
     console_print("pwd\n");
     console_print("reboot\n");
+    console_print("exit\n");
     return EXIT_SUCCESS;
 }
 
@@ -660,6 +678,8 @@ int dispatch(int pos) {
         return handle_pwd(pos);
     } else if (streq(cmd, "reboot")) {
         return handle_reboot(pos);
+    } else if (streq(cmd, "exit")) {
+        return handle_exit(pos);
     }
     return run_executable();
 }
