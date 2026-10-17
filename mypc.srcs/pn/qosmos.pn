@@ -9,7 +9,7 @@
 #include "fat.pn"
 #include "syscall_dispatch.pn"
 
-const int INPUT_SIZE = 64;          // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
+const int INPUT_SIZE = CONSOLE_LINE_SIZE;  // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
 const int CODE_ADDRESS = 0x8000;    // メモリの後半の先頭番地(実行ファイルの読み込み先)
 const int CODE_SIZE = SYSCALL_ENTRY_ADDRESS - CODE_ADDRESS;  // 読み込める実行ファイルの大きさの上限(メモリの後半のうち，末尾のシステムコールの入口より手前のバイト数)
 const int CODE_PC = 0x4000;         // メモリの後半の先頭の命令を指すPC(実行ファイルを呼び出す先)
