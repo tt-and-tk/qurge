@@ -40,20 +40,6 @@ module mother_board(
     input  wire [63:0] divu_dout_tdata,
     input  wire        divu_dout_tvalid,
 
-    // 標準入力用
-    input  wire [31:0] stdin_tdata,
-    input  wire [ 3:0] stdin_tkeep,
-    input  wire        stdin_tlast,
-    output wire        stdin_tready,
-    input  wire        stdin_tvalid,
-
-    // 標準出力用
-    output wire [31:0] stdout_tdata,
-    output wire [ 3:0] stdout_tkeep,
-    output wire        stdout_tlast,
-    input  wire        stdout_tready,
-    output wire        stdout_tvalid,
-
     // デバッグ用
     input  wire [ 3:0] btn,
     input  wire [ 1:0] sw,
@@ -102,18 +88,6 @@ module mother_board(
         .divu_dividend_tvalid(divu_dividend_tvalid),
         .divu_dout_tdata(divu_dout_tdata),
         .divu_dout_tvalid(divu_dout_tvalid),
-
-        .stdin_tdata(stdin_tdata),
-        .stdin_tkeep(stdin_tkeep),
-        .stdin_tlast(stdin_tlast),
-        .stdin_tready(stdin_tready),
-        .stdin_tvalid(stdin_tvalid),
-
-        .stdout_tdata(stdout_tdata),
-        .stdout_tkeep(stdout_tkeep),
-        .stdout_tlast(stdout_tlast),
-        .stdout_tready(stdout_tready),
-        .stdout_tvalid(stdout_tvalid),
 
         .btn(btn),
         .sw(sw),

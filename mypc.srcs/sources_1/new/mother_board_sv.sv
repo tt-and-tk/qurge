@@ -43,20 +43,6 @@ module mother_board_sv(
     input  logic [63:0] divu_dout_tdata,
     input  logic        divu_dout_tvalid,
 
-    // 標準入力
-    input  logic [31:0] stdin_tdata,
-    input  logic [ 3:0] stdin_tkeep,
-    input  logic        stdin_tlast,
-    output logic        stdin_tready,
-    input  logic        stdin_tvalid,
-
-    // 標準出力
-    output logic [31:0] stdout_tdata,
-    output logic [ 3:0] stdout_tkeep,
-    output logic        stdout_tlast,
-    input  logic        stdout_tready,
-    output logic        stdout_tvalid,
-
     // デバッグ用
     input  logic [ 3:0] btn,
     input  logic [ 1:0] sw,
@@ -97,6 +83,15 @@ module mother_board_sv(
     rom_read_if rom_read1();
     rom_read_if rom_read2();
 
+    // CPUの標準入出力(SCAN命令・PRINT命令)は外部につながず，入力は届かない・出力は受け取って捨てる状態に固定する
+    // 入出力はEthernetモジュールを通したTCPの接続で行うため，標準入出力を使う相手がいない
+    // 固定せずに放っておくと，PRINT命令が受け取られるのを待ち続けてCPUが止まる
+    logic [31:0] stdout_tdata;   // CPUが出力するデータ(捨てる)
+    logic [ 3:0] stdout_tkeep;   // CPUが出力するデータの有効なバイト(捨てる)
+    logic        stdout_tlast;   // CPUが出力するデータの末尾を示す信号(捨てる)
+    logic        stdout_tvalid;  // CPUが出力するデータが有効かを示す信号(捨てる)
+    logic        stdin_tready;   // CPUが入力を受け取れるかを示す信号(捨てる)
+
     // メインメモリ
     ram_sv ram_sv_0 (
         .clk(clk), .resetn(resetn),
@@ -135,15 +130,15 @@ module mother_board_sv(
         .led(led),
         .rgb_led(rgb_led),
         // 標準入出力
-        .stdin_tdata(stdin_tdata),
-        .stdin_tkeep(stdin_tkeep),
-        .stdin_tlast(stdin_tlast),
+        .stdin_tdata(32'h0),
+        .stdin_tkeep(4'h0),
+        .stdin_tlast(1'b0),
         .stdin_tready(stdin_tready),
-        .stdin_tvalid(stdin_tvalid),
+        .stdin_tvalid(1'b0),                // 入力は届かない
         .stdout_tdata(stdout_tdata),
         .stdout_tkeep(stdout_tkeep),
         .stdout_tlast(stdout_tlast),
-        .stdout_tready(stdout_tready),
+        .stdout_tready(1'b1),               // 出力は常に受け取る
         .stdout_tvalid(stdout_tvalid),
         .ja(ja),
         .jb(jb),
