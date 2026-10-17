@@ -11,8 +11,8 @@ const int SYSCALL_ENTRY_ADDRESS = 0xFFFC;  // 入口の番地(メモリの後半
 const int SYS_FILE_SIZE = 0;      // ファイルの大きさ(バイト数)を返す(a: 名前)
 const int SYS_FILE_READ = 1;      // ファイルの内容を丸ごと読み込み，そのバイト数を返す(a: 名前，b: 読み込み先，c: 読み込み先のバイト数)
 const int SYS_FILE_WRITE = 2;     // ファイルの内容を丸ごと置き換え，0を返す．ファイルが無ければ作成する(a: 名前，b: 書き込む内容，c: そのバイト数)
-const int SYS_CONSOLE_WRITE = 3;  // バイト列をコンソールへ出力し，0を返す(a: 出力するバイト列，b: そのバイト数)
-const int SYS_CONSOLE_READ = 4;   // コンソールから1行を受け取ってヌル終端付きで格納し，格納した文字数を返す(a: 格納先，b: 格納先のバイト数)
+const int SYS_CONSOLE_READ = 3;   // コンソールから1行を受け取ってヌル終端付きで格納し，格納した文字数を返す(a: 格納先，b: 格納先のバイト数)
+const int SYS_CONSOLE_WRITE = 4;  // バイト列をコンソールへ出力し，0を返す(a: 出力するバイト列，b: そのバイト数)
 
 // エラーを表す戻り値
 const int SYSCALL_ERR_UNKNOWN = -1;       // 未定義の番号を渡した

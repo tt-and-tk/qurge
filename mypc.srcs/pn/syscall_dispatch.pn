@@ -86,23 +86,6 @@ int syscall_file_write(int a, int b, int c) {
     return 0;
 }
 
-// 番地aからのbバイトをコンソールへ出力し，0を返す
-int syscall_console_write(int a, int b) {
-    char *data = (char *)a;  // 出力するバイト列
-
-    // バイト列を読めないか，バイト数が負であれば出力できない
-    if (data == nullptr || b < 0) {
-        return SYSCALL_ERR_INVALID;
-    }
-    // コンソールへ出力する
-    // TCPの接続が切れたことは送るときに分かり，そのときまでにためていた出力は失われる．分かった後の出力はPSへ出る
-    console_write(data, b);
-    // ためた出力を送る(送れなければ，この中で接続が閉じる)
-    // ためた出力はシェルが次に入力を待つまで送られないため，実行ファイルが出力の後に長く計算すると表示が遅れる
-    console_flush();
-    return 0;
-}
-
 // コンソールから1行を受け取り，番地aからのbバイトの格納先へヌル終端付きで格納し，格納した文字数を返す
 int syscall_console_read(int a, int b) {
     char *buf = (char *)a;  // 格納先
@@ -142,6 +125,23 @@ int syscall_console_read(int a, int b) {
     return length;
 }
 
+// 番地aからのbバイトをコンソールへ出力し，0を返す
+int syscall_console_write(int a, int b) {
+    char *data = (char *)a;  // 出力するバイト列
+
+    // バイト列を読めないか，バイト数が負であれば出力できない
+    if (data == nullptr || b < 0) {
+        return SYSCALL_ERR_INVALID;
+    }
+    // コンソールへ出力する
+    // TCPの接続が切れたことは送るときに分かり，そのときまでにためていた出力は失われる．分かった後の出力はPSへ出る
+    console_write(data, b);
+    // ためた出力を送る(送れなければ，この中で接続が閉じる)
+    // ためた出力はシェルが次に入力を待つまで送られないため，実行ファイルが出力の後に長く計算すると表示が遅れる
+    console_flush();
+    return 0;
+}
+
 // 番号numberのシステムコールの処理を引数a〜dで実行し，その結果を返す(戻り値: 0以上は成功，負の値はエラー)
 // コンソールへ出すのは，実行ファイルが出力を求めたバイト列と，1行を受け取る間のエコーだけである(エラーを表示するかどうかは，呼び出した実行ファイルが決めるため)
 int syscall_dispatch(int number, int a, int b, int c, int d) {
@@ -156,12 +156,12 @@ int syscall_dispatch(int number, int a, int b, int c, int d) {
         // ファイルの内容を丸ごと書き込む
         case SYS_FILE_WRITE:
             return syscall_file_write(a, b, c);
-        // コンソールへ出力する
-        case SYS_CONSOLE_WRITE:
-            return syscall_console_write(a, b);
         // コンソールから1行を受け取る
         case SYS_CONSOLE_READ:
             return syscall_console_read(a, b);
+        // コンソールへ出力する
+        case SYS_CONSOLE_WRITE:
+            return syscall_console_write(a, b);
     }
     // どの番号とも一致しなければ，未定義の番号としてエラーを返す
     return SYSCALL_ERR_UNKNOWN;
