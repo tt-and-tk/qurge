@@ -486,7 +486,7 @@ int handle_reboot(int pos) {
     return boot();
 }
 
-// exitコマンド: ためた出力を送ってからTCPの接続を閉じる(シェルへ戻ると，次の接続を待ち受ける)
+// exitコマンド: ためた出力を送ってからTCPの接続を閉じる
 int handle_exit(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
