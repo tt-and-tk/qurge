@@ -69,7 +69,7 @@ SDカードは2枚使う．
 
 ### BOOT.BINの作成
 
-VivadoとVitis(版はVivadoと揃える)のbinディレクトリ(`vivado`・`xsct`・`bootgen`)にPATHを通し，コマンドプロンプトから次を行う．Vitisは，PSで動くプログラムを作るXilinxの開発環境で，FSBLの生成とビルドに使う(`xsct`はそのコマンドラインのツール)．`bootgen`は，FSBLとビットストリームをBOOT.BINにまとめるツールで，Vivadoに付属する．出力はリポジトリ直下の`mypc.boot/`(Git管理外)に置かれる．
+VivadoとVitis(版はVivadoと揃える)のbinディレクトリ(`vivado`・`xsct`・`bootgen`)にPATHを通し，コマンドプロンプトから次を行う．出力はリポジトリ直下の`mypc.boot/`(Git管理外)に置かれる．
 
 1. Vivadoで`Generate Bitstream`を実行する
 2. 最初の1回と，ブロックダイアグラムでPS(`processing_system7_0`)の設定を変えたときは，`mypc.srcs\boot\make_fsbl.bat`を実行してFSBLを作る．FSBLはPSの設定だけに依存するため，自作HDLやROMの内容を変えただけなら作り直さなくてよい
