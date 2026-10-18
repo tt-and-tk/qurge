@@ -78,7 +78,7 @@ int console_input_length = 0;                 // 受信したデータのバイ�
 int console_input_position = 0;               // 受信したデータのうち，次に処理する位置
 int console_tcp_after_cr = 0;                 // TCPの端末から直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
 int console_uart_after_cr = 0;                // UARTの端末から直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
-int console_last_input_terminal = CONSOLE_TERMINAL_UART;  // 直前に受け取った文字を送った端末の種類(1行の確定後は，確定した文字を送った端末を表す)
+int console_last_input_terminal = CONSOLE_TERMINAL_UART;  // 直前に受け取った文字を送った端末の種類
 int console_telnet_state = TELNET_STATE_DATA; // telnetの受信の状態
 unsigned char console_telnet_command = 0;     // 受け取った交渉のコマンド(オプションの番号を待つ間に控える)
 int console_telnet_echo = 0;                  // エコーのオプションが有効か(0:無効，1:有効．有効な間だけ，打った文字をTCPの端末へ表示する)
@@ -513,11 +513,12 @@ int console_receive_char(void) {
     }
 }
 
-// コンソールから改行までの1行を受け取り，ヌル終端付きで配列へ格納する．受け取った文字のエコーと1行の編集を行う
-// - 復帰(CR)か改行(LF)で行を確定し，改行をエコーする．行を打った端末は，確定した文字を送った端末とする(2つの端末から打った文字が混ざった行も同じ)
+// コンソールから改行までの1行を受け取るか，TCPの端末が新たに接続するまで待ち，先に起きた方を返す
+// 1行を受け取る間は，受け取った文字のエコーと1行の編集を行い，ヌル終端付きで配列へ格納する
+// - 復帰(CR)か改行(LF)で行を確定し，改行をエコーする．確定した文字を送った端末を，その行を打った端末として控える
 // - BSとDELは，格納した直前の1文字を取り消し，画面から消すエコーを送る(格納した文字が無ければ何もしない)
 // - 印字可能な文字とタブを格納してエコーする．配列の要素数-1文字を超える分と，それ以外の文字は捨てる
-// - 受け取る途中でTCPの端末が新たに接続すれば，受け取り途中の行を捨てて戻る(配列の内容は不定)
+// TCPの端末が新たに接続したときは，受け取り途中の行を捨てる(配列の内容は不定)
 // 戻り値: CONSOLE_LINE_DONE(1行を受け取った) / CONSOLE_LINE_CONNECTED(TCPの端末が新たに接続した)
 int console_read_line(char *buf, int size) {
     int length = 0;  // 格納した文字数
