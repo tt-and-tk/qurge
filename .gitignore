@@ -12,6 +12,9 @@ mypc.sim/
 vivado*.log
 vivado*.jou
 
+# BOOT.BINとその材料(FSBL・ハードウェアの情報)．mypc.srcs/boot/のスクリプトで作り直せる
+mypc.boot/
+
 # 合成・実装をやり直せば再生成されるデザインチェックポイント
 mypc.srcs/utils_1/
 

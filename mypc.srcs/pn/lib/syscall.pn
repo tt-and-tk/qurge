@@ -1,7 +1,7 @@
 // Qosmosの実行ファイルからOSの機能(システムコール)を呼び出すライブラリ．実行ファイルのソースから取り込んで使う
 // 各関数の戻り値は，0以上が成功，負の値がエラー(値の意味はsyscall_number.pnのSYSCALL_ERR_*)を表す
 // ファイルを扱う関数に渡す名前はいずれも，シェルの現在のディレクトリの直下にあるファイルの"NAME.EXT"形式の名前(パスは指定できない)
-// コンソールを扱う関数は，シェルと同じコンソール(TCPで接続していればその接続，していなければPSを経由した端末)を使う
+// コンソールを扱う関数は，シェルと同じコンソール(TCPで接続した相手)を使う
 #pragma once
 #include "syscall_number.pn"
 
@@ -36,14 +36,14 @@ int file_write(char *name, char *data, int length) {
 
 /// コンソールから改行までの1行を受け取り，sizeバイトの配列bufへヌル終端付きで格納し，格納した文字数を返す(改行は格納しない)
 // 1行がsize-1文字を超えれば，超えた分は捨てる
-// TCPで接続していれば，打った文字の表示と1行の編集をQosmosが行う．接続が切れていて受け取れなければSYSCALL_ERR_DISCONNECTEDを返す
+// 打った文字の表示と1行の編集はQosmosが行う．接続が切れていて受け取れなければSYSCALL_ERR_DISCONNECTEDを返す
 int console_read(char *buf, int size) {
     // 番号SYS_CONSOLE_READのシステムコールを呼び出す
     return syscall(SYS_CONSOLE_READ, (int)buf, size, 0, 0);
 }
 
 // dataの先頭lengthバイトをコンソールへ出力し，0を返す
-// 出力する前に，Qosmosが端末に合わせて変換する(値0のバイトを除き，TCPの接続では改行の前に復帰を補う)．呼び出し側で変換しておく必要はない
+// 出力する前に，Qosmosが端末に合わせて変換する(値0のバイトを省き，改行の前に復帰を補う)．呼び出し側で変換しておく必要はない
 int console_write(char *data, int length) {
     // 番号SYS_CONSOLE_WRITEのシステムコールを呼び出す
     return syscall(SYS_CONSOLE_WRITE, (int)data, length, 0, 0);
