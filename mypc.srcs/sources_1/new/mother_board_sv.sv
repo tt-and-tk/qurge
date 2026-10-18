@@ -83,7 +83,7 @@ module mother_board_sv(
     rom_read_if rom_read1();
     rom_read_if rom_read2();
 
-    // CPUの標準入出力(SCAN命令・PRINT命令)は外部につながず，入力は届かない・出力は受け取って捨てる状態に固定する
+    // CPUの標準入出力(SCAN命令・PRINT命令)は外部から切り離し，入力は常に空，出力は常に受け取って捨てる状態に固定する
     // 入出力はEthernetモジュールを通したTCPの接続で行うため，標準入出力を使う相手がいない
     // 固定せずに放っておくと，PRINT命令が受け取られるのを待ち続けてCPUが止まる
     logic [31:0] stdout_tdata;   // CPUが出力するデータ(捨てる)
