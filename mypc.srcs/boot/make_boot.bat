@@ -24,8 +24,10 @@ rem findをフルパスで呼ぶのは，PATHの並びによっては同名の別のコマンドが呼ばれるた
 echo %cmdcmdline% | "%SystemRoot%\System32\find.exe" /i "%~0" >nul
 if not errorlevel 1 set "own_window=1"
 
-rem リポジトリ直下へ移動する(BOOT.BINの構成のファイルは，リポジトリ直下からの相対パスでFSBLとビットストリームを指す)
+rem 出力先のディレクトリが無ければ作る
 if not exist "%out_dir%" mkdir "%out_dir%"
+
+rem リポジトリ直下へ移動する(BOOT.BINの構成のファイルは，リポジトリ直下からの相対パスでFSBLとビットストリームを指す)
 pushd "%root_dir%"
 
 rem FSBLとビットストリームをまとめてBOOT.BINを作る(既にあれば上書きする)

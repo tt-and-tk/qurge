@@ -26,8 +26,10 @@ rem findをフルパスで呼ぶのは，PATHの並びによっては同名の別のコマンドが呼ばれるた
 echo %cmdcmdline% | "%SystemRoot%\System32\find.exe" /i "%~0" >nul
 if not errorlevel 1 set "own_window=1"
 
-rem リポジトリ直下へ移動する(Tclのスクリプトは，リポジトリ直下からの相対パスでファイルを扱う)
+rem 出力先のディレクトリが無ければ作る
 if not exist "%out_dir%" mkdir "%out_dir%"
+
+rem リポジトリ直下へ移動する(Tclのスクリプトは，リポジトリ直下からの相対パスでファイルを扱う)
 pushd "%root_dir%"
 
 rem 実装結果から，ハードウェアの情報(PSの設定を含むXSAファイル)を書き出す
