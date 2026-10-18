@@ -3,7 +3,7 @@ rem BOOT.BINに入れるFSBLを作る．
 rem FSBL(First Stage Boot Loader)は，電源を入れたときにPS(ARM)が最初に実行するプログラムで，PSを初期化してからビットストリームをPLへ書き込む．
 rem 最初の1回と，ブロックダイアグラムでPS(processing_system7_0)の設定を変えたときに実行する．
 rem FSBLはPSの設定だけに依存するため，自作HDLやROMの内容を変えただけなら作り直さなくてよい．
-rem 実行前に，VivadoでGenerate Bitstreamまで済ませておく(実装結果からハードウェアの情報を書き出すため)．
+rem 実行前に，VivadoでGenerate Bitstreamまで済ませておく(配置配線を終えた設計からハードウェアの情報を書き出すため)．
 rem VivadoとVitisのbinディレクトリ(vivado・xsct)にPATHが通っている必要がある．
 rem 作ったFSBLは，リポジトリ直下のmypc.boot\fsbl\executable.elf(Git管理外)に出力される．
 rem ダブルクリックで実行した場合は，結果を読めるよう，ウィンドウが閉じる前にキー入力を待つ．
@@ -33,7 +33,7 @@ if not exist "%out_dir%" mkdir "%out_dir%"
 rem リポジトリ直下へ移動する(Tclのスクリプトは，リポジトリ直下からの相対パスでファイルを扱う)
 pushd "%root_dir%"
 
-rem 実装結果から，ハードウェアの情報(PSの設定を含むXSAファイル)を書き出す
+rem 配置配線を終えた設計から，ハードウェアの情報(PSの設定を含むXSAファイル)を書き出す
 call vivado -mode batch -nojournal -nolog -source "%boot_dir%export_xsa.tcl"
 if errorlevel 1 goto finish
 
