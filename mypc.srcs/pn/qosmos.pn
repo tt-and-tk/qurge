@@ -27,7 +27,7 @@ const unsigned int NET_GATEWAY = 0xc0a80a01;      // ゲートウェイのIPア�
 
 char input[INPUT_SIZE];  // 1行分の入力バッファ
 char cmd[INPUT_SIZE];    // 入力の先頭トークン(コマンド名)
-int exit_status = 0;     // 直前のコマンドの終了状態(コマンドを実行する前は，起動の成否)
+int exit_status = 0;     // statusコマンドで出力する終了状態(電源を入れたときの起動の成否か，その後に実行した直前のコマンドの成否)
 
 // エラーメッセージの前置き"<コマンド名>: "を出力する(どのコマンドが出したエラーかが分かるようにするため)
 void print_error_head(void) {
@@ -526,7 +526,7 @@ int handle_help(int pos) {
     return EXIT_SUCCESS;
 }
 
-// statusコマンド: 直前のコマンドの終了状態を10進数で出力する
+// statusコマンド: 保持している終了状態(電源を入れたときの起動の成否か，直前のコマンドの成否)を10進数で出力する
 // 何度実行しても同じ値を確かめられるよう，引数の誤りも含め，保持している終了状態をそのまま返して値を変えない
 int handle_status(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
