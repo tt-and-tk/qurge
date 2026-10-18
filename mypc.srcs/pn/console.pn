@@ -292,8 +292,8 @@ int console_poll_connection(void) {
     return 1;
 }
 
-// TCPの端末が接続していれば，ためた出力を送ってから接続を閉じる．待ち受けていれば，待ち受けをやめる
-// 待ち受けは，次に接続を確かめるときに始め直す
+// TCPの端末を待ち受けていない状態へ戻す．接続していれば，ためた出力を送ってから接続を閉じる
+// 待ち受けは，次に接続を確かめるときに始め直される
 void console_close(void) {
     // 接続していれば，ためた出力を送ってから閉じる
     if (console_tcp_state == CONSOLE_TCP_CONNECTED) {
