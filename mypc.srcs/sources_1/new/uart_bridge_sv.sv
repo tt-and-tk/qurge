@@ -91,13 +91,13 @@ module uart_bridge_sv #(
 
     // 読み書きの段階
     typedef enum logic [2:0] {
-        START_WAIT,   // リセットの解除後，届きうる応答を捨てながら待っている
-        STATUS_ADDR,  // 状態のレジスタの読み出し番地を送っている
-        STATUS_DATA,  // 状態のレジスタの値を待っている
-        RX_ADDR,      // 受信FIFOの読み出し番地を送っている
-        RX_DATA,      // 受信FIFOから読み出したバイトを待っている
-        TX_REQUEST,   // 送信FIFOへの書き込み番地とデータを送っている
-        TX_RESPONSE   // 送信FIFOへの書き込みの応答を待っている
+        START_WAIT,       // リセットの解除後，届きうる応答を捨てながら待っている
+        STATUS_REQUEST,   // 状態のレジスタの読み出し番地を送っている
+        STATUS_RESPONSE,  // 状態のレジスタの値を待っている
+        RX_REQUEST,       // 受信FIFOの読み出し番地を送っている
+        RX_RESPONSE,      // 受信FIFOから読み出したバイトを待っている
+        TX_REQUEST,       // 送信FIFOへの書き込み番地とデータを送っている
+        TX_RESPONSE       // 送信FIFOへの書き込みの応答を待っている
     } step_enum;
 
     step_enum step = START_WAIT;                            // 読み書きの段階
@@ -139,7 +139,7 @@ module uart_bridge_sv #(
     );
 
     // 受信FIFOのバイトが成功の応答とともに届いたら，受信バッファへ入れる(失敗の応答で届いた値は受信したバイトではないため捨てる)
-    assign rx_push = (step == RX_DATA) && m_axi_rvalid && (m_axi_rresp == AXI_RESP_OKAY);
+    assign rx_push = (step == RX_RESPONSE) && m_axi_rvalid && (m_axi_rresp == AXI_RESP_OKAY);
     // 送信FIFOへの書き込みの応答が届いたら，送信バッファから取り除く
     // 失敗の応答でも取り除くのは，同じバイトを書き込み続けて送信が止まらないようにするため
     assign tx_pop = (step == TX_RESPONSE) && m_axi_bvalid;
@@ -158,9 +158,9 @@ module uart_bridge_sv #(
         // 書き込むのは最下位の1バイト
         m_axi_wstrb  = 4'b0001;
         // 読み出し番地は，段階に応じて状態のレジスタか受信FIFOを指す
-        m_axi_araddr  = (step == RX_ADDR) ? UART_FIFO_ADDR : UART_STATUS_ADDR;
+        m_axi_araddr  = (step == RX_REQUEST) ? UART_FIFO_ADDR : UART_STATUS_ADDR;
         // 読み出し番地は，番地を送る段階の間だけ有効にする
-        m_axi_arvalid = (step == STATUS_ADDR) || (step == RX_ADDR);
+        m_axi_arvalid = (step == STATUS_REQUEST) || (step == RX_REQUEST);
         // 書き込み番地とデータは，送る段階のうち，まだ受け取られていない間だけ有効にする
         m_axi_awvalid = (step == TX_REQUEST) && !aw_sent;
         m_axi_wvalid  = (step == TX_REQUEST) && !w_sent;
@@ -182,18 +182,18 @@ module uart_bridge_sv #(
                 START_WAIT: begin
                     start_wait_count <= start_wait_count + 1'b1;
                     if (start_wait_count == START_WAIT_CYCLES - 1) begin
-                        step <= STATUS_ADDR;
+                        step <= STATUS_REQUEST;
                     end
                 end
                 // 読み出し番地が受け取られたら，値を待つ
-                STATUS_ADDR: begin
+                STATUS_REQUEST: begin
                     if (m_axi_arready) begin
-                        step <= STATUS_DATA;
+                        step <= STATUS_RESPONSE;
                     end
                 end
                 // 状態が届いたら，受信FIFOの読み出しと送信FIFOへの書き込みのうち，できるものへ進む
                 // 失敗の応答で届いた値は状態ではないため，受信FIFOが空で送信FIFOが満杯とみなし，状態を読み直す
-                STATUS_DATA: begin
+                STATUS_RESPONSE: begin
                     if (m_axi_rvalid) begin
                         // 送信FIFOに空きがあるかを，受信FIFOを読み出した後の判断に使うため控える
                         tx_fifo_has_space <= (m_axi_rresp == AXI_RESP_OKAY) && !m_axi_rdata[UART_STATUS_TX_FULL];
@@ -207,7 +207,7 @@ module uart_bridge_sv #(
                             && rx_not_full
                         ) begin
                             // 受信FIFOから1バイト読み出す
-                            step <= RX_ADDR;
+                            step <= RX_REQUEST;
                         end
                         else if (
                             // 成功の応答である
@@ -222,24 +222,24 @@ module uart_bridge_sv #(
                         end
                         else begin
                             // どちらもできなければ，状態を読み直す
-                            step <= STATUS_ADDR;
+                            step <= STATUS_REQUEST;
                         end
                     end
                 end
                 // 読み出し番地が受け取られたら，バイトを待つ
-                RX_ADDR: begin
+                RX_REQUEST: begin
                     if (m_axi_arready) begin
-                        step <= RX_DATA;
+                        step <= RX_RESPONSE;
                     end
                 end
                 // バイトが届いたら(受信バッファへは別の組み合わせ回路で入れる)，続けて送信FIFOへ書き込めるなら書き込み，書き込めなければ状態を読み直す
-                RX_DATA: begin
+                RX_RESPONSE: begin
                     if (m_axi_rvalid) begin
                         if (tx_fifo_has_space && tx_not_empty) begin
                             step <= TX_REQUEST;
                         end
                         else begin
-                            step <= STATUS_ADDR;
+                            step <= STATUS_REQUEST;
                         end
                     end
                 end
@@ -266,7 +266,7 @@ module uart_bridge_sv #(
                 // 応答が届いたら(送信バッファからは別の組み合わせ回路で取り除く)，状態を読み直す
                 TX_RESPONSE: begin
                     if (m_axi_bvalid) begin
-                        step <= STATUS_ADDR;
+                        step <= STATUS_REQUEST;
                     end
                 end
                 default: begin
