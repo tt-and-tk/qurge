@@ -77,7 +77,7 @@ VivadoとVitis(版はVivadoと揃える)のbinディレクトリ(`vivado`・`xsc
 
 ### 開発中の書き込み
 
-動作を確かめる段階では，BOOT.BINを作らずに，VivadoのHardware ManagerからJTAG(USB)でビットストリームを書き込んでよい．ただし書き込みの前に，BOOT.BINを置いたカードで一度起動しておく．JTAGではPSを初期化しないため，CPUのクロックとリセットがFSBLの起動で供給されている必要がある．
+動作を確かめる段階では，BOOT.BINを置いたカードで一度起動した後に，VivadoのHardware ManagerからJTAG(USB)でビットストリームを書き込んで上書きしてよい．ビットストリームを作り直すたびにBOOT.BINを作り直さずに済む．先にBOOT.BINで起動しておくのは，JTAGではPSを初期化せず，CPUのクロックとリセットがFSBLの起動で初めて供給されるためである．
 
 ## ディレクトリ構造
 
