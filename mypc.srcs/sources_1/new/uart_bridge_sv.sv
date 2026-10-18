@@ -200,8 +200,10 @@ module uart_bridge_sv #(
                         step <= STATUS_RESPONSE;
                     end
                 end
-                // 状態が届いたら，受信FIFOの読み出しと送信FIFOへの書き込みのうち，できるものへ進む
-                // 失敗の応答で届いた値は状態ではないため，受信FIFOが空で送信FIFOが満杯とみなし，状態を読み直す
+                // 状態が届いたら，次のいずれかへ進む(失敗の応答で届いた値は状態ではないため，読み直す)
+                // - 成功の応答で，受信FIFOから読み出せる: 受信FIFOの読み出し
+                // - 成功の応答で，送信FIFOへ書き込める: 送信FIFOへの書き込み
+                // - それ以外: 状態の読み直し
                 STATUS_RESPONSE: begin
                     if (m_axi_rvalid) begin
                         // 送信FIFOに空きがあるかを，受信FIFOを読み出した後の判断に使うため控える
