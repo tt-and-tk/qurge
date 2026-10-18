@@ -2257,6 +2257,15 @@ module cpu_tb;
         expect_end();
         expect_uart_tx('{8'h41, 8'h43});
 
+        // 送信を指示した直後の命令と，数命令後の命令でUARTのレジスタを読み出す
+        `BEGIN_TEST("送信を指示した直後は空きがあることを示さず，後で空きがあることを示す");
+        run('{movi(UART_ADDR, 32'h141), movr(2, UART_ADDR), nop(), nop(), nop(), nop(), movr(3, UART_ADDR)});
+        // 直後の命令では空きがあることのビットが0になり，後の命令では空きがあることを示す
+        expect_end();
+        expect_uart_tx('{8'h41});
+        expect_reg(2, 32'h0);
+        expect_reg(3, 32'h0200_0000);
+
         // 送信バッファにためられるバイト数より1つ多く送信を指示してから，UARTのレジスタを読み出す
         `BEGIN_TEST("送信バッファが満杯になると送信の指示は無視され，空きがないことを示す");
         run('{movi(UART_ADDR, 32'h141), movi(UART_ADDR, 32'h142), movi(UART_ADDR, 32'h143), movi(UART_ADDR, 32'h144),
