@@ -202,7 +202,7 @@ void console_telnet_send(unsigned char command, unsigned char option) {
 }
 
 // TCPの接続が無ければ，待ち受けて相手が接続するまで待ち，接続した相手へtelnetのオプションを申し出る
-// ネットワークを設定していないか待ち受けを始められなければ，接続せずに戻る
+// 待ち受けの開始に失敗すれば(ネットワークの設定に失敗している場合を含む)，接続せずに戻る
 // 戻り値: 1(新たに接続した) / 0(既に接続しているか，接続せずに戻った)
 int console_accept(void) {
     int status;  // TCPの各関数の結果
@@ -215,7 +215,7 @@ int console_accept(void) {
     while (1) {
         // 待ち受けを始める
         status = tcp_listen(CONSOLE_PORT);
-        // ネットワークを設定していないか，モジュールが待ち受けの状態にならなければ，接続せずに戻る
+        // 待ち受けの開始に失敗すれば(ネットワークの設定に失敗している場合を含む)，接続せずに戻る
         if (status != TCP_OK) {
             return 0;
         }
