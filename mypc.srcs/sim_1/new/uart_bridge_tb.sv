@@ -482,6 +482,7 @@ module uart_bridge_tb;
         wait_tx(2);
         // 受信バッファが満杯のまま，送信バッファのバイトが書き込まれる
         expect_sent('{8'hf1, 8'hf2});
+        // 受信バッファに入りきらない分は，受信FIFOに残る
         if (model_rx_fifo.size() != 6 - BUFFER_DEPTH)
             fail($sformatf("受信FIFOに残ったバイト数: 期待値%0d，実際%0d", 6 - BUFFER_DEPTH, model_rx_fifo.size()));
         // 取り出すと，受信FIFOに残したバイトも順に受け取る
