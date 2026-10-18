@@ -697,7 +697,7 @@ void main(void) {
         console_print("> ");
         // コンソールから1行受け取る
         // 受け取る途中でTCPの端末が新たに接続すれば，受け取り途中の行を捨て，行を改めてOS名を出力してからプロンプトを出し直す
-        if (console_read_line(input, INPUT_SIZE) == CONSOLE_LINE_CONNECTED) {
+        if (console_read_line(input, INPUT_SIZE) == CONSOLE_LINE_NEW_CONNECTION) {
             console_print("\n");
             print_welcome();
             continue;

@@ -95,7 +95,7 @@ int syscall_console_read(int a, int b) {
     }
     // コンソールから，エコーと1行の編集をしながら受け取る
     // 受け取る途中でTCPの端末が新たに接続すれば，受け取り途中の行を捨てて受け取り直す(新たに接続した相手へOS名を出すのはシェルだけのため，ここでは何も出力しない)
-    while (console_read_line(buf, b) == CONSOLE_LINE_CONNECTED) {
+    while (console_read_line(buf, b) == CONSOLE_LINE_NEW_CONNECTION) {
     }
     // 行を確定したときの改行のエコーをTCPの端末へ送る(送れなければ，この中で接続が閉じる)
     // ためた出力は，シェルが次に入力を待つまで送られない

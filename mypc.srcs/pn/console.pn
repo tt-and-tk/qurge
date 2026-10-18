@@ -47,8 +47,8 @@ const int CONSOLE_TCP_CONNECTED = 2;  // 接続している
 const int CONSOLE_NEW_CONNECTION = -1;  // 受け取る前に，TCPの端末が新たに接続した
 
 // 1行の入力の結果
-const int CONSOLE_LINE_DONE = 1;       // 1行を受け取った
-const int CONSOLE_LINE_CONNECTED = 0;  // 受け取る途中で，TCPの端末が新たに接続した(受け取り途中の行は捨てる)
+const int CONSOLE_LINE_DONE = 1;            // 1行を受け取った
+const int CONSOLE_LINE_NEW_CONNECTION = 0;  // 受け取る途中で，TCPの端末が新たに接続した(受け取り途中の行は捨てる)
 
 // telnetのコマンドの値
 const unsigned char TELNET_IAC = 0xff;   // IAC(続くバイトがコマンドであることを示す)
@@ -522,7 +522,7 @@ int console_receive_char(void) {
 // - BSとDELは，格納した直前の1文字を取り消し，画面から消すエコーを送る(格納した文字が無ければ何もしない)
 // - 印字可能な文字とタブを格納してエコーする．配列の要素数-1文字を超える分と，それ以外の文字は捨てる
 // TCPの端末が新たに接続したときは，受け取り途中の行を捨てる(配列の内容は不定)
-// 戻り値: CONSOLE_LINE_DONE(1行を受け取った) / CONSOLE_LINE_CONNECTED(TCPの端末が新たに接続した)
+// 戻り値: CONSOLE_LINE_DONE(1行を受け取った) / CONSOLE_LINE_NEW_CONNECTION(TCPの端末が新たに接続した)
 int console_read_line(char *buf, int size) {
     int length = 0;  // 格納した文字数
     int c;           // 受け取った文字の値
@@ -533,7 +533,7 @@ int console_read_line(char *buf, int size) {
         c = console_receive_char();
         // TCPの端末が新たに接続すれば，受け取り途中の行を捨てて伝える
         if (c == CONSOLE_NEW_CONNECTION) {
-            return CONSOLE_LINE_CONNECTED;
+            return CONSOLE_LINE_NEW_CONNECTION;
         }
         // 復帰か改行であれば，終端して行を確定する
         if (c == '\r' || c == '\n') {
