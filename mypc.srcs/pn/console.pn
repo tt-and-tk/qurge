@@ -481,9 +481,11 @@ int console_receive_char(void) {
         // UARTの端末から受信していれば，その文字を受け取る
         c = uart_receive();
         if (c >= 0) {
-            // 読み捨てる文字でなければ，送った端末を控えて受け取った文字とする
+            // 読み捨てる文字でなければ，受け取った文字とする
             if (console_skip_after_cr(&console_uart_after_cr, c) == 0) {
+                // 送った端末をUARTの端末として控える
                 console_last_input_terminal = CONSOLE_TERMINAL_UART;
+                // 受け取った文字を返す
                 return c;
             }
             continue;
@@ -502,9 +504,11 @@ int console_receive_char(void) {
         if (c < 0) {
             continue;
         }
-        // 読み捨てる文字でなければ，送った端末を控えて受け取った文字とする
+        // 読み捨てる文字でなければ，受け取った文字とする
         if (console_skip_after_cr(&console_tcp_after_cr, c) == 0) {
+            // 送った端末をTCPの端末として控える
             console_last_input_terminal = CONSOLE_TERMINAL_TCP;
+            // 受け取った文字を返す
             return c;
         }
     }
