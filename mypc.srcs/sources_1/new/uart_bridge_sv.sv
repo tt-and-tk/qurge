@@ -138,11 +138,20 @@ module uart_bridge_sv #(
         .not_empty(rx_not_empty)
     );
 
-    // 受信FIFOのバイトが成功の応答とともに届いたら，受信バッファへ入れる(失敗の応答で届いた値は受信したバイトではないため捨てる)
-    assign rx_push = (step == RX_RESPONSE) && m_axi_rvalid && (m_axi_rresp == AXI_RESP_OKAY);
-    // 送信FIFOへの書き込みの応答が届いたら，送信バッファから取り除く
-    // 失敗の応答でも取り除くのは，同じバイトを書き込み続けて送信が止まらないようにするため
-    assign tx_pop = (step == TX_RESPONSE) && m_axi_bvalid;
+    // 受信FIFOから読み出したバイトを受信バッファへ入れるかを求める
+    assign rx_push =
+        // 受信FIFOから読み出したバイトを待っている
+        (step == RX_RESPONSE)
+        // かつ，応答が届いた
+        && m_axi_rvalid
+        // かつ，成功の応答である(失敗の応答で届いた値は受信したバイトではないため捨てる)
+        && (m_axi_rresp == AXI_RESP_OKAY);
+    // 送信バッファの先頭のバイトを取り除くかを求める
+    assign tx_pop =
+        // 送信FIFOへの書き込みの応答を待っている
+        (step == TX_RESPONSE)
+        // かつ，応答が届いた(失敗の応答でも取り除き，同じバイトを書き込み続けて送信が止まらないようにする)
+        && m_axi_bvalid;
 
     // AXIの信号のうち，段階によらず決まるもの
     always_comb begin
@@ -235,10 +244,18 @@ module uart_bridge_sv #(
                 // バイトが届いたら(受信バッファへは別の組み合わせ回路で入れる)，続けて送信FIFOへ書き込めるなら書き込み，書き込めなければ状態を読み直す
                 RX_RESPONSE: begin
                     if (m_axi_rvalid) begin
-                        if (tx_fifo_has_space && tx_not_empty) begin
+                        // 次に進む段階を選ぶ
+                        if (
+                            // 最後に読んだ状態で，送信FIFOに空きがあった
+                            tx_fifo_has_space
+                            // かつ，送信バッファに送るバイトがある
+                            && tx_not_empty
+                        ) begin
+                            // 送信FIFOへ1バイト書き込む
                             step <= TX_REQUEST;
                         end
                         else begin
+                            // 書き込めなければ，状態を読み直す
                             step <= STATUS_REQUEST;
                         end
                     end
