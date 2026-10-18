@@ -134,6 +134,14 @@ module alu_sv (
     input  logic        eth_miso,  // MISO(AR12)
     output logic        eth_sck,   // SCK(AR13)
 
+    // UARTの橋渡し回路(PSのUART0を使って，USBのシリアル通信でバイトを送受信する)
+    output logic        uart_tx_push,       // 1のサイクルに，送るバイトを送信バッファへ入れる
+    output logic [7:0]  uart_tx_data,       // 送るバイト
+    input  logic        uart_tx_not_full,   // 送信バッファに空きがあるか(1:ある)
+    output logic        uart_rx_pop,        // 1のサイクルに，受信バッファの先頭のバイトを取り除く
+    input  logic [7:0]  uart_rx_head,       // 受信バッファの先頭のバイト
+    input  logic        uart_rx_not_empty,  // 受信バッファに受信したバイトがあるか(1:ある)
+
     // ラズパイヘッダー
     output logic [26:8] gpio
     );
@@ -1106,6 +1114,49 @@ module alu_sv (
     logic ex2_alu_write;
     assign ex2_alu_write = ex2_occupied && ex_completes;
 
+    // UARTのレジスタの各ビット(書き込む値の指示のビットと，読み出す値の橋渡し回路の状態のビット)
+    localparam int UART_TX_DATA_LSB    = 0;   // 送るバイト(0〜7ビット目)
+    localparam int UART_TX_REQUEST     = 8;   // 1を書き込むと，送るバイトを送信バッファへ入れる
+    localparam int UART_RX_POP         = 9;   // 1を書き込むと，受信バッファの先頭のバイトを取り除く
+    localparam int UART_RX_HEAD_LSB    = 16;  // 受信バッファの先頭のバイト(16〜23ビット目)
+    localparam int UART_RX_NOT_EMPTY   = 24;  // 受信バッファに受信したバイトがあるか
+    localparam int UART_TX_NOT_FULL    = 25;  // 送信バッファに空きがあるか
+
+    // 実行段がこのサイクルにUARTのレジスタへ書き込むかと，書き込む値
+    // 指示のビットはレジスタに残らない(使わないビットとして0になる)ため，指示はレジスタではなく書き込む値から読み取る
+    logic      uart_write;
+    register_t uart_write_value;
+    always_comb begin
+        // 既定値として「書き込まない」を与え，UARTのレジスタへ書き込む経路があれば上書きする
+        uart_write       = 1'b0;
+        uart_write_value = '0;
+        // レジスタへの書き込みと同じ順に並べ，同じ番地へ重なった場合にレジスタに残る値と同じものを選ぶ
+        // 2本目のパイプラインの命令の結果
+        if (ex2_alu_write && ex2_rd_addr_r == UART_ADDR) begin
+            uart_write       = 1'b1;
+            uart_write_value = ex2_write_value;
+        end
+        // 複数サイクルかけて得た結果
+        if (late_write_valid && late_write_addr == UART_ADDR) begin
+            uart_write       = 1'b1;
+            uart_write_value = late_write_value;
+        end
+        // 割り算の余り
+        if (remainder_write_valid && remainder_write_addr == UART_ADDR) begin
+            uart_write       = 1'b1;
+            uart_write_value = remainder_write_value;
+        end
+        // 1本目のパイプラインの1サイクルで完了する命令の結果
+        if (ex_alu_write && rd_addr_r == UART_ADDR) begin
+            uart_write       = 1'b1;
+            uart_write_value = write_value;
+        end
+    end
+
+    // UARTのレジスタへ指示を書き込んだ次のサイクルか
+    // 指示は書き込んだ次のサイクルに橋渡し回路へ届き，その次のサイクルに橋渡し回路の状態へ反映される
+    logic uart_settling = 1'b0;
+
     // ===== 確認段から実行段への受け渡し(組み合わせ回路) =====
 
     // 実行段がこのサイクルに，指定した番地のレジスタへ書き込み，確認段の命令がその番地を読み出すか
@@ -1129,8 +1180,8 @@ module alu_sv (
     endfunction
 
     // 実行段がこのサイクルに一部だけ反映されるレジスタへ書き込み，確認段の命令がそのレジスタを読み出すか．
-    // 一部だけ反映されるレジスタへ書き込む命令はレジスタ全体(32ビット)の値を書き込むが，書き込んだ値で変わるのは
-    // ピンへ出力するビットだけであり，ピンの値を写すビットと使わないビットは書き込んだ値にならない．
+    // 一部だけ反映されるレジスタへ書き込む命令はレジスタ全体(32ビット)の値を書き込むが，書き込んだ値が残るのは
+    // ピンへ出力するビットだけであり，ピンの値や周辺回路の状態を写すビットと使わないビットは書き込んだ値にならない．
     // 書き込む32ビットの値を，レジスタへの書き込みを待たずに確認段の命令へ渡す(フォワーディングする)ことはしない．
     // 渡すと，これらのビットが書き込んだ値になって誤るため．
     // 正しい値は書き込みを終えたレジスタからしか読めないため，確認段の命令を実行段へ進めず，レジスタを読めるようになるまで1サイクル待たせる．
@@ -1360,6 +1411,12 @@ module alu_sv (
             stdin_tready <= 1'b0;
             stdout_tvalid <= 1'b0;
             stdout_tdata <= '0;
+
+            // UARTの橋渡し回路への指示を取り消す
+            uart_tx_push <= 1'b0;
+            uart_tx_data <= '0;
+            uart_rx_pop <= 1'b0;
+            uart_settling <= 1'b0;
 
             // メモリ読み書き
             ram_read.address <= 0;
@@ -1869,6 +1926,15 @@ module alu_sv (
                 register[rd_addr_r] <= write_value;
                 ex1_alu_result_r <= write_value;
             end
+            // UARTのレジスタへ書き込んだ指示を，次のサイクルに橋渡し回路へ1サイクルだけ渡す
+            // 送信の指示
+            uart_tx_push <= uart_write && uart_write_value[UART_TX_REQUEST];
+            // 送るバイト
+            uart_tx_data <= uart_write_value[UART_TX_DATA_LSB +: 8];
+            // 取り出しの指示
+            uart_rx_pop <= uart_write && uart_write_value[UART_RX_POP];
+            // 指示を書き込んだ次のサイクルであることを控える
+            uart_settling <= uart_write;
             // 実行段の1本目・2本目のパイプラインに命令が入っているかを更新する
             // 実行できる命令を受け取れば入り，2本目には同時実行する場合だけ入る
             // (分岐・ジャンプで後の命令を捨てる場合は，同じサイクルに受け取った命令も2命令とも捨てるため除く)
@@ -1895,7 +1961,7 @@ module alu_sv (
             // ===== IOからレジスタへの取り込み・使わないビットの0固定 =====
             // 同じクロックで同じ変数へ複数のノンブロッキング代入を行うと，代入する値はどれも代入前の値から求まるが，
             // 変数に残るのは後に実行した代入の値になる．この性質を使い，以下の代入は命令による書き込みより後に置いている．
-            // これにより，命令が同じサイクルに書き込んでも，ピンの値を写すビットにはピンの値が残り，使わないビットは0になる
+            // これにより，命令が同じサイクルに書き込んでも，ピンの値や周辺回路の状態を写すビットにはその値が残り，使わないビットは0になる
 
             // タクトスイッチ・DIPスイッチは同期化後の値で，ピンの値が届くまでこの1段と合わせて3サイクルかかる
             register[BTN_ADDR] <= {4'b0, btn_sync[1]};
@@ -1907,6 +1973,15 @@ module alu_sv (
             register[AR8_13_ADDR][4] <= eth_miso_sync[1];
             // AR_SPI・AR8_13のピンへ出力するビットには，ここでは触れない
             // 命令が書き込んだ値をそのまま保持するため
+            // UARTの橋渡し回路の状態は毎サイクル取り込む
+            // 指示を書き込んだサイクルとその次のサイクルは，指示を反映する前の状態が届くため，受信したバイトがあること・空きがあることを示さない
+            // (示すと，取り出したバイトをもう一度取り出したり，満杯の送信バッファへ入れたりするため)
+            // 受信バッファの先頭のバイト
+            register[UART_ADDR][UART_RX_HEAD_LSB +: 8] <= uart_rx_head;
+            // 受信したバイトがあるか
+            register[UART_ADDR][UART_RX_NOT_EMPTY] <= uart_rx_not_empty && !uart_write && !uart_settling;
+            // 送信バッファに空きがあるか
+            register[UART_ADDR][UART_TX_NOT_FULL] <= uart_tx_not_full && !uart_write && !uart_settling;
 
             // 各レジスタの使わないビットは，命令が書き込んだ値によらず毎サイクル0にする
             // 0のまま変わらないビットとして，合成でフリップフロップを削除させるため

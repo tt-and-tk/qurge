@@ -73,6 +73,12 @@ module cpu_tb;
     logic        eth_rstn, eth_csn, eth_mosi, eth_sck;     // EthernetモジュールのRSTn・CSn・MOSI・SCK
     logic        eth_intn = 1'b0;                          // EthernetモジュールのINTn
     logic        eth_miso = 1'b0;                          // EthernetモジュールのMISO
+    logic        uart_tx_push;                             // CPUが送るバイトを送信バッファへ入れるか
+    logic [ 7:0] uart_tx_data;                             // CPUが送るバイト
+    logic        uart_tx_not_full = 1'b0;                  // 送信バッファに空きがあるか
+    logic        uart_rx_pop;                              // CPUが受信バッファの先頭のバイトを取り除くか
+    logic [ 7:0] uart_rx_head = '0;                        // 受信バッファの先頭のバイト
+    logic        uart_rx_not_empty = 1'b0;                 // 受信バッファに受信したバイトがあるか
     logic [26:8] gpio;                                     // ラズパイヘッダーのGPIO8〜GPIO26
 
     // 試験対象のCPU
@@ -124,6 +130,12 @@ module cpu_tb;
         .eth_mosi(eth_mosi),
         .eth_miso(eth_miso),
         .eth_sck(eth_sck),
+        .uart_tx_push(uart_tx_push),
+        .uart_tx_data(uart_tx_data),
+        .uart_tx_not_full(uart_tx_not_full),
+        .uart_rx_pop(uart_rx_pop),
+        .uart_rx_head(uart_rx_head),
+        .uart_rx_not_empty(uart_rx_not_empty),
         .gpio(gpio)
     );
 
@@ -222,6 +234,34 @@ module cpu_tb;
             else
                 stdout_wait <= stdout_wait + 1;
         end
+    end
+
+    // ===== UARTの橋渡し回路のモデル =====
+    // CPUから見た受け渡しだけを模し，PSのUART0との読み書きは行わない．
+    // 実物と同じく，受け取った指示は次のサイクルに状態(先頭のバイト・バイトがあるか・空きがあるか)へ反映する
+
+    localparam int UART_TX_DEPTH = 4;  // 送信バッファにためられるバイト数(満杯の場合を少ない命令で確かめるため，実物より少なくする)
+
+    logic [7:0] uart_rx_queue[$];  // 受信バッファにあるバイトの列(実行前にテストケースが入れる)
+    logic [7:0] uart_tx_log[$];    // 送信バッファへ入ったバイトの列
+
+    // 受信バッファ．取り出しの指示を受けたら先頭のバイトを取り除く
+    always @(posedge clk) begin
+        // 取り出しの指示を受け，バイトがあれば先頭を取り除く(リセットでは消さない．テストケースが実行前に入れた列を残すため)
+        if (resetn && uart_rx_pop && uart_rx_queue.size() > 0)
+            void'(uart_rx_queue.pop_front());
+        // 取り除いた後の状態を出す
+        uart_rx_not_empty <= uart_rx_queue.size() > 0;
+        uart_rx_head      <= (uart_rx_queue.size() > 0) ? uart_rx_queue[0] : 8'h00;
+    end
+
+    // 送信バッファ．送信の指示を受け，空きがあれば送るバイトを記録する
+    always @(posedge clk) begin
+        // 空きがあれば記録する
+        if (resetn && uart_tx_push && uart_tx_log.size() < UART_TX_DEPTH)
+            uart_tx_log.push_back(uart_tx_data);
+        // 記録した後の状態を出す
+        uart_tx_not_full <= uart_tx_log.size() < UART_TX_DEPTH;
     end
 
     // ===== テストケースの記述を短くする関数 =====
@@ -345,8 +385,9 @@ module cpu_tb;
         // リセット中に，ROMの末尾へ置く命令列を書き込む(有効な命令数がROMの命令数の上限まで広がる)
         if (rom_tail.size() > 0)
             rom.place(rom_p::MAX_LINE_NUM - rom_tail.size(), rom_tail);
-        // リセット中に，前の実行で受け取った標準出力を消す
+        // リセット中に，前の実行で受け取った標準出力と，送信バッファへ入ったバイトを消す
         stdout_log.delete();
+        uart_tx_log.delete();
         // リセットを2サイクル保ってから解除する
         repeat (2) @(negedge clk);
         resetn = 1'b1;
@@ -415,7 +456,7 @@ module cpu_tb;
     endfunction
 
     // 前のテストケースを合否の件数へ数え，新しいテストケースを始める．
-    // 標準入出力の相手は入力なし・待ちなしの状態に，メモリの後半・ROMの末尾へ置く命令列は空に戻す
+    // 標準入出力の相手は入力なし・待ちなしの状態に，UARTの受信バッファ，メモリの後半・ROMの末尾へ置く命令列は空に戻す
     function automatic void begin_test(input string name);
         // 前のテストケースを数える
         finish_test();
@@ -427,6 +468,8 @@ module cpu_tb;
         stdin_queue.delete();
         stdin_delay  = 0;
         stdout_delay = 0;
+        // UARTの受信バッファを空にする
+        uart_rx_queue.delete();
         // メモリの後半・ROMの末尾へ置く命令列を空にする
         code_area.delete();
         code_area_index = 0;
@@ -1169,7 +1212,7 @@ module cpu_tb;
     // 仕様(register.md)の表に基づき，その番地のレジスタを命令のオペランドとして読めるかを返す
     function automatic bit spec_readable(input addr_t addr);
         case (addr) inside
-            [6'h00:6'h10], [6'h1c:6'h21], 6'h26, 6'h2a: return 1'b1;
+            [6'h00:6'h10], [6'h1c:6'h21], 6'h26, 6'h2a, 6'h31: return 1'b1;
             default: return 1'b0;
         endcase
     endfunction
@@ -1177,7 +1220,7 @@ module cpu_tb;
     // 仕様(register.md)の表に基づき，その番地のレジスタを命令のオペランドとして書けるかを返す
     function automatic bit spec_writable(input addr_t addr);
         case (addr) inside
-            [6'h00:6'h10], 6'h1d, 6'h1e, [6'h22:6'h28], 6'h2a, [6'h2d:6'h30]: return 1'b1;
+            [6'h00:6'h10], 6'h1d, 6'h1e, [6'h22:6'h28], 6'h2a, [6'h2d:6'h31]: return 1'b1;
             default: return 1'b0;
         endcase
     endfunction
@@ -2174,6 +2217,85 @@ module cpu_tb;
         expect_reg(2, 32'b111011);
     endtask
 
+    // 直前の実行で送信バッファへ入ったバイトの列を確かめる
+    function automatic void expect_uart_tx(input logic [7:0] values[$]);
+        if (uart_tx_log != values)
+            fail($sformatf("送信バッファへ入ったバイト: 期待値%p，実際%p", values, uart_tx_log));
+    endfunction
+
+    // UARTのレジスタ．送信の指示は書き込んだ次のサイクルにモデルへ届くため，送信を確かめる命令列は末尾にNOPを置いてから正常終了させる
+    task automatic test_uart();
+        // 受信バッファが空で送信バッファに空きがある状態で，UARTのレジスタを読み出す
+        `BEGIN_TEST("UARTのレジスタで送信バッファに空きがあることを読める");
+        run('{movr(1, UART_ADDR)});
+        // 空きがあることを示すビット25だけが1になる
+        expect_end();
+        expect_reg(1, 32'h0200_0000);
+
+        // 受信バッファに1バイトある状態で，UARTのレジスタを読み出す
+        `BEGIN_TEST("UARTのレジスタで受信バッファの先頭のバイトを読める");
+        uart_rx_queue = '{8'h41};
+        run('{movr(1, UART_ADDR)});
+        // ビット16〜23が先頭のバイト，ビット24が受信したバイトがあること，ビット25が空きがあることを示す
+        expect_end();
+        expect_reg(1, 32'h0341_0000);
+
+        // 受信バッファに2バイトある状態で，取り出しを指示した直後の命令と，数命令後の命令で読み出す
+        `BEGIN_TEST("取り出しを指示した直後は受信したバイトがあることを示さず，後で次のバイトを示す");
+        uart_rx_queue = '{8'h41, 8'h42};
+        run('{movi(5, 32'h0300_0000), movi(UART_ADDR, 32'h200), movr(2, UART_ADDR), nop(), nop(), nop(), nop(), movr(3, UART_ADDR),
+              and_(2, 5, 4)});
+        // 直後の命令ではバイトがあること・空きがあることのビットが0になり，後の命令では1バイトだけ取り除いた状態が読める
+        expect_end();
+        expect_reg(4, 32'h0);
+        expect_reg(3, 32'h0342_0000);
+
+        // 送信を指示するビットを立てた値と，立てない値を続けてUARTのレジスタへ書き込む
+        `BEGIN_TEST("送信を指示したバイトだけが送信バッファへ入る");
+        run('{movi(UART_ADDR, 32'h141), movi(UART_ADDR, 32'h042), movi(UART_ADDR, 32'h143), nop(), nop()});
+        // 送信を指示した1つ目と3つ目のバイトが，書き込んだ順に入る
+        expect_end();
+        expect_uart_tx('{8'h41, 8'h43});
+
+        // 送信バッファにためられるバイト数より1つ多く送信を指示してから，UARTのレジスタを読み出す
+        `BEGIN_TEST("送信バッファが満杯になると送信の指示は無視され，空きがないことを示す");
+        run('{movi(UART_ADDR, 32'h141), movi(UART_ADDR, 32'h142), movi(UART_ADDR, 32'h143), movi(UART_ADDR, 32'h144),
+              movi(UART_ADDR, 32'h145), nop(), nop(), nop(), nop(), movr(1, UART_ADDR)});
+        // ためられる4バイトだけが入り，空きがあることのビットが0になる
+        expect_end();
+        expect_uart_tx('{8'h41, 8'h42, 8'h43, 8'h44});
+        expect_reg(1, 32'h0);
+
+        // 代入と，UARTのレジスタへの送信の指示を同時実行する
+        `BEGIN_TEST("同時実行した2番目の命令による送信の指示も送信バッファへ入る");
+        run('{movi(1, 32'd1), movi(UART_ADDR, 32'h146), nop(), nop()});
+        // 指示したバイトが入る
+        expect_end();
+        expect_uart_tx('{8'h46});
+
+        // メモリから読んだ値をRMでUARTのレジスタへ書き込む
+        `BEGIN_TEST("RMによる送信の指示も送信バッファへ入る");
+        run('{movi(1, 32'h147), wm(4'hf, 6'h00, 1, im(32'h100)), rm(4'hf, 6'h00, UART_ADDR, im(32'h100)), nop(), nop()});
+        // 読んだ値のバイトが入る
+        expect_end();
+        expect_uart_tx('{8'h47});
+
+        // 0x148÷0x1000の余り0x148を，UARTのレジスタへ書き込む
+        `BEGIN_TEST("割り算の余りによる送信の指示も送信バッファへ入る");
+        run('{movi(1, 32'h148), movi(2, 32'h1000), div(1, 2, 3, im(UART_ADDR)), nop(), nop()});
+        // 余りのバイトが入る
+        expect_end();
+        expect_uart_tx('{8'h48});
+
+        // 全ビットが1の値をUARTのレジスタへ書き込んでから，数命令後に読み出す
+        `BEGIN_TEST("UARTのレジスタへ書き込んだ指示のビットは読み出せない");
+        run('{movi(UART_ADDR, '1), nop(), nop(), nop(), nop(), movr(1, UART_ADDR)});
+        // 送信を指示したバイトが入り，読み出した値は空きがあることのビット25だけが1になる
+        expect_end();
+        expect_uart_tx('{8'hff});
+        expect_reg(1, 32'h0200_0000);
+    endtask
+
     initial begin
         // 命令の種類ごとのテストケースを実行する
         test_n_type();
@@ -2188,6 +2310,7 @@ module cpu_tb;
         test_register_access();
         test_operand_checks();
         test_pins();
+        test_uart();
         test_common();
         test_code_area();
         test_pipeline();

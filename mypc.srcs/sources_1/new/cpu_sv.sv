@@ -93,6 +93,14 @@ module cpu_sv import machine_p::*; (
     input  logic         eth_miso,
     output logic         eth_sck,
 
+    // UARTの橋渡し回路
+    output logic         uart_tx_push,
+    output logic [7:0]   uart_tx_data,
+    input  logic         uart_tx_not_full,
+    output logic         uart_rx_pop,
+    input  logic [7:0]   uart_rx_head,
+    input  logic         uart_rx_not_empty,
+
     // ラズパイヘッダー
     output logic [26:8] gpio
     );
@@ -158,6 +166,12 @@ module cpu_sv import machine_p::*; (
         .eth_mosi(eth_mosi),
         .eth_miso(eth_miso),
         .eth_sck(eth_sck),
+        .uart_tx_push(uart_tx_push),
+        .uart_tx_data(uart_tx_data),
+        .uart_tx_not_full(uart_tx_not_full),
+        .uart_rx_pop(uart_rx_pop),
+        .uart_rx_head(uart_rx_head),
+        .uart_rx_not_empty(uart_rx_not_empty),
         .gpio(gpio)
     );
 

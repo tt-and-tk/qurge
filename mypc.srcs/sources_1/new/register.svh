@@ -27,5 +27,6 @@ parameter machine_p::func_t GPIO0_ADDR         = 6'h2d;
 parameter machine_p::func_t GPIO1_ADDR         = 6'h2e;
 parameter machine_p::func_t GPIO2_ADDR         = 6'h2f;
 parameter machine_p::func_t GPIO3_ADDR         = 6'h30;
+parameter machine_p::func_t UART_ADDR          = 6'h31;
 
 `endif

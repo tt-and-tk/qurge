@@ -96,8 +96,11 @@ package alu_p;
         // GPIO
         else if (6'h2d <= addr && addr <= 6'h30)
             is_readable = util_p::FALSE;
+        // UART
+        else if (addr == 6'h31)
+            is_readable = util_p::TRUE;
         // 空き
-        else if (6'h31 <= addr && addr <= 6'h34)
+        else if (6'h32 <= addr && addr <= 6'h34)
             is_readable = util_p::FALSE;
         // 定義されていない
         else
@@ -169,8 +172,11 @@ package alu_p;
         // GPIO
         else if (6'h2d <= addr && addr <= 6'h30)
             is_writable = util_p::TRUE;
+        // UART
+        else if (addr == 6'h31)
+            is_writable = util_p::TRUE;
         // 空き
-        else if (6'h31 <= addr && addr <= 6'h34)
+        else if (6'h32 <= addr && addr <= 6'h34)
             is_writable = util_p::FALSE;
         // 定義されていない
         else
@@ -251,8 +257,11 @@ package alu_p;
         // GPIO24〜GPIO26
         else if (addr == 6'h30)
             used_bits = 32'h7;
+        // UART．指示のビット(0〜9ビット目)は書き込んだ値を保持せず，橋渡し回路の状態を写すビット(16〜25ビット目)だけを使う
+        else if (addr == 6'h31)
+            used_bits = 32'h03ff_0000;
         // 空き
-        else if (6'h31 <= addr && addr <= 6'h34)
+        else if (6'h32 <= addr && addr <= 6'h34)
             used_bits = '0;
         // 定義されていない
         else
