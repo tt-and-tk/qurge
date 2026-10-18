@@ -97,6 +97,8 @@ module uart_bridge_tb;
     int         model_status_errors = 0; // これから返す状態のレジスタの読み出しの応答のうち，失敗の応答にする数
     int         model_fifo_errors = 0;   // これから返す受信FIFOの読み出しの応答のうち，失敗の応答にする数(失敗の応答では受信FIFOからバイトを取り除かない)
     int         model_write_errors = 0;  // これから返す書き込みの応答のうち，失敗の応答にする数
+    int         model_aw_extra = 0;   // 書き込み番地を受け取るまでに，番地・データに共通のサイクル数より多く空けるサイクル数
+    int         model_w_extra = 1;    // 書き込みデータを受け取るまでに，番地・データに共通のサイクル数より多く空けるサイクル数
     int         model_reads = 0;      // 読み出し番地を受け取った回数
     bit         aw_received = 0;      // 書き込み番地を受け取り，まだ応答していないか
     bit         w_received = 0;       // 書き込みデータを受け取り，まだ応答していないか
@@ -170,7 +172,7 @@ module uart_bridge_tb;
         @(negedge clk);
         if (!awvalid || aw_received)
             continue;
-        repeat (model_delay) @(negedge clk);
+        repeat (model_delay + model_aw_extra) @(negedge clk);
         awready = 1'b1;
         @(posedge clk);
         // 待つ間にリセットで取り下げられていれば，受け取らずに次の番地を待つ
@@ -185,12 +187,13 @@ module uart_bridge_tb;
         awready = 1'b0;
     end
 
-    // 書き込みデータ: 書き込み番地より1サイクル多く空けてから受け取る(番地とデータを別々のサイクルに受け取る場合を確かめるため)
+    // 書き込みデータ: 決められたサイクル数だけ空けてから受け取る
+    // 空けるサイクル数を番地と変えて，番地とデータを受け取る順と，同じサイクルに受け取る場合を確かめる(既定はデータを番地より1サイクル後に受け取る)
     initial forever begin
         @(negedge clk);
         if (!wvalid || w_received)
             continue;
-        repeat (model_delay + 1) @(negedge clk);
+        repeat (model_delay + model_w_extra) @(negedge clk);
         wready = 1'b1;
         @(posedge clk);
         // 待つ間にリセットで取り下げられていれば，受け取らずに次のデータを待つ
@@ -258,6 +261,8 @@ module uart_bridge_tb;
         model_status_errors = 0;
         model_fifo_errors = 0;
         model_write_errors = 0;
+        model_aw_extra = 0;
+        model_w_extra = 1;
         model_reads = 0;
         aw_received = 0;
         w_received = 0;
@@ -401,6 +406,27 @@ module uart_bridge_tb;
         wait_tx(2);
         // 入れた順に書き込まれる
         expect_sent('{8'h61, 8'h62});
+
+        // スレーブが書き込みデータを書き込み番地より2サイクル先に受け取る状態で，送信バッファへ2バイト入れる
+        `BEGIN_TEST("書き込みデータを書き込み番地より先に受け取られても送信FIFOへ書き込む");
+        reset_dut();
+        model_aw_extra = 2;
+        model_w_extra = 0;
+        push_tx(8'h64);
+        push_tx(8'h65);
+        wait_tx(2);
+        // 入れた順に書き込まれる
+        expect_sent('{8'h64, 8'h65});
+
+        // スレーブが書き込み番地とデータを同じサイクルに受け取る状態で，送信バッファへ2バイト入れる
+        `BEGIN_TEST("書き込み番地とデータを同じサイクルに受け取られても送信FIFOへ書き込む");
+        reset_dut();
+        model_w_extra = 0;
+        push_tx(8'h66);
+        push_tx(8'h67);
+        wait_tx(2);
+        // 入れた順に書き込まれる
+        expect_sent('{8'h66, 8'h67});
 
         // 送信FIFOが満杯の状態で送信バッファへ入れ，しばらく待ってから空きを作る
         `BEGIN_TEST("送信FIFOが満杯の間は書き込まず，空いたら書き込む");
