@@ -1156,14 +1156,14 @@ module alu_sv (
             && (
                 // 1本目のパイプラインでこのサイクルに完了する1サイクル命令の結果を，このサイクルに書き込む
                 (ex_alu_write          && rd_addr_r            == addr)
+                // 1本目のパイプラインでこのサイクルに完了する複数サイクル命令の結果を，このサイクルに書き込む
+             || (late_write_valid      && late_write_addr      == addr)
+                // 1本目のパイプラインでこのサイクルに完了する割り算の余りを，このサイクルに書き込む
+             || (remainder_write_valid && remainder_write_addr == addr)
                 // 2本目のパイプラインでこのサイクルに完了する命令の結果を，次のサイクルに書き込む
              || (ex2_completes         && ex2_rd_addr_r        == addr)
                 // 2本目のパイプラインで前のサイクルに完了した命令の結果を，このサイクルに書き込む
              || (ex2_write_pending     && ex2_pending_addr     == addr)
-                // 1本目のパイプラインでこのサイクルに完了する複数サイクル命令の結果を，このサイクルに書き込む
-             || (late_write_valid      && late_write_addr      == addr)
-                // このサイクルに完了する割り算の余りを，このサイクルに書き込む
-             || (remainder_write_valid && remainder_write_addr == addr)
             );
     endfunction
 
