@@ -38,7 +38,7 @@ const int CONSOLE_TERMINAL_TCP = 0;   // TCPの端末
 const int CONSOLE_TERMINAL_UART = 1;  // UARTの端末
 
 // TCPの端末の状態
-const int CONSOLE_TCP_IDLE = 0;      // 接続を待ち受けていない
+const int CONSOLE_TCP_IDLE = 0;       // 接続を待ち受けていない
 const int CONSOLE_TCP_LISTENING = 1;  // 接続を待ち受けている
 const int CONSOLE_TCP_CONNECTED = 2;  // 接続している
 
