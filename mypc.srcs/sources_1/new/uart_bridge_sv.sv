@@ -101,7 +101,7 @@ module uart_bridge_sv #(
     } step_enum;
 
     step_enum step = START_WAIT;                            // 読み書きの段階
-    logic [$clog2(START_WAIT_CYCLES):0] start_wait_count = '0;  // 待ち始めてから数えたサイクル数
+    logic [$clog2(START_WAIT_CYCLES)-1:0] start_wait_count = '0;  // 待ち始めてから数えたサイクル数(0〜待つサイクル数-1)
     logic tx_fifo_has_space = 1'b0;                         // 最後に読んだ状態で，送信FIFOに空きがあったか
     logic aw_sent = 1'b0;                                   // 送信FIFOへの書き込み番地を送り終えたか
     logic w_sent = 1'b0;                                    // 送信FIFOへの書き込みデータを送り終えたか
