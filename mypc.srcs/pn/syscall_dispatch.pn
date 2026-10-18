@@ -95,7 +95,7 @@ int syscall_console_read(int a, int b) {
     }
     // TCPの接続から，エコーと1行の編集をしながら受け取る
     if (console_read_line(buf, b) == 0) {
-        // 接続していないか途中で接続が閉じれば，受け取れない
+        // 接続が呼び出す前に閉じているか途中で閉じれば，エラーを返す
         return SYSCALL_ERR_DISCONNECTED;
     }
     // 行を確定したときの改行のエコーを送る(送れなければ，この中で接続が閉じる)
