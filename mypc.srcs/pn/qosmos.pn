@@ -702,7 +702,8 @@ void main(void) {
             // 起動時の出力は接続より前で相手に届いていないため，案内を出力する
             print_welcome();
         }
-        console_print("> ");  // 入力待ちであることを示すプロンプト
+        // 入力待ちであることを示すプロンプトを出力する
+        console_print("> ");
         // TCPの接続から1行受け取る(プロンプトの送信や受け取る途中で接続が閉じれば，その行は捨てて次の接続を待つ)
         if (console_read_line(input, INPUT_SIZE) == 0) {
             continue;
