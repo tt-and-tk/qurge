@@ -235,7 +235,7 @@ module uart_bridge_tb;
         bvalid = 1'b0;
     end
 
-    // 保護属性は常にセキュアなデータの読み書きを表す値で出す
+    // 保護属性は常に非特権・セキュア・データの読み書きを表す値で出す
     always @(posedge clk) begin
         if (arvalid && arprot != 3'b000)
             fail($sformatf("読み出しの保護属性: 期待値000，実際%b", arprot));
