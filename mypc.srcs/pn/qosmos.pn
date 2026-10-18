@@ -482,8 +482,13 @@ int handle_exit(int pos) {
         print_error("too many arguments\n");
         return EXIT_FAILURE;
     }
-    // TCPの端末が接続していなければ(UARTの端末から実行した場合や，コマンドを受け取った後の出力の送信で接続が切れた場合)，閉じる接続が無いため失敗とする
-    if (console_tcp_state != CONSOLE_TCP_CONNECTED) {
+    // コマンドを打った端末が接続中のTCPの端末でなければ，閉じる接続が無いため失敗とする
+    if (
+        // UARTの端末から打った
+        console_last_input_terminal != CONSOLE_TERMINAL_TCP
+        // コマンドを受け取った後の出力の送信で，TCPの接続が切れた
+        || console_tcp_state != CONSOLE_TCP_CONNECTED
+    ) {
         print_error("not connected\n");
         return EXIT_FAILURE;
     }
