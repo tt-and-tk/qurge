@@ -44,10 +44,10 @@ module uart_bridge_sv #(
     input  logic        resetn,
 
     // CPUとの受け渡し
-    input  logic        tx_push,       // 1のサイクルに，送るバイトを送信バッファへ入れる(満杯なら入れない)
+    input  logic        tx_push,       // 1のサイクルに，送信バッファに空きがあれば，送るバイトを入れる
     input  logic [7:0]  tx_data,       // 送るバイト
     output logic        tx_not_full,   // 送信バッファに空きがあるか(1:ある)
-    input  logic        rx_pop,        // 1のサイクルに，受信バッファの先頭のバイトを取り除く
+    input  logic        rx_pop,        // 1のサイクルに，受信バッファにバイトがあれば，先頭のバイトを取り除く
     output logic [7:0]  rx_head,       // 受信バッファの先頭のバイト
     output logic        rx_not_empty,  // 受信バッファに受信したバイトがあるか(1:ある)
 

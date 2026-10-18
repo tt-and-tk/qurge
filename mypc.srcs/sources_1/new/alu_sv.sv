@@ -135,10 +135,10 @@ module alu_sv (
     output logic        eth_sck,   // SCK(AR13)
 
     // UARTの橋渡し回路(PSのUART0を使って，USBのシリアル通信でバイトを送受信する)
-    output logic        uart_tx_push,       // 1のサイクルに，送るバイトを送信バッファへ入れる
+    output logic        uart_tx_push,       // 1のサイクルに，送るバイトを送信バッファへ入れるよう橋渡し回路へ指示する
     output logic [7:0]  uart_tx_data,       // 送るバイト
     input  logic        uart_tx_not_full,   // 送信バッファに空きがあるか(1:ある)
-    output logic        uart_rx_pop,        // 1のサイクルに，受信バッファの先頭のバイトを取り除く
+    output logic        uart_rx_pop,        // 1のサイクルに，受信バッファの先頭のバイトを取り除くよう橋渡し回路へ指示する
     input  logic [7:0]  uart_rx_head,       // 受信バッファの先頭のバイト
     input  logic        uart_rx_not_empty,  // 受信バッファに受信したバイトがあるか(1:ある)
 
