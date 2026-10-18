@@ -129,17 +129,17 @@ module mother_board_sv(
         .sw(sw),
         .led(led),
         .rgb_led(rgb_led),
-        // 標準入出力
-        .stdin_tdata(32'h0),
-        .stdin_tkeep(4'h0),
-        .stdin_tlast(1'b0),
-        .stdin_tready(stdin_tready),
+        // 標準入出力(入力は固定値，出力は捨てる信号へつなぐ)
+        .stdin_tdata(32'h0),                // 入力のデータ(届かないため使われない)
+        .stdin_tkeep(4'h0),                 // 入力のデータの有効なバイト(同上)
+        .stdin_tlast(1'b0),                 // 入力のデータの末尾を示す信号(同上)
+        .stdin_tready(stdin_tready),        // 捨てる
         .stdin_tvalid(1'b0),                // 入力は届かない
-        .stdout_tdata(stdout_tdata),
-        .stdout_tkeep(stdout_tkeep),
-        .stdout_tlast(stdout_tlast),
+        .stdout_tdata(stdout_tdata),        // 捨てる
+        .stdout_tkeep(stdout_tkeep),        // 捨てる
+        .stdout_tlast(stdout_tlast),        // 捨てる
         .stdout_tready(1'b1),               // 出力は常に受け取る
-        .stdout_tvalid(stdout_tvalid),
+        .stdout_tvalid(stdout_tvalid),      // 捨てる
         .ja(ja),
         .jb(jb),
         .ar(ar),
