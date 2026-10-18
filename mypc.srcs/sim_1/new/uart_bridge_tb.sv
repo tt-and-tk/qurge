@@ -472,6 +472,22 @@ module uart_bridge_tb;
         expect_received('{8'h81, 8'h82, 8'h83});
         expect_sent('{8'h91, 8'h92});
 
+        // 受信FIFOのバイトで受信バッファを満杯にしてから，取り出さずに送信バッファへ2バイト入れる
+        `BEGIN_TEST("受信バッファが満杯の間も送信FIFOへ書き込む");
+        reset_dut();
+        model_rx_fifo = '{8'he1, 8'he2, 8'he3, 8'he4, 8'he5, 8'he6};
+        repeat (START_WAIT_CYCLES + 200) @(negedge clk);
+        push_tx(8'hf1);
+        push_tx(8'hf2);
+        wait_tx(2);
+        // 受信バッファが満杯のまま，送信バッファのバイトが書き込まれる
+        expect_sent('{8'hf1, 8'hf2});
+        if (model_rx_fifo.size() != 6 - BUFFER_DEPTH)
+            fail($sformatf("受信FIFOに残ったバイト数: 期待値%0d，実際%0d", 6 - BUFFER_DEPTH, model_rx_fifo.size()));
+        // 取り出すと，受信FIFOに残したバイトも順に受け取る
+        receive(6);
+        expect_received('{8'he1, 8'he2, 8'he3, 8'he4, 8'he5, 8'he6});
+
         // リセットを解除した直後に，求めていない読み出しと書き込みの応答を届ける
         `BEGIN_TEST("リセットの解除後に届いた求めていない応答を捨て，その後の読み書きを正しく行う");
         reset_dut();
