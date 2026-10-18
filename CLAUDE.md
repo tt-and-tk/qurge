@@ -10,7 +10,7 @@ PYNQ-Z2(Zynq-7000)上に実装する自作CPUと，それを動かすソフト�
 
 | リポジトリ(GitHub) | ディレクトリ(`pc/`配下) | 役割 |
 |:-|:-|:-|
-| `specification` | `specification/` | CPUアーキテクチャ・ISA・アセンブリ言語・コンパイラ・Qosmosの仕様のドキュメント(唯一の一次情報源) |
+| `specification` | `specification/` | CPUアーキテクチャ・ISA・アセンブリ言語・コンパイラ・Qosmosの仕様と，実機の構成のドキュメント(唯一の一次情報源) |
 | `pyntaxis` | `assembler/` | 自作アセンブリ言語Pyntaxis(`.pt`) → SystemVerilog ROM(`.sv`)，または自作OS Qosmosの実行ファイルへのアセンブラ |
 | `pynesis` | `compiler/` | 自作プログラミング言語Pynesis(`.pn`) → アセンブリ言語Pyntaxisへのコンパイラ．`pyntaxis`のソースファイルをincludeして使用し，`.sv`または実行ファイルまで一貫変換も可能 |
 | `qurge`(本リポジトリ) | `mypc/` | CPU・メモリ・ROM等のハードウェア全体のVivadoプロジェクト(SystemVerilog)と，ROM上で動く自作OS Qosmos(シェルやファイルシステムなど．Pynesisで記述．仕様は`specification`の`qosmos.md`) |
@@ -68,10 +68,7 @@ ROMの内容(`rom_sv.sv`)とブロックダイアグラムは，どちらのテ�
 PYNQ-Z2は，電源を入れるとボードのSDカードスロットに挿したカードのBOOT.BINから起動する．BOOT.BINには，FSBLとビットストリームだけを入れる．FSBL(First Stage Boot Loader)は，PS(ARM)が最初に実行するプログラムで，PSを初期化してからビットストリームをPLへ書き込む．書き込み後は，PL上のCPUがプログラムを実行し続け，PSのCPUは何も実行しない．CPUのクロックとリセットはPSから受け取っており，PSを初期化して初めて供給される．\
 PSの回路のうちUART0だけは，書き込み後もPLから使う．PYNQ-Z2の電源用のUSBはUART0にだけつながっているため，PL上のUARTの橋渡し回路が，PSのS_AXI_GP0ポートを通してUART0のレジスタを読み書きする．通信速度などのUART0の設定はFSBLが済ませる．
 
-SDカードは2枚使う．
-
-- ボードのSDカードスロットのカード: FAT32でフォーマットし，BOOT.BINを第1パーティションのルートに置く．ボードの起動元を選ぶジャンパ(Boot)はSDにしておく
-- ArduinoヘッダのSPIにつないだカード: Qosmosのファイルシステムを置く(仕様は`specification`の`qosmos.md`)
+SDカードは，BOOT.BINを置くボードのカードと，Qosmosのファイルシステムを置くシールド(ボードのArduinoヘッダに重ねる拡張基板)のカードの2枚を使う．カードの置き方・ジャンパの設定，シールドの重ね方と配線などの実機の構成は，`specification`の`board.md`を参照する．
 
 ### BOOT.BINの作成
 
