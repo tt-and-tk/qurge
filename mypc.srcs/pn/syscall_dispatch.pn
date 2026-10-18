@@ -100,7 +100,7 @@ int syscall_console_read(int a, int b) {
     // 行を確定したときの改行のエコーをTCPの端末へ送る(送れなければ，この中で接続が閉じる)
     // ためた出力は，シェルが次に入力を待つまで送られない
     // ここで送らないと，実行ファイルが受け取った後に長く計算する間，相手の端末のカーソルが入力した行の末尾に残る
-    console_flush();
+    console_tcp_flush();
     // ヌル終端までの文字数を数える
     while (buf[length] != '\0') {
         length++;
@@ -121,7 +121,7 @@ int syscall_console_write(int a, int b) {
     console_write(data, b);
     // ためた出力をTCPの端末へ送る(送れなければ，この中で接続が閉じる)
     // ためた出力はシェルが次に入力を待つまで送られないため，実行ファイルが出力の後に長く計算すると表示が遅れる
-    console_flush();
+    console_tcp_flush();
     return 0;
 }
 

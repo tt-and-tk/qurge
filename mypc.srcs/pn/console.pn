@@ -24,11 +24,11 @@
 #include "network.pn"
 #include "uart.pn"
 
-const int CONSOLE_PORT = 23;            // TCPの端末からの接続を待ち受けるポート番号(telnetの標準のポート番号)
-const int CONSOLE_LINE_SIZE = 64;       // コンソールから受け取る1行を置く配列の要素数(ヌル終端の分を含む)
-const int CONSOLE_OUTPUT_SIZE = 256;    // TCPへ送る前の出力をためるバッファのバイト数
-const int CONSOLE_INPUT_SIZE = 64;      // TCPから受信したデータを置くバッファのバイト数
-const int CONSOLE_DECIMAL_SIZE = 12;    // 10進数を出力する一時バッファの要素数(intで最も長い"-2147483648"とヌル終端の分)
+const int CONSOLE_TCP_PORT = 23;          // TCPの端末からの接続を待ち受けるポート番号(telnetの標準のポート番号)
+const int CONSOLE_LINE_SIZE = 64;         // コンソールから受け取る1行を置く配列の要素数(ヌル終端の分を含む)
+const int CONSOLE_TCP_OUTPUT_SIZE = 256;  // TCPへ送る前の出力をためるバッファのバイト数
+const int CONSOLE_TCP_INPUT_SIZE = 64;    // TCPから受信したデータを置くバッファのバイト数
+const int CONSOLE_DECIMAL_SIZE = 12;      // 10進数を出力する一時バッファの要素数(intで最も長い"-2147483648"とヌル終端の分)
 
 // 1行の編集に使う文字コード
 const int CONSOLE_BS = 0x08;   // BS(バックスペース)
@@ -70,31 +70,31 @@ const int TELNET_STATE_OPTION = 2;   // 交渉のコマンドの直後(オプシ
 const int TELNET_STATE_SUB = 3;      // サブネゴシエーションの中
 const int TELNET_STATE_SUB_IAC = 4;  // サブネゴシエーションの中のIACの直後
 
-int console_tcp_state = CONSOLE_TCP_IDLE;     // TCPの端末の状態
-char console_output[CONSOLE_OUTPUT_SIZE];     // TCPへ送る前の出力
-int console_output_length = 0;                // 送る前の出力のバイト数
-char console_last_output = 0;                 // コンソールへ最後に出力した文字(改行の前に復帰を補うかの判断に使う)
-char console_input[CONSOLE_INPUT_SIZE];       // TCPから受信したデータ
-int console_input_length = 0;                 // 受信したデータのバイト数
-int console_input_position = 0;               // 受信したデータのうち，次に処理する位置
-int console_tcp_after_cr = 0;                 // TCPの端末から直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
-int console_uart_after_cr = 0;                // UARTの端末から直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
+int console_tcp_state = CONSOLE_TCP_IDLE;                 // TCPの端末の状態
+char console_tcp_output[CONSOLE_TCP_OUTPUT_SIZE];         // TCPへ送る前の出力
+int console_tcp_output_length = 0;                        // 送る前の出力のバイト数
+char console_last_output = 0;                             // コンソールへ最後に出力した文字(改行の前に復帰を補うかの判断に使う)
+char console_tcp_input[CONSOLE_TCP_INPUT_SIZE];           // TCPから受信したデータ
+int console_tcp_input_length = 0;                         // 受信したデータのバイト数
+int console_tcp_input_position = 0;                       // 受信したデータのうち，次に処理する位置
+int console_tcp_after_cr = 0;                             // TCPの端末から直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
+int console_uart_after_cr = 0;                            // UARTの端末から直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
 int console_last_input_terminal = CONSOLE_TERMINAL_UART;  // 直前に受け取った文字を送った端末の種類
-int console_telnet_state = TELNET_STATE_DATA; // telnetの受信の状態
-unsigned char console_telnet_command = 0;     // 受け取った交渉のコマンド(オプションの番号を待つ間に控える)
-int console_telnet_echo = 0;                  // エコーのオプションが有効か(0:無効，1:有効．有効な間だけ，打った文字をTCPの端末へ表示する)
-int console_telnet_sga = 0;                   // SGAのオプションが有効か(0:無効，1:有効．GAは有効・無効によらず送らない)
+int console_telnet_state = TELNET_STATE_DATA;             // telnetの受信の状態
+unsigned char console_telnet_command = 0;                 // 受け取った交渉のコマンド(オプションの番号を待つ間に控える)
+int console_telnet_echo = 0;                              // エコーのオプションが有効か(0:無効，1:有効．有効な間だけ，打った文字をTCPの端末へ表示する)
+int console_telnet_sga = 0;                               // SGAのオプションが有効か(0:無効，1:有効．GAは有効・無効によらず送らない)
 
 // TCPの接続を閉じる．送る前の出力と処理する前の受信データは捨てる
-void console_disconnect(void) {
+void console_tcp_disconnect(void) {
     // 接続を閉じる
     tcp_close();
     // 待ち受けていない状態へ戻す(次に入力を待つときに，待ち受けを始め直す)
     console_tcp_state = CONSOLE_TCP_IDLE;
     // 次の接続へ持ち越さないよう，送る前の出力と受信したデータを捨てる
-    console_output_length = 0;
-    console_input_length = 0;
-    console_input_position = 0;
+    console_tcp_output_length = 0;
+    console_tcp_input_length = 0;
+    console_tcp_input_position = 0;
     console_tcp_after_cr = 0;
     // 受信の区切りをまたいで途中まで受け取ったtelnetのコマンドも捨てる
     console_telnet_state = TELNET_STATE_DATA;
@@ -102,20 +102,20 @@ void console_disconnect(void) {
 
 // ためた出力をTCPの接続へ送る．送れなければ接続を閉じる
 // 送信は1回ごとに完了を待つため，出力のたびに送らず，ためてまとめて送る
-void console_flush(void) {
+void console_tcp_flush(void) {
     int status;  // 送信の結果
 
     // 送るものが無ければ何もしない
-    if (console_output_length == 0) {
+    if (console_tcp_output_length == 0) {
         return;
     }
     // ためた出力を送る
-    status = tcp_send(console_output, console_output_length);
+    status = tcp_send(console_tcp_output, console_tcp_output_length);
     // 送ったものは捨てる
-    console_output_length = 0;
+    console_tcp_output_length = 0;
     // 送れなければ相手との接続が切れているため，接続を閉じる
     if (status != TCP_OK) {
-        console_disconnect();
+        console_tcp_disconnect();
     }
 }
 
@@ -126,11 +126,11 @@ void console_put_tcp(char c) {
         return;
     }
     // バッファの末尾に加える
-    console_output[console_output_length] = c;
-    console_output_length++;
+    console_tcp_output[console_tcp_output_length] = c;
+    console_tcp_output_length++;
     // 満杯になれば送る
-    if (console_output_length == CONSOLE_OUTPUT_SIZE) {
-        console_flush();
+    if (console_tcp_output_length == CONSOLE_TCP_OUTPUT_SIZE) {
+        console_tcp_flush();
     }
 }
 
@@ -257,7 +257,7 @@ int console_poll_connection(void) {
     // 待ち受けていなければ，待ち受けを始める
     if (console_tcp_state == CONSOLE_TCP_IDLE) {
         // telnetのポートで待ち受けを始める
-        status = tcp_listen(CONSOLE_PORT);
+        status = tcp_listen(CONSOLE_TCP_PORT);
         // 始められなければ(ネットワークの設定に失敗している場合を含む)，ネットワークの設定をやり直し，次に確かめるときに待ち受けを始め直す
         // やり直しの結果は出力しない．確かめるたびにやり直すため，出力すると同じ行が出続けるため
         if (status != TCP_OK) {
@@ -297,14 +297,14 @@ int console_poll_connection(void) {
 
 // TCPの端末を待ち受けていない状態へ戻す．接続していれば，ためた出力を送ってから接続を閉じる
 // 待ち受けは，次に接続を確かめるときに始め直される
-void console_close(void) {
+void console_tcp_close(void) {
     // 接続していれば，ためた出力を送ってから閉じる
     if (console_tcp_state == CONSOLE_TCP_CONNECTED) {
         // ためた出力を送る(送れなければ，この中で接続が閉じる)
-        console_flush();
+        console_tcp_flush();
         // まだ接続していれば閉じる
         if (console_tcp_state == CONSOLE_TCP_CONNECTED) {
-            console_disconnect();
+            console_tcp_disconnect();
         }
     }
     // 待ち受けていない状態にする
@@ -325,30 +325,30 @@ int console_receive_tcp_byte(void) {
     }
     // 受信したデータのバイトをすべて取り出し終えていれば，受信し直す
     // 1回の受信で複数のバイトが届いた場合，残りは受信したデータに置いたまま，次の呼び出しから1バイトずつ取り出す
-    if (console_input_position == console_input_length) {
+    if (console_tcp_input_position == console_tcp_input_length) {
         // 相手が待たずに済むよう，受信する前にエコーなどのためた出力を送る
-        console_flush();
+        console_tcp_flush();
         // 送れずに接続が閉じていれば，受け取れない
         if (console_tcp_state != CONSOLE_TCP_CONNECTED) {
             return -1;
         }
         // 受信したデータを読み出す(届いていなければ0バイトになる)
-        status = tcp_recv(console_input, CONSOLE_INPUT_SIZE, &console_input_length);
+        status = tcp_recv(console_tcp_input, CONSOLE_TCP_INPUT_SIZE, &console_tcp_input_length);
         // 読み出したデータの先頭から処理する
-        console_input_position = 0;
+        console_tcp_input_position = 0;
         // 相手が切断したか接続が切れていれば，接続を閉じる
         if (status != TCP_OK) {
-            console_disconnect();
+            console_tcp_disconnect();
             return -1;
         }
         // 届いていなければ，取り出せるバイトが無い
-        if (console_input_length == 0) {
+        if (console_tcp_input_length == 0) {
             return -1;
         }
     }
     // 次の1バイトを取り出す(符号付きのcharで負になる0x80以上の値を，0〜255として扱う)
-    b = console_input[console_input_position] & 0xff;
-    console_input_position++;
+    b = console_tcp_input[console_tcp_input_position] & 0xff;
+    console_tcp_input_position++;
     return b;
 }
 

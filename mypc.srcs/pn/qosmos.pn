@@ -448,7 +448,7 @@ int boot(void) {
     mounted = init_storage();
     // ネットワークの設定でEthernetモジュールをリセットすると接続が切れるため，先に相手へ切断を伝えて閉じる
     // 閉じた後の出力は，UARTの端末にだけ届く
-    console_close();
+    console_tcp_close();
     // SDカードとEthernetモジュールは互いに依存しないため，マウントの成否によらずネットワークを設定する
     init_network();
     // マウントに失敗していれば，起動の失敗とする
@@ -493,7 +493,7 @@ int handle_exit(int pos) {
         return EXIT_FAILURE;
     }
     // ためた出力を送ってから接続を閉じる(切断したことは相手の端末で分かるため，閉じる前の表示はしない)
-    console_close();
+    console_tcp_close();
     return EXIT_SUCCESS;
 }
 
@@ -635,7 +635,7 @@ int run_executable(void) {
     // (起動時に1回だけ書くのではなく呼び出すたびに書くのは，以前に実行した実行ファイルが入口を書き換えていても元に戻すため)
     *(int *)SYSCALL_ENTRY_ADDRESS = (int)syscall_dispatch;
     // ためた出力は実行ファイルが戻るまで送られずに残るため，呼び出す前に送る
-    console_flush();
+    console_tcp_flush();
     // 実行ファイルの先頭の命令を，通常の関数と同じ呼び出し規約でargc・argvを渡して呼び出す．実行ファイルがRETで戻れば，RAXで返された値をそのまま返す
     return ((int (*)(int, char **))CODE_PC)(argc, argv);
 }
