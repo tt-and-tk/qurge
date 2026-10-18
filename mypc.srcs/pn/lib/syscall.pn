@@ -43,7 +43,7 @@ int console_read(char *buf, int size) {
 }
 
 // dataの先頭lengthバイトをコンソールへ出力し，0を返す
-// 出力する前に，Qosmosが端末に合わせて変換する(値0のバイトを除き，改行の前に復帰を補う)．呼び出し側で変換しておく必要はない
+// 出力する前に，Qosmosが端末に合わせて変換する(値0のバイトを省き，改行の前に復帰を補う)．呼び出し側で変換しておく必要はない
 int console_write(char *data, int length) {
     // 番号SYS_CONSOLE_WRITEのシステムコールを呼び出す
     return syscall(SYS_CONSOLE_WRITE, (int)data, length, 0, 0);
