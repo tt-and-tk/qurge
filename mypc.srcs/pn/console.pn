@@ -256,6 +256,7 @@ int console_poll_connection(void) {
     }
     // 待ち受けていなければ，待ち受けを始める
     if (console_tcp_state == CONSOLE_TCP_IDLE) {
+        // telnetのポートで待ち受けを始める
         status = tcp_listen(CONSOLE_PORT);
         // 始められなければ(ネットワークの設定に失敗している場合を含む)，ネットワークの設定をやり直し，次に確かめるときに待ち受けを始め直す
         // やり直しの結果は出力しない．確かめるたびにやり直すため，出力すると同じ行が出続けるため
@@ -263,6 +264,7 @@ int console_poll_connection(void) {
             network_setup();
             return 0;
         }
+        // 待ち受けている状態にする
         console_tcp_state = CONSOLE_TCP_LISTENING;
     }
     // 相手が接続したかを確かめる
