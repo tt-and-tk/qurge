@@ -551,22 +551,26 @@ int console_read_line(char *buf, int size) {
         }
         // 復帰か改行であれば，終端して行を確定する
         if (c == '\r' || c == '\n') {
+            // 格納した文字の後ろをヌル終端する
             buf[length] = '\0';
             // 次の出力が次の行から始まるよう，復帰と改行をエコーする
             console_echo('\r');
             console_echo('\n');
+            // 1行を受け取ったことを伝える
             return CONSOLE_LINE_DONE;
         }
         // BSかDELであれば，直前の1文字を取り消す
         if (c == CONSOLE_BS || c == CONSOLE_DEL) {
             // 格納した文字が無ければ何もしない
             if (length > 0) {
+                // 格納した直前の1文字を取り消す
                 length--;
                 // カーソルを1つ戻し，空白で上書きして，もう1つ戻すことで画面から消す
                 console_echo(CONSOLE_BS);
                 console_echo(' ');
                 console_echo(CONSOLE_BS);
             }
+            // 次の文字を受け取る
             continue;
         }
         // 格納する文字かを判定する
@@ -578,8 +582,11 @@ int console_read_line(char *buf, int size) {
         ) {
             // ヌル終端の分を残して空きがあれば，格納してエコーする
             if (length < size - 1) {
+                // 配列の末尾に格納する
                 buf[length] = c;
+                // 格納した文字数を数える
                 length++;
+                // 格納した文字をエコーする
                 console_echo(c);
             }
         }
