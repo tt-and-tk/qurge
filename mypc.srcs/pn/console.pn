@@ -416,7 +416,7 @@ void console_telnet_negotiate(unsigned char command, unsigned char option) {
 // 受信の区切りをまたいだコマンドも扱えるよう，どこまで受け取ったかは受信の状態として呼び出しをまたいで控える
 // 交渉への応答はTCPの出力バッファへ加わり，次に受信するときにバッファの他の中身と一緒に送られる
 // 戻り値: データの文字の値(0〜255) / -1(コマンドの一部として処理した)
-int console_telnet_receive(int b) {
+int console_telnet_receive(unsigned char b) {
     // 受信の状態に応じて，バイトをデータとして返すか，コマンドの一部として処理して状態を進める
     if (console_telnet_state == TELNET_STATE_DATA) {
         // データの途中では，IACであればコマンドの始まりとして次のバイトを待ち，それ以外はデータの1文字とする
@@ -489,8 +489,8 @@ int console_skip_after_cr(int *after_cr, int c) {
 // 文字を受け取ったときは，送った端末の種類も控える
 // 戻り値: 受け取った文字の値(0〜255) / CONSOLE_NEW_CONNECTION(新たな端末がtelnetで接続した)
 int console_receive_char(void) {
-    int b;  // TCPの接続から受信したバイトの値
-    int c;  // 受け取った文字の値
+    int b;  // TCPの接続から受信したバイトの値(0〜255．受信したバイトが無いことを表す-1も入るため，intとする)
+    int c;  // 受け取った文字の値(0〜255．文字が無いことを表す-1も入るため，intとする)
 
     // 文字が得られるまで，両方の端末を交互に確かめる
     while (1) {
