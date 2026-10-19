@@ -438,7 +438,7 @@ void print_welcome(void) {
     }
 }
 
-// OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，telnetの接続を閉じてからネットワークを設定する
+// OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，telnetでの接続を閉じてからネットワークを設定する
 // 呼ぶたびにハードウェアの初期化からやり直すため，再起動にもそのまま使える．戻り値は終了状態で，マウントに成功すれば成功，失敗すれば失敗を表す
 // ネットワークの設定の成否は戻り値に含めない．失敗しても，telnetでの接続を受け付けられるまで設定をやり直すため
 int boot(void) {
@@ -475,7 +475,7 @@ int handle_reboot(int pos) {
     return status;
 }
 
-// exitコマンド: TCPの出力バッファの中身を送ってからtelnetの接続を閉じる
+// exitコマンド: TCPの出力バッファの中身を送ってからtelnetでの接続を閉じる
 int handle_exit(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
@@ -486,7 +486,7 @@ int handle_exit(int pos) {
     if (
         // UARTで接続した端末から打った
         console_last_input_terminal != CONSOLE_TERMINAL_TCP
-        // コマンドを受け取った後の出力の送信で，TCPの接続が切れた
+        // コマンドを受け取った後の出力の送信で，telnetでの接続が切れた
         || console_tcp_state != CONSOLE_TCP_CONNECTED
     ) {
         print_error("not connected\n");
