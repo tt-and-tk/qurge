@@ -1115,6 +1115,8 @@ module alu_sv (
     assign ex2_alu_write = ex2_occupied && ex_completes;
 
     // UARTのレジスタの各ビット(書き込む値の指示のビットと，読み出す値の橋渡し回路の状態のビット)
+    // 状態のビットは，指示のビットと重ならない16ビット目以降に置く
+    // 読み出した値を書き戻す書き方(UART |= xのような複合代入)をしても，状態のビットが送信や取り出しの指示として働かないようにするため
     localparam int UART_TX_DATA_LSB    = 0;   // 送るバイト(0〜7ビット目)
     localparam int UART_TX_REQUEST     = 8;   // 1を書き込むと，送るバイトを送信バッファへ入れる
     localparam int UART_RX_POP         = 9;   // 1を書き込むと，受信バッファの先頭のバイトを取り除く
