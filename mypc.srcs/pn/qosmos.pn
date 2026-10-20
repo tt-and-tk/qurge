@@ -482,9 +482,9 @@ int handle_exit(int pos) {
         print_error("too many arguments\n");
         return EXIT_FAILURE;
     }
-    // コマンドを打った端末がtelnetで接続した端末でなければ，閉じる接続が無いため失敗とする
+    // コマンドが入力された端末がtelnetで接続した端末でなければ，閉じる接続が無いため失敗とする
     if (
-        // UARTで接続した端末から打った
+        // UARTで接続した端末から入力された
         console_last_input_terminal != CONSOLE_TERMINAL_TCP
         // コマンドを受け取った後の出力の送信で，telnetでの接続が切れた
         || console_tcp_state != CONSOLE_TCP_CONNECTED
