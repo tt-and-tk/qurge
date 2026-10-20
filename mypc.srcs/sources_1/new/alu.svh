@@ -19,8 +19,7 @@ package alu_p;
         A_TYPE,   // 代入系
         F_TYPE,   // 分岐系
         J_TYPE,   // ジャンプ系
-        M_TYPE,   // メモリ系
-        IO_TYPE   // 標準入出力系
+        M_TYPE    // メモリ系
     } type_enum;
 
     // 変数型
@@ -380,16 +379,6 @@ package alu_p;
                         // レジスタ相対のメモリ書き込み: 書き込むデータと番地の基準になる読み出し元が有効で，
                         // かつ番地に足すイミディエイトデータを指定しているか
                         WMR:     is_instruction_executable = is_readable(rs1) && is_readable(rs2) && imm[32];
-                        // それ以外は不正な命令として無効扱い
-                        default: is_instruction_executable = util_p::FALSE;
-                    endcase
-                end
-                IO_TYPE: begin
-                    unique case (func)
-                        // 標準入力: 書き込み先が有効か
-                        SCAN:    is_instruction_executable = is_writable(rd);
-                        // 標準出力: 出力するデータをイミディエイトデータで指定するか，読み出し元が有効か
-                        PRINT:   is_instruction_executable = imm[32] || is_readable(rs1);
                         // それ以外は不正な命令として無効扱い
                         default: is_instruction_executable = util_p::FALSE;
                     endcase

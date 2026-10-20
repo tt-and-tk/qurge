@@ -57,20 +57,6 @@ module cpu_sv import machine_p::*; (
     output logic [3:0] led,
     output logic [5:0] rgb_led,
 
-    // 標準入力
-    input  logic [31:0] stdin_tdata,
-    input  logic [ 3:0] stdin_tkeep,
-    input  logic        stdin_tlast,
-    output logic        stdin_tready,
-    input  logic        stdin_tvalid,
-
-    // 標準出力
-    output logic [31:0] stdout_tdata,
-    output logic [ 3:0] stdout_tkeep,
-    output logic        stdout_tlast,
-    input  logic        stdout_tready,
-    output logic        stdout_tvalid,
-
     // Pmod A・Pmod B
     output logic [7:0] ja,
     output logic [7:0] jb,
@@ -139,17 +125,6 @@ module cpu_sv import machine_p::*; (
         .sw(sw),
         .led(led),
         .rgb_led(rgb_led),
-        // 標準入出力
-        .stdin_tdata(stdin_tdata),
-        .stdin_tkeep(stdin_tkeep),
-        .stdin_tlast(stdin_tlast),
-        .stdin_tready(stdin_tready),
-        .stdin_tvalid(stdin_tvalid),
-        .stdout_tdata(stdout_tdata),
-        .stdout_tkeep(stdout_tkeep),
-        .stdout_tlast(stdout_tlast),
-        .stdout_tready(stdout_tready),
-        .stdout_tvalid(stdout_tvalid),
         .ja(ja),
         .jb(jb),
         .ar(ar),

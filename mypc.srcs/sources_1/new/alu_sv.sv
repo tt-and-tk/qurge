@@ -38,7 +38,7 @@
 // - 取り込み段: 取得した命令(ROMからは最大2命令)を命令キューの末尾へ取り込む
 // - 確認段: 命令キューの先頭の命令(以下，先頭と書く)が実行できるかを確認し，レジスタから値を読み出して実行段へ渡す．
 //   命令キューで先頭の次にある命令(以下，2番目と書く)が同時実行の条件を満たせば，先頭と同じサイクルに渡す
-// - 実行段: 命令を実行する．メモリ・標準入出力の応答待ちや割り算の完了待ちなど，複数サイクルかかる命令の
+// - 実行段: 命令を実行する．メモリの応答待ちや割り算の完了待ちなど，複数サイクルかかる命令の
 //   実行中は，確認段の命令を待たせる．同時実行する2命令のうち，先頭の命令は1本目のパイプラインで，2番目の命令は
 //   2本目のパイプラインで実行する．2本目は，1サイクルで完了しレジスタへ書き込む以外の動作を持たない命令(以下，単純な演算と書く)
 //   だけを扱い，結果は1本目の命令が完了するサイクルに書き込む
@@ -50,7 +50,7 @@
 // 前の命令の結果を使う命令は，結果がレジスタへ書き込まれるのを待たずに受け取る(フォワーディング)．
 // 1サイクルで終わる命令の結果はパイプラインごとに保持しておき，次の命令が実行段の入口で読み出した値と差し替える．
 // 確認段で差し替えないのは，演算結果から確認段の比較・選択を経て実行段の入力に至る経路が1クロックに収まらないため．
-// 複数サイクルかかる命令の結果は，メモリ・標準入力・除算IPの出力や掛け算の結果のレジスタから出る値で経路が短いため，確認段で差し替える．
+// 複数サイクルかかる命令の結果は，メモリ・除算IPの出力や掛け算の結果のレジスタから出る値で経路が短いため，確認段で差し替える．
 //
 // 取得段は，分岐・ジャンプの後も順番どおりに次の番地を取得していく．行き先が順番どおりでないと分かった時点で，
 // それより後に取得していた命令を捨て，飛び先の番地の命令から順に取得し直す．
@@ -98,19 +98,6 @@ module alu_sv (
     output logic        divu_dividend_tvalid,
     input  logic [63:0] divu_dout_tdata,
     input  logic        divu_dout_tvalid,
-
-    // 標準入出力
-    input  logic [31:0] stdin_tdata,
-    input  logic [ 3:0] stdin_tkeep,
-    input  logic        stdin_tlast,
-    output logic        stdin_tready,
-    input  logic        stdin_tvalid,
-
-    output logic [31:0] stdout_tdata,
-    output logic [ 3:0] stdout_tkeep,
-    output logic        stdout_tlast,
-    input  logic        stdout_tready,
-    output logic        stdout_tvalid,
 
     // Pmod A・Pmod B
     output logic [7:0] ja,
@@ -360,9 +347,7 @@ module alu_sv (
         // 演算系・シフト系・代入系
         command_next1.m_type == P_TYPE || command_next1.m_type == S_TYPE || command_next1.m_type == A_TYPE
         // メモリ読み込み
-        || (command_next1.m_type == M_TYPE && (command_next1.func == RM || command_next1.func == RMR))
-        // 標準入力
-        || (command_next1.m_type == IO_TYPE && command_next1.func == SCAN);
+        || (command_next1.m_type == M_TYPE && (command_next1.func == RM || command_next1.func == RMR));
     // 先頭が割り算の余りを書き込むか．同時実行してよいかの判定に使う．書き込み先はimm[5:0]
     util_p::bool_t check_writes_remainder;
     assign check_writes_remainder =
@@ -527,13 +512,11 @@ module alu_sv (
         : ex2_rs2_from_ex2_alu_r ? ex2_alu_result_r
         : ex2_rs2_val_r;
 
-    // ===== メモリ・標準入出力・割り算回路とのハンドシェイク状態 =====
+    // ===== メモリ・割り算回路とのハンドシェイク状態 =====
     // それぞれの命令の実行が複数サイクルにまたがる間，どこまで進んだかを保持する
 
     util_p::state_enum ram_read_state = IDLE;  // メモリ読み込み(RM・RMR)とRETの実行状態
     util_p::state_enum ram_write_state = IDLE; // メモリ書き込み(WM・WMR)とCALLの実行状態
-    util_p::state_enum stdin_state = IDLE;     // 標準入力(SCAN)の実行状態
-    util_p::state_enum stdout_state = IDLE;    // 標準出力(PRINT)の実行状態
     util_p::state_enum mul_state = IDLE;       // 掛け算(MUL)の実行状態
     util_p::state_enum div_state = IDLE;       // 割り算(DIV/DIVU)の実行状態
 
@@ -1080,21 +1063,6 @@ module alu_sv (
                     endcase
                 end
 
-                // 標準入出力系
-                IO_TYPE: begin
-                    unique case (func_r)
-                        // 標準入力は，値が届いたら受け取った値を書き込む
-                        SCAN: begin
-                            ex_completes     = (stdin_state == EXECUTE) && stdin_tvalid;
-                            late_write_valid = (stdin_state == EXECUTE) && stdin_tvalid;
-                            late_write_value = stdin_tdata;
-                        end
-                        // 標準出力は，値が受け取られたら次の命令へ進む
-                        PRINT: ex_completes = (stdout_state == EXECUTE) && stdout_tready;
-                        default: ;
-                    endcase
-                end
-
                 default: ;
             endcase
         end
@@ -1317,10 +1285,6 @@ module alu_sv (
         // 最下位ビットを0・1にした番地をそれぞれ偶数番地・奇数番地とし，加算器を経ずに組の2つの番地を作る
         rom_read1.pc = rom_p::pc_bus_t'({fetch_pc[31:1], 1'b0});
         rom_read2.pc = rom_p::pc_bus_t'({fetch_pc[31:1], 1'b1});
-
-        // 標準入出力
-        stdout_tkeep = 4'hf;
-        stdout_tlast = 1'b1;
     end
 
     // 外部ピンからの非同期入力の同期化．準安定状態をシフトレジスタで消してからメインの順序回路で取り込む
@@ -1406,13 +1370,6 @@ module alu_sv (
             // メモリの読み込み・書き出し状態をリセット
             ram_read_state <= IDLE;
             ram_write_state <= IDLE;
-
-            // 標準入出力の状態と，受け渡しを行っていることを表す信号をリセット
-            stdin_state <= IDLE;
-            stdout_state <= IDLE;
-            stdin_tready <= 1'b0;
-            stdout_tvalid <= 1'b0;
-            stdout_tdata <= '0;
 
             // UARTの橋渡し回路への指示を取り消す
             uart_tx_push <= 1'b0;
@@ -1808,87 +1765,6 @@ module alu_sv (
                             // メモリ書き込み(バースト)
                             BWM: begin
                                 is_halted <= 1'b1;
-                            end
-
-                            default: begin
-                                is_halted <= 1'b1;
-                            end
-                        endcase
-                    end
-
-                    // 標準入出力系
-                    IO_TYPE: begin
-                        unique case (func_r)
-                            // 標準入力
-                            SCAN: begin
-                                unique case (stdin_state)
-                                    // 待機
-                                    IDLE: begin
-                                        // 実行を指示
-                                        stdin_state <= EXECUTE;
-                                        stdin_tready <= 1'b1;
-                                    end
-
-                                    // 実行
-                                    EXECUTE: begin
-                                        // データが送られてきているなら(受け取った値は共通の処理で書き込む)
-                                        if (stdin_tvalid) begin
-                                            // 一文字ずつ読み込むため，これだけ読みこんだら終了する
-                                            stdin_state <= IDLE;
-                                            stdin_tready <= 1'b0;
-                                        end
-                                        else begin
-                                            // 読み取り準備が整っていることを送る
-                                            stdin_tready <= 1'b1;
-                                        end
-                                    end
-
-                                    // その他
-                                    default: begin
-                                        is_halted <= 1'b1;
-                                    end
-                                endcase
-                            end
-
-                            // 標準出力
-                            PRINT: begin
-                                unique case (stdout_state)
-                                    // 待機
-                                    IDLE: begin
-                                        // イミディエイトデータを使用するなら
-                                        if (imm_r[32]) begin
-                                            // データを送る
-                                            stdout_tdata <= imm_r[31:0];
-                                        end
-                                        // rs1のデータを使用するなら
-                                        else begin
-                                            stdout_tdata <= rs1_val;
-                                        end
-
-                                        // 実行を指示
-                                        stdout_tvalid <= 1'b1;
-                                        stdout_state <= EXECUTE;
-                                    end
-
-                                    // 実行
-                                    EXECUTE: begin
-                                        // データの送信に成功したなら
-                                        if (stdout_tready) begin
-                                            // 一文字ずつ書き込むため，これだけ書き込んだら終了する
-                                            stdout_state <= IDLE;
-                                            stdout_tvalid <= 1'b0;
-                                        end
-                                        else begin
-                                            // 書き込み準備が終わっていることを送る
-                                            stdout_tvalid <= 1'b1;
-                                        end
-                                    end
-
-                                    // その他
-                                    default: begin
-                                        is_halted <= 1'b1;
-                                    end
-                                endcase
                             end
 
                             default: begin

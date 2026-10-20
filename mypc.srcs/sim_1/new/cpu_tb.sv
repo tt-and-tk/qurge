@@ -3,7 +3,7 @@
 // CPUの命令の動作を検証するテストベンチ．
 // CPU本体(cpu_sv)とメインメモリ(ram_sv)は実物を使い，ROMと除算IPをテストベンチ用のモデルに差し替える．
 // テストケースごとにmachine.svhの関数で組んだ命令列をROMへ書き込んで実行し，実行後のレジスタ・メモリ・
-// 停止の有無と番地・標準出力を期待値と比較する．最後に合否の件数を表示し，失敗があれば$fatalで終了する．
+// 停止の有無と番地を期待値と比較する．最後に合否の件数を表示し，失敗があれば$fatalで終了する．
 //
 // このファイルで使う用語
 // - テストケース: 1つの命令列を実行し，その結果を期待値と比較する単位．合否はテストケースごとに数える
@@ -52,15 +52,6 @@ module cpu_tb;
     logic [63:0] divu_dout_tdata;                            // 符号なしの除算IPの計算結果
     logic        divu_dout_tvalid;                           // 符号なしの除算IPの計算結果が出たか
 
-    logic [31:0] stdin_tdata = '0;       // 標準入力へ送る値
-    logic        stdin_tvalid = 1'b0;    // 標準入力へ送る値が有効か
-    logic        stdin_tready;           // CPUが標準入力を受け取れるか
-    logic [31:0] stdout_tdata;           // CPUが標準出力へ出す値
-    logic [ 3:0] stdout_tkeep;           // 標準出力の有効バイト(CPUは常に全バイト有効で出す)
-    logic        stdout_tlast;           // 標準出力の終端(CPUは常に1で出す)
-    logic        stdout_tvalid;          // CPUが標準出力へ出す値が有効か
-    logic        stdout_tready = 1'b0;   // 標準出力を受け取れるか
-
     logic [ 3:0] btn = 4'b0;                               // タクトスイッチ
     logic [ 1:0] sw = 2'b0;                                // DIPスイッチ
     logic [ 3:0] led;                                      // LED
@@ -104,16 +95,6 @@ module cpu_tb;
         .sw(sw),
         .led(led),
         .rgb_led(rgb_led),
-        .stdin_tdata(stdin_tdata),
-        .stdin_tkeep(4'hf),
-        .stdin_tlast(1'b1),
-        .stdin_tready(stdin_tready),
-        .stdin_tvalid(stdin_tvalid),
-        .stdout_tdata(stdout_tdata),
-        .stdout_tkeep(stdout_tkeep),
-        .stdout_tlast(stdout_tlast),
-        .stdout_tready(stdout_tready),
-        .stdout_tvalid(stdout_tvalid),
         .ja(ja),
         .jb(jb),
         .ar(ar),
@@ -174,67 +155,6 @@ module cpu_tb;
         .m_axis_dout_tdata(divu_dout_tdata),
         .m_axis_dout_tvalid(divu_dout_tvalid)
     );
-
-    // ===== 標準入出力の相手 =====
-
-    logic [31:0] stdin_queue[$];   // これから標準入力へ送る値の列
-    int          stdin_delay = 0;  // 1つ前の受け渡しから次の値を送り始めるまでに空けるサイクル数
-    logic [31:0] stdout_log[$];    // 標準出力から受け取った値の列
-    int          stdout_delay = 0; // CPUが値を出してから受け取るまでのサイクル数．0なら常に受け取れる状態にしておく
-    int          stdin_wait = 0;   // 標準入力で次の値を送り始めるまでに待ったサイクル数
-    int          stdout_wait = 0;  // 標準出力で受け取るまでに待ったサイクル数
-
-    // 標準入力．値を1つずつ送り，CPUが受け取ったサイクルに次の値へ進む
-    always @(posedge clk) begin
-        // リセット中は何も送らない
-        if (!resetn) begin
-            stdin_tvalid <= 1'b0;
-            stdin_wait   <= 0;
-        end
-        // CPUが受け取ったので，送るのをやめて次の値を待つ
-        else if (stdin_tvalid && stdin_tready) begin
-            stdin_tvalid <= 1'b0;
-            stdin_wait   <= 0;
-        end
-        // 送る値が残っていれば，決められたサイクル数だけ待ってから次の値を送り始める
-        else if (!stdin_tvalid && stdin_queue.size() > 0) begin
-            if (stdin_wait >= stdin_delay) begin
-                stdin_tdata  <= stdin_queue.pop_front();
-                stdin_tvalid <= 1'b1;
-            end
-            else begin
-                stdin_wait <= stdin_wait + 1;
-            end
-        end
-    end
-
-    // 標準出力．CPUが出した値を受け取ったサイクルにその値を記録する
-    always @(posedge clk) begin
-        // リセット中は受け取らない
-        if (!resetn) begin
-            stdout_tready <= 1'b0;
-            stdout_wait   <= 0;
-        end
-        // 待たない場合は常に受け取れる状態にしておき，値が出たサイクルに記録する
-        else if (stdout_delay == 0) begin
-            if (stdout_tvalid && stdout_tready)
-                stdout_log.push_back(stdout_tdata);
-            stdout_tready <= 1'b1;
-        end
-        // 受け取ったサイクルに値を記録し，次の値に備えて受け取れない状態へ戻す
-        else if (stdout_tvalid && stdout_tready) begin
-            stdout_log.push_back(stdout_tdata);
-            stdout_tready <= 1'b0;
-            stdout_wait   <= 0;
-        end
-        // CPUが値を出していれば，決められたサイクル数だけ待ってから受け取れる状態にする
-        else if (stdout_tvalid) begin
-            if (stdout_wait >= stdout_delay)
-                stdout_tready <= 1'b1;
-            else
-                stdout_wait <= stdout_wait + 1;
-        end
-    end
 
     // ===== UARTの橋渡し回路のモデル =====
     // CPUから見た受け渡しだけを模し，PSのUART0との読み書きは行わない．
@@ -385,8 +305,7 @@ module cpu_tb;
         // リセット中に，ROMの末尾へ置く命令列を書き込む(有効な命令数がROMの命令数の上限まで広がる)
         if (rom_tail.size() > 0)
             rom.place(rom_p::MAX_LINE_NUM - rom_tail.size(), rom_tail);
-        // リセット中に，前の実行で受け取った標準出力と，送信バッファへ入ったバイトを消す
-        stdout_log.delete();
+        // リセット中に，前の実行で送信バッファへ入ったバイトを消す
         uart_tx_log.delete();
         // リセットを2サイクル保ってから解除する
         repeat (2) @(negedge clk);
@@ -456,7 +375,7 @@ module cpu_tb;
     endfunction
 
     // 前のテストケースを合否の件数へ数え，新しいテストケースを始める．
-    // 標準入出力の相手は入力なし・待ちなしの状態に，UARTの受信バッファ，メモリの後半・ROMの末尾へ置く命令列は空に戻す
+    // UARTの受信バッファ，メモリの後半・ROMの末尾へ置く命令列は空に戻す
     function automatic void begin_test(input string name);
         // 前のテストケースを数える
         finish_test();
@@ -464,10 +383,6 @@ module cpu_tb;
         test_name    = name;
         test_errors  = 0;
         test_open    = 1'b1;
-        // 標準入出力の相手を，入力なし・待ちなしの状態に戻す
-        stdin_queue.delete();
-        stdin_delay  = 0;
-        stdout_delay = 0;
         // UARTの受信バッファを空にする
         uart_rx_queue.delete();
         // メモリの後半・ROMの末尾へ置く命令列を空にする
@@ -530,12 +445,6 @@ module cpu_tb;
         // 1バイトずつ，下位のバイトから順に確かめる
         for (int i = 0; i < 4; i++)
             expect_mem(addr + i, value[i * 8 +: 8]);
-    endfunction
-
-    // 直前の実行で標準出力へ出た値の列を確かめる
-    function automatic void expect_output(input logic [31:0] values[$]);
-        if (stdout_log != values)
-            fail($sformatf("標準出力: 期待値%p，実際%p", values, stdout_log));
     endfunction
 
     // 直前の実行の所要サイクル数を確かめる
@@ -1160,51 +1069,11 @@ module cpu_tb;
         expect_halt(0);
     endtask
 
-    // 標準入出力系(IO系)
-    task automatic test_io_type();
-        // 20サイクルずつ遅れて届く2つの入力を受け取り，その和を求める
-        `BEGIN_TEST("SCANは入力が届くまで待って受け取る");
-        stdin_queue = '{32'h41, 32'h42};
-        stdin_delay = 20;
-        run('{scan(1), scan(2), add(1, 2, 3)});
-        // 届いた順に受け取れる
-        expect_end();
-        expect_reg(1, 32'h41);
-        expect_reg(2, 32'h42);
-        expect_reg(3, 32'h83);
-
-        // 既に届いている2つの入力を受け取り，その和を求める．SCANの実行が2サイクルで終わる場合を確かめる
-        `BEGIN_TEST("SCANは既に届いている入力を受け取る");
-        stdin_queue = '{32'h41, 32'h42};
-        stdin_delay = 0;
-        run('{scan(1), scan(2), add(1, 2, 3)});
-        // 届いた順に受け取れる
-        expect_end();
-        expect_reg(1, 32'h41);
-        expect_reg(2, 32'h42);
-        expect_reg(3, 32'h83);
-
-        // 受け取りが20サイクル遅れる相手へ，即値とr1の値を出力する
-        `BEGIN_TEST("PRINTは受け取られるまで待って即値・レジスタの値を出力する");
-        stdout_delay = 20;
-        run('{movi(1, 32'h43), print(6'h00, im(32'h41)), print(1, NO_IMM), movi(2, 32'd1)});
-        // 出力した順に受け取られ，その後の命令も実行される
-        expect_end();
-        expect_output('{32'h41, 32'h43});
-        expect_reg(2, 32'd1);
-
-        // すぐに受け取る相手へ，即値とr1の値を出力する．PRINTの実行が2サイクルで終わる場合を確かめる
-        `BEGIN_TEST("PRINTはすぐに受け取られる場合も即値・レジスタの値を出力する");
-        stdout_delay = 0;
-        run('{movi(1, 32'h43), print(6'h00, im(32'h41)), print(1, NO_IMM), movi(2, 32'd1)});
-        // 出力した順に受け取られ，その後の命令も実行される
-        expect_end();
-        expect_output('{32'h41, 32'h43});
-        expect_reg(2, 32'd1);
-
-        // IO系で未定義のfuncを持つ命令を実行する
-        `BEGIN_TEST("IO系で未定義のfuncは停止する");
-        run('{raw(3'h7, 6'h02, 0, 0, 0, NO_IMM)});
+    // どの命令タイプにも割り当てていない命令コード
+    task automatic test_undefined_type();
+        // 命令コード3'h7の命令を実行する
+        `BEGIN_TEST("どの命令タイプにも割り当てていない命令コードは停止する");
+        run('{raw(3'h7, 6'h00, 0, 0, 0, NO_IMM)});
         // その命令の番地で停止する
         expect_halt(0);
     endtask
@@ -1277,7 +1146,6 @@ module cpu_tb;
             '{$sformatf("即値の番地へのJMPはrs1が読み込み不可でも停止しない"),     jmp(6'h11, im(2)),                            1'b0},
             '{$sformatf("即値の番地のRMはrs1が読み込み不可でも停止しない"),       rm(4'hf, 6'h11, 3, im(32'h100)),              1'b0},
             '{$sformatf("WMは使わないrdが書き込み不可でも停止しない"),             raw(3'h6, WM, 0, 2, PC_ADDR, im(32'h100)),    1'b0},
-            '{$sformatf("即値を出力するPRINTはrs1が読み込み不可でも停止しない"),   print(6'h11, im(32'h41)),                     1'b0},
             '{$sformatf("rs2でシフト量を指定するとrs2が読み込み不可なら停止する"), sll(1, 6'h11, 3, NO_IMM),                   1'b1},
             '{$sformatf("imm使用のDIVは余りの格納先が書き込み不可なら停止する"),   div(1, 2, 3, im(PC_ADDR)),                    1'b1},
             '{$sformatf("imm使用のDIVは余りの格納先が番地の上限を超えると停止する"), div(1, 2, 3, im(REGISTER_MAX_ADDR + 1)),       1'b1},
@@ -1289,9 +1157,7 @@ module cpu_tb;
             '{$sformatf("RMは書き込み先が書き込み不可なら停止する"),               rm(4'hf, 6'h00, PC_ADDR, im(32'h100)),        1'b1},
             '{$sformatf("WMは書き込むデータのrs2が読み込み不可なら停止する"),     wm(4'hf, 6'h00, 6'h11, im(32'h100)),          1'b1},
             '{$sformatf("RMRは番地の基準のrs1が読み込み不可なら停止する"),       rmr(4'hf, 6'h11, 3, im(0)),                   1'b1},
-            '{$sformatf("WMRは書き込むデータのrs2が読み込み不可なら停止する"),   wmr(4'hf, 2, 6'h11, im(0)),                   1'b1},
-            '{$sformatf("SCANは書き込み先が書き込み不可なら停止する"),             scan(PC_ADDR),                                1'b1},
-            '{$sformatf("レジスタを出力するPRINTはrs1が読み込み不可なら停止する"), print(6'h11, NO_IMM),                         1'b1}
+            '{$sformatf("WMRは書き込むデータのrs2が読み込み不可なら停止する"),   wmr(4'hf, 2, 6'h11, im(0)),                   1'b1}
         };
 
         foreach (cases[i]) begin
@@ -1725,16 +1591,14 @@ module cpu_tb;
         expect_end();
         expect_reg(2, 32'd14);
 
-        // ADDで作った値を，直後のWMの書き込むデータ・RMRの番地の基準・PRINTの出力する値に使う
-        `BEGIN_TEST("1サイクル命令の結果を直後のWM・RMR・PRINTが使える");
+        // ADDで作った値を，直後のWMの書き込むデータ・RMRの番地の基準に使う
+        `BEGIN_TEST("1サイクル命令の結果を直後のWM・RMRが使える");
         run('{movi(1, 32'd5), add(1, 1, 2), wm(4'hf, 6'h00, 2, im(32'h100)),
-              movi(3, 32'h80), add(3, 3, 4), rmr(4'hf, 4, 5, im(32'd0)),
-              add(1, 1, 6), print(6, NO_IMM)});
-        // 0x100番地へ10が書かれ，それを読み戻せ，10が出力される
+              movi(3, 32'h80), add(3, 3, 4), rmr(4'hf, 4, 5, im(32'd0))});
+        // 0x100番地へ10が書かれ，それを読み戻せる
         expect_end();
         expect_mem32(32'h100, 32'd10);
         expect_reg(5, 32'd10);
-        expect_output('{32'd10});
 
         // ADDで作った値を，直後のSLLのシフト量と，直後の分岐のrs1・rs2に使う
         `BEGIN_TEST("1サイクル命令の結果を直後の命令がシフト量・分岐の比較に使える");
@@ -1973,13 +1837,13 @@ module cpu_tb;
         if (!redirect_met_early_jump)
             fail("分岐で取得し直すサイクルに即値のJMPが届いていません");
 
-        // 即値のJMPの直後に，WM・PRINTを置き，JMPでそれを飛び越える
-        `BEGIN_TEST("即値のJMPで飛び越えたWM・PRINTは実行されない");
-        run('{movi(1, 32'd5), jmp(6'h00, im(4)), wm(4'hf, 6'h00, 1, im(32'h100)), print(1, NO_IMM)});
-        // メモリへの書き込みも出力も行われない
+        // 即値のJMPの直後に，WM・MOVを置き，JMPでそれを飛び越える
+        `BEGIN_TEST("即値のJMPで飛び越えたWM・MOVは実行されない");
+        run('{movi(1, 32'd5), jmp(6'h00, im(4)), wm(4'hf, 6'h00, 1, im(32'h100)), movi(2, 32'd1)});
+        // メモリへの書き込みもレジスタへの代入も行われない
         expect_end();
         expect_mem32(32'h100, 32'd0);
-        expect_output('{});
+        expect_reg(2, 32'd0);
 
         // 成立する分岐の直後に，N系で未定義のfuncを持つ命令を置き，分岐でそれを飛び越える
         `BEGIN_TEST("成立した分岐で飛び越えた実行できない命令では停止しない");
@@ -2314,7 +2178,7 @@ module cpu_tb;
         test_f_type();
         test_j_type();
         test_m_type();
-        test_io_type();
+        test_undefined_type();
         // 命令の種類をまたぐテストケースを実行する
         test_register_access();
         test_operand_checks();
