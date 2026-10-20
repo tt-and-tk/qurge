@@ -2,7 +2,7 @@
 // コンソールは次の2つの端末から成り，1つの画面を2か所で共有する形で使う．コマンドなどの出力は接続している端末すべてへ送り，入力はどちらの端末からも受け付ける
 // - telnetで接続した端末: LANを通してtelnetで接続した端末．同時に接続できるのは1つ
 // - UARTで接続した端末: USBのシリアル通信(UART)で接続した端末．常に使え，受け取ったバイトをそのまま文字として扱う
-// 打った文字の表示(エコー)と1行の編集もこのファイルで行う．エコーは，UARTで接続した端末へは常に送り，telnetで接続した端末へは端末側のローカルエコー(打った文字を端末自身が表示する機能)がオフの間だけ送る
+// 入力された文字の表示(エコー)と1行の編集もこのファイルで行う．エコーは，UARTで接続した端末へは常に送り，telnetで接続した端末へは端末側のローカルエコー(入力された文字を端末自身が表示する機能)がオフの間だけ送る
 //
 // telnetでの接続は，次の3つの状態をたどる
 // - 待ち受け前: Ethernetモジュール(W5100S)に，接続の待ち受けをまだ指示していない．次に接続を確かめるときに待ち受けを始める
@@ -65,7 +65,7 @@ const unsigned char TELNET_SB = 0xfa;    // SB(サブネゴシエーションの
 const unsigned char TELNET_SE = 0xf0;    // SE(サブネゴシエーションの終わり)
 
 // telnetのオプションの番号
-const unsigned char TELNET_ECHO = 1;  // エコー(相手が打った文字の表示を，こちらが行う)
+const unsigned char TELNET_ECHO = 1;  // エコー(相手の端末で入力された文字の表示を，こちらが行う)
 const unsigned char TELNET_SGA = 3;   // SGA(Suppress Go Ahead．送り終えるたびに送るGAというコマンドを省き，1文字ずつ送り合えるようにする)
 
 // telnetの受信の状態(受信したバイトをデータとして扱うかコマンドとして扱うかの判断に使う)
@@ -87,7 +87,7 @@ int console_uart_after_cr = 0;                            // UARTで接続した
 int console_last_input_terminal = CONSOLE_TERMINAL_UART;  // 直前に文字を受け取った端末の種類
 int console_telnet_state = TELNET_STATE_DATA;             // telnetの受信の状態
 unsigned char console_telnet_command = 0;                 // 受け取った交渉のコマンド(オプションの番号を待つ間に控える)
-int console_telnet_echo = 0;                              // エコーのオプションが有効か(0:無効，1:有効．有効な間だけ，打った文字をtelnetで接続した端末へ表示する)
+int console_telnet_echo = 0;                              // エコーのオプションが有効か(0:無効，1:有効．有効な間だけ，入力された文字をtelnetで接続した端末へ表示する)
 int console_telnet_sga = 0;                               // SGAのオプションが有効か(0:無効，1:有効．GAは有効・無効によらず送らない)
 
 // telnetでの接続を閉じる．TCPの出力バッファの中身と処理する前の受信データは捨てる
@@ -149,7 +149,7 @@ void console_put(char c) {
     console_last_output = c;
 }
 
-// 打った文字を表示するため，1文字を出力する
+// 入力された文字を表示するため，1文字を出力する
 // UARTで接続した端末へは常に出力し，telnetで接続した端末へはエコーのオプションが有効な間だけ出力する(無効な間は，表示をその端末自身に任せる)
 void console_echo(char c) {
     // UARTで接続した端末へ送る
@@ -269,7 +269,7 @@ int console_poll_connection(void) {
         // 始められなければ(ネットワークの設定に失敗している場合を含む)，次に確かめるときに待ち受けを始め直す
         if (status != TCP_OK) {
             // モジュールが応答すれば，ネットワークの設定をやり直す
-            // やり直すのを応答する間に限るのは，やり直すとモジュールのリセットを待つ間(約64ms)，UARTで接続した端末で打った文字の処理が止まり，モジュールを接続していない間それが続くため
+            // やり直すのを応答する間に限るのは，やり直すとモジュールのリセットを待つ間(約64ms)，UARTで接続した端末で入力された文字の処理が止まり，モジュールを接続していない間それが続くため
             // やり直しの結果は出力しない．確かめるたびにやり直すため，出力すると同じ行が出続けるため
             if (network_module_responds()) {
                 network_setup();
@@ -298,7 +298,7 @@ int console_poll_connection(void) {
     // 申し出たオプションは，相手が断ればそのときに無効へ戻すため，同意を待たずに有効とする
     // エコーを有効にする
     console_telnet_echo = 1;
-    // エコーをこちらで行うと申し出る(相手の端末は，打った文字を自分では表示しなくなる)
+    // エコーをこちらで行うと申し出る(相手の端末は，入力された文字を自分では表示しなくなる)
     console_telnet_send(TELNET_WILL, TELNET_ECHO);
     // SGAを有効にする
     console_telnet_sga = 1;
