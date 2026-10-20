@@ -257,6 +257,7 @@ package alu_p;
         else if (addr == 6'h30)
             used_bits = 32'h7;
         // UART．指示のビット(0〜9ビット目)は書き込んだ値を保持せず，橋渡し回路の状態を写すビット(16〜25ビット目)だけを使う
+        // 各ビットの位置はregister.svhで，役割はspecificationのregister.mdで定めている
         else if (addr == 6'h31)
             used_bits = 32'h03ff_0000;
         // 空き

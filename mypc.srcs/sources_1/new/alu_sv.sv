@@ -122,10 +122,10 @@ module alu_sv (
     output logic        eth_sck,   // SCK(AR13)
 
     // UARTの橋渡し回路(PSのUART0を使って，USBのシリアル通信でバイトを送受信する)
-    output logic        uart_tx_push,       // 1のサイクルに，送るバイトを送信バッファへ入れるよう橋渡し回路へ指示する
-    output logic [7:0]  uart_tx_data,       // 送るバイト
+    output logic        uart_tx_push,       // この信号が1のサイクルに，送信するデータを送信バッファへ入れるよう橋渡し回路へ指示する
+    output logic [7:0]  uart_tx_data,       // 送信するデータ
     input  logic        uart_tx_not_full,   // 送信バッファに空きがあるか(1:ある)
-    output logic        uart_rx_pop,        // 1のサイクルに，受信バッファの先頭のバイトを取り除くよう橋渡し回路へ指示する
+    output logic        uart_rx_pop,        // この信号が1のサイクルに，受信バッファの先頭のバイトを取り除くよう橋渡し回路へ指示する
     input  logic [7:0]  uart_rx_head,       // 受信バッファの先頭のバイト
     input  logic        uart_rx_not_empty,  // 受信バッファに受信したバイトがあるか(1:ある)
 
@@ -1082,25 +1082,19 @@ module alu_sv (
     logic ex2_alu_write;
     assign ex2_alu_write = ex2_occupied && ex_completes;
 
-    // UARTのレジスタの各ビット(書き込む値の指示のビットと，読み出す値の橋渡し回路の状態のビット)
-    // 状態のビットは，指示のビットと重ならない16ビット目以降に置く
-    // 読み出した値を書き戻す書き方(UART |= xのような複合代入)をしても，状態のビットが送信や取り出しの指示として働かないようにするため
-    localparam int UART_TX_DATA_LSB    = 0;   // 送るバイト(0〜7ビット目)
-    localparam int UART_TX_REQUEST     = 8;   // 1を書き込むと，送るバイトを送信バッファへ入れる
-    localparam int UART_RX_POP         = 9;   // 1を書き込むと，受信バッファの先頭のバイトを取り除く
-    localparam int UART_RX_HEAD_LSB    = 16;  // 受信バッファの先頭のバイト(16〜23ビット目)
-    localparam int UART_RX_NOT_EMPTY   = 24;  // 受信バッファに受信したバイトがあるか
-    localparam int UART_TX_NOT_FULL    = 25;  // 送信バッファに空きがあるか
-
-    // 実行段がこのサイクルにUARTのレジスタへ書き込むかと，書き込む値
-    // 指示のビットはレジスタに残らない(使わないビットとして0になる)ため，指示はレジスタではなく書き込む値から読み取る
+    // 実行段がこのサイクルに命令の結果をUARTのレジスタへ書き込むかと，書き込む値を求める
+    // UARTのレジスタへの書き込みは，橋渡し回路(PSのUART0を使ってUSBのシリアル通信を行うPL上の回路)への送信・取り出しの指示になる
+    // 指示のビットはUARTのレジスタに残らない(使わないビットとして0になる)ため，指示はレジスタの値ではなく書き込む値から読み取る
+    // 命令の結果をレジスタへ書き込む経路は次の4つで，どの経路の結果もUARTのレジスタを書き込み先にできるため，すべてを調べる
+    // (経路はこのALUの中にしか無いため，指示を取り出す処理もALUに置く)
     logic      uart_write;
     register_t uart_write_value;
     always_comb begin
         // 既定値として「書き込まない」を与え，UARTのレジスタへ書き込む経路があれば上書きする
         uart_write       = 1'b0;
         uart_write_value = '0;
-        // レジスタへの書き込みと同じ順に並べ，同じ番地へ重なった場合にレジスタに残る値と同じものを選ぶ
+        // 1サイクルに複数の経路が同時にUARTのレジスタへ書き込むことがある
+        // そのときに指示として使う値を，レジスタへの書き込みで最後に残る値と揃えるため，経路をレジスタへの書き込みと同じ順に並べる(後の経路の値が優先される)
         // 2本目のパイプラインの命令の結果
         if (ex2_alu_write && ex2_rd_addr_r == UART_ADDR) begin
             uart_write       = 1'b1;
@@ -1807,7 +1801,7 @@ module alu_sv (
             // UARTのレジスタへ書き込んだ指示を，次のサイクルに橋渡し回路へ1サイクルだけ渡す
             // 送信の指示
             uart_tx_push <= uart_write && uart_write_value[UART_TX_REQUEST];
-            // 送るバイト
+            // 送信するデータ
             uart_tx_data <= uart_write_value[UART_TX_DATA_LSB +: 8];
             // 取り出しの指示
             uart_rx_pop <= uart_write && uart_write_value[UART_RX_POP];

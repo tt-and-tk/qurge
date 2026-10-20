@@ -64,8 +64,8 @@ module cpu_tb;
     logic        eth_rstn, eth_csn, eth_mosi, eth_sck;     // EthernetモジュールのRSTn・CSn・MOSI・SCK
     logic        eth_intn = 1'b0;                          // EthernetモジュールのINTn
     logic        eth_miso = 1'b0;                          // EthernetモジュールのMISO
-    logic        uart_tx_push;                             // CPUが送るバイトを送信バッファへ入れるか
-    logic [ 7:0] uart_tx_data;                             // CPUが送るバイト
+    logic        uart_tx_push;                             // CPUが送信するデータを送信バッファへ入れるか
+    logic [ 7:0] uart_tx_data;                             // CPUが送信するデータ
     logic        uart_tx_not_full = 1'b0;                  // 送信バッファに空きがあるか
     logic        uart_rx_pop;                              // CPUが受信バッファの先頭のバイトを取り除くか
     logic [ 7:0] uart_rx_head = '0;                        // 受信バッファの先頭のバイト
@@ -175,7 +175,7 @@ module cpu_tb;
         uart_rx_head      <= (uart_rx_queue.size() > 0) ? uart_rx_queue[0] : 8'h00;
     end
 
-    // 送信バッファ．送信の指示を受け，空きがあれば送るバイトを記録する
+    // 送信バッファ．送信の指示を受け，空きがあれば送信するデータを記録する
     always @(posedge clk) begin
         // 空きがあれば記録する
         if (resetn && uart_tx_push && uart_tx_log.size() < UART_TX_DEPTH)

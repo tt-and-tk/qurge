@@ -30,12 +30,12 @@ module uart_buffer_sv #(
     input  logic       resetn,
 
     // 追加
-    input  logic       push,       // 1のサイクルに，追加するバイトを末尾へ加える(満杯なら加えない)
+    input  logic       push,       // この信号が1のサイクルに，追加するバイトを末尾へ加える(満杯なら加えない)
     input  logic [7:0] push_data,  // 追加するバイト
     output logic       not_full,   // 空きがあるか(1:ある)
 
     // 取り出し
-    input  logic       pop,        // 1のサイクルに，先頭のバイトを取り除く(空なら何もしない)
+    input  logic       pop,        // この信号が1のサイクルに，先頭のバイトを取り除く(空なら何もしない)
     output logic [7:0] head,       // 先頭のバイト(先頭のバイトがない間は不定)
     output logic       not_empty   // 先頭のバイトがあるか(1:ある)
     );

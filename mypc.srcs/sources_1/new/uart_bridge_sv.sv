@@ -36,7 +36,7 @@
 // - 受信FIFOにバイトがあれば1バイト読み出し，PL側の受信バッファへ入れる
 //   受信FIFOは64バイトしかためられず，CPUがほかの処理で受信を確かめない間にあふれうるため，大きい受信バッファへ移しておく
 // - PL側の送信バッファにバイトがあり，送信FIFOに空きがあれば，送信FIFOへ1バイト書き込む
-//   CPUが送信FIFOの空きを待たずに次の処理へ進めるよう，送るバイトは送信バッファへためておく
+//   CPUが送信FIFOの空きを待たずに次の処理へ進めるよう，送信するデータは送信バッファへためておく
 module uart_bridge_sv #(
     parameter int BUFFER_DEPTH = 2048  // 送信バッファ・受信バッファそれぞれにためられるバイト数(2のべき乗)
     ) (
@@ -44,10 +44,10 @@ module uart_bridge_sv #(
     input  logic        resetn,
 
     // CPUとの受け渡し
-    input  logic        tx_push,       // 1のサイクルに，送信バッファに空きがあれば，送るバイトを入れる
-    input  logic [7:0]  tx_data,       // 送るバイト
+    input  logic        tx_push,       // この信号が1のサイクルに，送信バッファに空きがあれば，送信するデータを入れる
+    input  logic [7:0]  tx_data,       // 送信するデータ
     output logic        tx_not_full,   // 送信バッファに空きがあるか(1:ある)
-    input  logic        rx_pop,        // 1のサイクルに，受信バッファにバイトがあれば，先頭のバイトを取り除く
+    input  logic        rx_pop,        // この信号が1のサイクルに，受信バッファにバイトがあれば，先頭のバイトを取り除く
     output logic [7:0]  rx_head,       // 受信バッファの先頭のバイト
     output logic        rx_not_empty,  // 受信バッファに受信したバイトがあるか(1:ある)
 
@@ -116,7 +116,7 @@ module uart_bridge_sv #(
     // 送信バッファの先頭のバイトを取り除くか(送信FIFOへの書き込みの応答が届いたサイクル)
     logic       tx_pop;
 
-    // CPUが送るバイトをためる送信バッファ
+    // CPUが送信するデータをためる送信バッファ
     uart_buffer_sv #(.DEPTH(BUFFER_DEPTH)) tx_buffer (
         .clk(clk), .resetn(resetn),
         .push(tx_push),
@@ -225,7 +225,7 @@ module uart_bridge_sv #(
                             m_axi_rresp == AXI_RESP_OKAY
                             // かつ，送信FIFOに空きがある
                             && !m_axi_rdata[UART_STATUS_TX_FULL]
-                            // かつ，送信バッファに送るバイトがある
+                            // かつ，送信バッファに送信するデータがある
                             && tx_not_empty
                         ) begin
                             // 送信FIFOへ1バイト書き込む
@@ -250,7 +250,7 @@ module uart_bridge_sv #(
                         if (
                             // 最後に読んだ状態で，送信FIFOに空きがあった
                             tx_fifo_has_space
-                            // かつ，送信バッファに送るバイトがある
+                            // かつ，送信バッファに送信するデータがある
                             && tx_not_empty
                         ) begin
                             // 送信FIFOへ1バイト書き込む

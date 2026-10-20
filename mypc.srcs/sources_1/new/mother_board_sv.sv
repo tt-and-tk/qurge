@@ -105,8 +105,8 @@ module mother_board_sv(
     rom_read_if rom_read2();
 
     // CPUとUARTの橋渡し回路の間の受け渡し
-    logic       uart_tx_push;       // 送るバイトを送信バッファへ入れるか
-    logic [7:0] uart_tx_data;       // 送るバイト
+    logic       uart_tx_push;       // 送信するデータを送信バッファへ入れるか
+    logic [7:0] uart_tx_data;       // 送信するデータ
     logic       uart_tx_not_full;   // 送信バッファに空きがあるか
     logic       uart_rx_pop;        // 受信バッファの先頭のバイトを取り除くか
     logic [7:0] uart_rx_head;       // 受信バッファの先頭のバイト

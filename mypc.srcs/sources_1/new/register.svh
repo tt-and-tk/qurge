@@ -29,4 +29,15 @@ parameter machine_p::func_t GPIO2_ADDR         = 6'h2f;
 parameter machine_p::func_t GPIO3_ADDR         = 6'h30;
 parameter machine_p::func_t UART_ADDR          = 6'h31;
 
+// UARTのレジスタの各ビットの位置(各ビットの役割はspecificationのregister.mdを参照)
+// 書き込む値のビットは橋渡し回路(PSのUART0を使ってUSBのシリアル通信を行うPL上の回路)への指示を，読み出す値のビットは橋渡し回路の状態を表す
+// 状態のビットは，指示のビットと重ならない16ビット目以降に置く(Qurgeの取り決め)
+// 読み出した値を書き戻す書き方(UART |= xのような複合代入)をしても，状態のビットが指示として働かないようにするため
+parameter int UART_TX_DATA_LSB  = 0;   // UARTで送信するデータ(1バイト)の最下位ビット(0〜7ビット目)
+parameter int UART_TX_REQUEST   = 8;   // 送信の指示．このビットを1にして書き込むと，送信するデータを送信バッファへ入れる
+parameter int UART_RX_POP       = 9;   // 取り出しの指示．このビットを1にして書き込むと，受信バッファの先頭のバイトを取り除く
+parameter int UART_RX_HEAD_LSB  = 16;  // 受信バッファの先頭のバイトの最下位ビット(16〜23ビット目)
+parameter int UART_RX_NOT_EMPTY = 24;  // 受信バッファに受信したバイトがあるか(1:ある)
+parameter int UART_TX_NOT_FULL  = 25;  // 送信バッファに空きがあるか(1:ある)
+
 `endif
