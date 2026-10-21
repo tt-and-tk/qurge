@@ -319,11 +319,11 @@ module uart_bridge_tb;
 
     string test_name = "";     // 実行中のテストケースの名前
     int    test_errors = 0;    // 実行中のテストケースで見つかった不一致の数
-    bit    test_open = 1'b0;   // 合否の件数へまだ数えていないテストケースがあるか
+    bit    test_open = 1'b0;   // 合否の件数にまだ数えていないテストケースがあるか
     int    passed = 0;         // 合格したテストケースの数
     int    failed = 0;         // 不合格だったテストケースの数
 
-    // 実行中のテストケースを，不一致の有無に応じて合格・不合格の件数へ数える
+    // 実行中のテストケースを，不一致の有無に応じて合格・不合格の件数に数える
     function automatic void finish_test();
         // 数えていないテストケースがなければ何もしない
         if (!test_open)

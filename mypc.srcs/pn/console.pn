@@ -543,7 +543,7 @@ int console_read_line(char *buf, int size) {
     while (1) {
         // 1文字受け取る
         c = console_receive_char();
-        // 新たな端末がtelnetで接続すれば，受け取り途中の行を捨てて伝える
+        // 新たな端末がtelnetで接続すれば，受け取り途中の行を捨てて，そのことを伝える
         if (c == CONSOLE_NEW_CONNECTION) {
             return CONSOLE_LINE_NEW_CONNECTION;
         }
