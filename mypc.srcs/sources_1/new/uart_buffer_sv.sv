@@ -20,9 +20,9 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 
-// 入れた順にバイトを取り出すバッファ(FIFO)．先頭のバイトがあれば，取り出す指示を待たずにその値を読める
+// 入れた順にバイトを取り出すバッファ(FIFO)．バッファが空でなければ，取り出す指示を待たずに先頭のバイトを読める
 // 中身はBlock RAMへ推論させる．Block RAMは番地を与えた次のサイクルに読めるため，
-// 先頭のバイトと，先頭のバイトがあるかは，取り出しや追加を受け付けた次のサイクルに変わる
+// 先頭のバイトと，バッファが空でないかは，取り出しや追加を受け付けた次のサイクルに変わる
 module uart_buffer_sv #(
     parameter int DEPTH = 2048  // ためられるバイト数(2のべき乗)
     ) (
@@ -36,8 +36,8 @@ module uart_buffer_sv #(
 
     // 取り出し
     input  logic       pop,        // この信号が1のサイクルに，先頭のバイトを取り除く(空なら何もしない)
-    output logic [7:0] head,       // 先頭のバイト(先頭のバイトがない間は不定)
-    output logic       not_empty   // 先頭のバイトがあるか(1:ある)
+    output logic [7:0] head,       // 先頭のバイト(バッファが空の間は不定)
+    output logic       not_empty   // バッファが空でないか(1:空でなく，先頭のバイトが有効)
     );
 
     localparam int INDEX_WIDTH = $clog2(DEPTH);  // 中身の番地のビット数
@@ -57,15 +57,8 @@ module uart_buffer_sv #(
     assign next_read_position = read_position + position_t'(pop && not_empty);
 
     always_ff @(posedge clk) begin
-        // 取り出しを反映した後の先頭のバイトを読む
-        // 追加と同じサイクルに同じ番地を読むのは空になる場合だけで，そのときは先頭のバイトがないため読んだ値を使わない
-        head <= memory[next_read_position[INDEX_WIDTH - 1:0]];
-        // 空きがあれば，追加するバイトを末尾へ書き込む
-        if (push && not_full) begin
-            memory[write_position[INDEX_WIDTH - 1:0]] <= push_data;
-        end
-
         // リセット
+        // 中身はBlock RAMのため消さず，位置を戻して空にするだけにする(位置が空を表していれば，中身の値は使われない)
         if (!resetn) begin
             // 空にする
             write_position <= '0;
@@ -73,14 +66,19 @@ module uart_buffer_sv #(
             not_empty <= 1'b0;
         end
         else begin
-            // 空きがあれば，追加の位置を1つ進める
+            // 取り出しを反映した後の先頭のバイトを読む
+            // 空のバッファへ追加したサイクルは，追加する番地を書き込む前に読むため，不定な値を読む
+            // そのサイクルはバッファがまだ空とみなす(下の空でないかを0にする)ため，読んだ値は使われず，次のサイクルに追加したバイトを読み直す
+            head <= memory[next_read_position[INDEX_WIDTH - 1:0]];
+            // 空きがあれば，追加するバイトを末尾へ書き込み，追加の位置を1つ進める
             if (push && not_full) begin
+                memory[write_position[INDEX_WIDTH - 1:0]] <= push_data;
                 write_position <= write_position + 1'b1;
             end
             // 先頭の位置を，取り出しを反映した位置へ進める
             read_position <= next_read_position;
-            // 先頭のバイトがあるかを求める
-            // このサイクルに追加するバイトは，次のサイクルに読む先頭のバイトへ間に合わないため数えない(追加前の位置と比べる)
+            // バッファが空でないかを求める
+            // このサイクルに追加したバイトは，次のサイクルにならないと先頭のバイトとして読めないため，追加したサイクルはまだ空とみなす(追加前の位置と比べる)
             not_empty <= write_position != next_read_position;
         end
     end

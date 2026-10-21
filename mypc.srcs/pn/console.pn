@@ -84,7 +84,7 @@ int console_tcp_input_length = 0;                         // 受信したデー�
 int console_tcp_input_position = 0;                       // 受信したデータのうち，次に処理する位置
 int console_tcp_after_cr = 0;                             // telnetで接続した端末から直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
 int console_uart_after_cr = 0;                            // UARTで接続した端末から直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
-int console_last_input_terminal = CONSOLE_TERMINAL_UART;  // 直前に文字を受け取った端末の種類
+int console_last_input_terminal = CONSOLE_TERMINAL_UART;  // 直前に受け取った文字を送ってきた端末の種類
 int console_telnet_state = TELNET_STATE_DATA;             // telnetの受信の状態
 unsigned char console_telnet_command = 0;                 // 受け取った交渉のコマンド(オプションの番号を待つ間に控える)
 int console_telnet_echo = 0;                              // エコーのオプションが有効か(0:無効，1:有効．有効な間だけ，入力された文字をtelnetで接続した端末へ表示する)
@@ -484,7 +484,7 @@ int console_skip_after_cr(int *after_cr, int c) {
 
 // どちらかの端末から1文字届くか，新たな端末がtelnetで接続するまで待つ(何を返すかは戻り値の説明を参照)
 // telnetで接続した端末からはtelnetのコマンドを除いたデータを受け取り，どちらの端末からも復帰の直後のLF・NULは読み捨てる
-// 文字を受け取ったときは，その文字を受け取った端末の種類も控える
+// 文字を受け取ったときは，その文字を送ってきた端末の種類も控える
 // 戻り値: 受け取った文字の値(0〜255) / CONSOLE_NEW_CONNECTION(新たな端末がtelnetで接続した)
 int console_receive_char(void) {
     int b;  // telnetでの接続から受信したバイトの値(0〜255)か，受信したバイトが無いことを表す-1
@@ -497,7 +497,7 @@ int console_receive_char(void) {
         if (c >= 0) {
             // 読み捨てる文字でなければ，受け取った文字とする
             if (console_skip_after_cr(&console_uart_after_cr, c) == 0) {
-                // 文字を受け取った端末として，UARTで接続した端末を控える
+                // 文字を送ってきた端末として，UARTで接続した端末を控える
                 console_last_input_terminal = CONSOLE_TERMINAL_UART;
                 // 受け取った文字を返す
                 return c;
@@ -520,7 +520,7 @@ int console_receive_char(void) {
         }
         // 読み捨てる文字でなければ，受け取った文字とする
         if (console_skip_after_cr(&console_tcp_after_cr, c) == 0) {
-            // 文字を受け取った端末として，telnetで接続した端末を控える
+            // 文字を送ってきた端末として，telnetで接続した端末を控える
             console_last_input_terminal = CONSOLE_TERMINAL_TCP;
             // 受け取った文字を返す
             return c;
@@ -530,7 +530,7 @@ int console_receive_char(void) {
 
 // コンソールから改行までの1行を受け取るか，新たな端末がtelnetで接続するまで待つ(何を返すかは戻り値の説明を参照)
 // 1行を受け取る間は，受け取った文字のエコーと1行の編集を行い，ヌル終端付きで配列へ格納する
-// - 復帰(CR)か改行(LF)で行を確定し，復帰と改行をエコーする．確定した文字を受け取った端末を，その行が入力された端末として控える
+// - 復帰(CR)か改行(LF)で行を確定し，復帰と改行をエコーする．確定した文字を送ってきた端末を，その行が入力された端末として控える
 // - BSとDELは，格納した直前の1文字を取り消し，画面から消すエコーを送る(格納した文字が無ければ何もしない)
 // - 印字可能な文字とタブを格納してエコーする．配列の要素数-1文字を超える分と，それ以外の文字は捨てる
 // 新たな端末がtelnetで接続したときは，受け取り途中の行を捨てる(配列の内容は不定)
