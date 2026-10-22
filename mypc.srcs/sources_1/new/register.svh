@@ -32,8 +32,8 @@ parameter machine_p::func_t UART_ADDR          = 6'h31;
 // UARTのレジスタの各ビットの役割
 // 書き込む値のビットは橋渡し回路(CPUとPSのUART0の間でバイトを受け渡すPL上の回路)への指示や通知を，読み出す値のビットは橋渡し回路の状態を表す
 parameter int UART_TX_DATA_LSB  = 0;   // UARTで送信するデータ(1バイト)の最下位ビット(0〜7ビット目)
-parameter int UART_TX_REQUEST   = 8;   // 送信の指示．このビットを立てて書き込むと，送信するデータを送信バッファへ入れる
-parameter int UART_RX_POP       = 9;   // 読み終えた通知．このビットを立てて書き込むと，受信バッファの先頭のバイトを読み終えたことを伝え，そのバイトを受信バッファから取り除かせる
+parameter int UART_TX_REQUEST   = 8;   // 送信の指示．このビットを立てると，送信するデータを送信バッファへ入れる
+parameter int UART_RX_POP       = 9;   // 読み終えた通知．このビットを立てると，受信バッファの先頭のバイトを読み終えたことを伝え，そのバイトを受信バッファから取り除かせる
 parameter int UART_RX_HEAD_LSB  = 16;  // 受信バッファの先頭のバイトの最下位ビット(16〜23ビット目)
 parameter int UART_RX_NOT_EMPTY = 24;  // 受信バッファに受信したバイトがあるか(1:ある)
 parameter int UART_TX_NOT_FULL  = 25;  // 送信バッファに空きがあるか(1:ある)
