@@ -8,7 +8,7 @@
 //   24・25ビット目は，指示や通知を書き込んでから反映が済むまでの数サイクルは0を，その後は反映した後の状態を読む．このため，1を読めば指示や通知を反映した後の状態である
 #pragma once
 
-// UARTのレジスタへ書き込む指示
+// UARTのレジスタへ書き込む指示と通知
 const unsigned int UART_TX_REQUEST = 0x100;  // 送信の指示
 const unsigned int UART_RX_POP = 0x200;      // 読み終えた通知
 
@@ -58,7 +58,7 @@ int uart_receive(void) {
     if ((status & UART_RX_NOT_EMPTY) == 0) {
         return -1;
     }
-    // 取り出しを指示して，先頭のバイトを受信バッファから取り除く
+    // 読み終えたことを通知して，先頭のバイトを受信バッファから取り除かせる
     UART = UART_RX_POP;
     // 読み出した状態から先頭のバイトを返す
     return (status >> UART_RX_HEAD_SHIFT) & 0xff;
