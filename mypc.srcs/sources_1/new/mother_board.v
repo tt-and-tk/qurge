@@ -40,20 +40,6 @@ module mother_board(
     input  wire [63:0] divu_dout_tdata,
     input  wire        divu_dout_tvalid,
 
-    // 標準入力用
-    input  wire [31:0] stdin_tdata,
-    input  wire [ 3:0] stdin_tkeep,
-    input  wire        stdin_tlast,
-    output wire        stdin_tready,
-    input  wire        stdin_tvalid,
-
-    // 標準出力用
-    output wire [31:0] stdout_tdata,
-    output wire [ 3:0] stdout_tkeep,
-    output wire        stdout_tlast,
-    input  wire        stdout_tready,
-    output wire        stdout_tvalid,
-
     // デバッグ用
     input  wire [ 3:0] btn,
     input  wire [ 1:0] sw,
@@ -82,6 +68,27 @@ module mother_board(
     input  wire         eth_miso,
     output wire         eth_sck,
 
+    // PSのUART0を読み書きするAXI4-Liteのマスタ(PSのS_AXI_GP0ポートへつなぐ)
+    output wire [31:0] m_axi_araddr,
+    output wire [ 2:0] m_axi_arprot,
+    output wire        m_axi_arvalid,
+    input  wire        m_axi_arready,
+    input  wire [31:0] m_axi_rdata,
+    input  wire [ 1:0] m_axi_rresp,
+    input  wire        m_axi_rvalid,
+    output wire        m_axi_rready,
+    output wire [31:0] m_axi_awaddr,
+    output wire [ 2:0] m_axi_awprot,
+    output wire        m_axi_awvalid,
+    input  wire        m_axi_awready,
+    output wire [31:0] m_axi_wdata,
+    output wire [ 3:0] m_axi_wstrb,
+    output wire        m_axi_wvalid,
+    input  wire        m_axi_wready,
+    input  wire [ 1:0] m_axi_bresp,
+    input  wire        m_axi_bvalid,
+    output wire        m_axi_bready,
+
     // ラズパイヘッダー
     output wire [26:8] gpio
     );
@@ -102,18 +109,6 @@ module mother_board(
         .divu_dividend_tvalid(divu_dividend_tvalid),
         .divu_dout_tdata(divu_dout_tdata),
         .divu_dout_tvalid(divu_dout_tvalid),
-
-        .stdin_tdata(stdin_tdata),
-        .stdin_tkeep(stdin_tkeep),
-        .stdin_tlast(stdin_tlast),
-        .stdin_tready(stdin_tready),
-        .stdin_tvalid(stdin_tvalid),
-
-        .stdout_tdata(stdout_tdata),
-        .stdout_tkeep(stdout_tkeep),
-        .stdout_tlast(stdout_tlast),
-        .stdout_tready(stdout_tready),
-        .stdout_tvalid(stdout_tvalid),
 
         .btn(btn),
         .sw(sw),
@@ -136,6 +131,27 @@ module mother_board(
         .eth_mosi(eth_mosi),
         .eth_miso(eth_miso),
         .eth_sck(eth_sck),
+
+        .m_axi_araddr(m_axi_araddr),
+        .m_axi_arprot(m_axi_arprot),
+        .m_axi_arvalid(m_axi_arvalid),
+        .m_axi_arready(m_axi_arready),
+        .m_axi_rdata(m_axi_rdata),
+        .m_axi_rresp(m_axi_rresp),
+        .m_axi_rvalid(m_axi_rvalid),
+        .m_axi_rready(m_axi_rready),
+        .m_axi_awaddr(m_axi_awaddr),
+        .m_axi_awprot(m_axi_awprot),
+        .m_axi_awvalid(m_axi_awvalid),
+        .m_axi_awready(m_axi_awready),
+        .m_axi_wdata(m_axi_wdata),
+        .m_axi_wstrb(m_axi_wstrb),
+        .m_axi_wvalid(m_axi_wvalid),
+        .m_axi_wready(m_axi_wready),
+        .m_axi_bresp(m_axi_bresp),
+        .m_axi_bvalid(m_axi_bvalid),
+        .m_axi_bready(m_axi_bready),
+
         .gpio(gpio)
     );
 

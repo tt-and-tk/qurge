@@ -1,5 +1,6 @@
 // 1バイトの値を16進数で表して出力する関数
 #pragma once
+#include "console.pn"
 
 // 0〜15の値を16進数1桁の文字へ変換する
 char hex(int value) {
@@ -19,13 +20,13 @@ void print_hex(char value) {
     hex_buf[2] = hex((value >> 4) & 0x0f);  // 上位4ビット
     hex_buf[3] = hex(value & 0x0f);         // 下位4ビット
     hex_buf[4] = '\0';
-    print(hex_buf);
+    console_print(hex_buf);
 }
 
 // 初期化に失敗した段階の行の末尾へ，判定に使った応答値を" (0x??)"の形で添えて改行する
 void print_response(char value) {
     // 応答値を括弧で囲んで出力し，行を終える
-    print(" (");
+    console_print(" (");
     print_hex(value);
-    print(")\n");
+    console_print(")\n");
 }

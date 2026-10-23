@@ -1,0 +1,8 @@
+/* BOOT.BINの構成(bootgenに渡す)．パスはリポジトリ直下からの相対パス */
+/* FSBLと，FSBLがPLへ書き込むビットストリームだけを入れる．PSで動かすプログラム(アプリケーション)は入れない */
+/* アプリケーションが無いと，FSBLはビットストリームを書き込んだ後にPSを待機させたまま終わり，PLだけが動き続ける */
+the_ROM_image:
+{
+	[bootloader]mypc.boot/fsbl/executable.elf
+	mypc.runs/impl_1/top_wrapper.bit
+}

@@ -43,20 +43,6 @@ module mother_board_sv(
     input  logic [63:0] divu_dout_tdata,
     input  logic        divu_dout_tvalid,
 
-    // 標準入力
-    input  logic [31:0] stdin_tdata,
-    input  logic [ 3:0] stdin_tkeep,
-    input  logic        stdin_tlast,
-    output logic        stdin_tready,
-    input  logic        stdin_tvalid,
-
-    // 標準出力
-    output logic [31:0] stdout_tdata,
-    output logic [ 3:0] stdout_tkeep,
-    output logic        stdout_tlast,
-    input  logic        stdout_tready,
-    output logic        stdout_tvalid,
-
     // デバッグ用
     input  logic [ 3:0] btn,
     input  logic [ 1:0] sw,
@@ -85,6 +71,27 @@ module mother_board_sv(
     input  logic         eth_miso,
     output logic         eth_sck,
 
+    // PSのUART0を読み書きするAXI4-Liteのマスタ(PSのS_AXI_GP0ポートへつなぐ)
+    output logic [31:0] m_axi_araddr,
+    output logic [ 2:0] m_axi_arprot,
+    output logic        m_axi_arvalid,
+    input  logic        m_axi_arready,
+    input  logic [31:0] m_axi_rdata,
+    input  logic [ 1:0] m_axi_rresp,
+    input  logic        m_axi_rvalid,
+    output logic        m_axi_rready,
+    output logic [31:0] m_axi_awaddr,
+    output logic [ 2:0] m_axi_awprot,
+    output logic        m_axi_awvalid,
+    input  logic        m_axi_awready,
+    output logic [31:0] m_axi_wdata,
+    output logic [ 3:0] m_axi_wstrb,
+    output logic        m_axi_wvalid,
+    input  logic        m_axi_wready,
+    input  logic [ 1:0] m_axi_bresp,
+    input  logic        m_axi_bvalid,
+    output logic        m_axi_bready,
+
     // ラズパイヘッダー
     output logic [26:8] gpio
     );
@@ -96,6 +103,14 @@ module mother_board_sv(
     // ROM読み込みインターフェース．1サイクルに2つの番地の命令を読むため2つ持つ
     rom_read_if rom_read1();
     rom_read_if rom_read2();
+
+    // CPUとUARTの橋渡し回路の間の受け渡し
+    logic       uart_tx_push;       // 送信するデータを送信バッファへ入れるか
+    logic [7:0] uart_tx_data;       // 送信するデータ
+    logic       uart_tx_not_full;   // 送信バッファに空きがあるか
+    logic       uart_rx_pop;        // 受信バッファの先頭のバイトを取り除くか
+    logic [7:0] uart_rx_head;       // 受信バッファの先頭のバイト
+    logic       uart_rx_not_empty;  // 受信バッファに受信したバイトがあるか
 
     // メインメモリ
     ram_sv ram_sv_0 (
@@ -134,17 +149,6 @@ module mother_board_sv(
         .sw(sw),
         .led(led),
         .rgb_led(rgb_led),
-        // 標準入出力
-        .stdin_tdata(stdin_tdata),
-        .stdin_tkeep(stdin_tkeep),
-        .stdin_tlast(stdin_tlast),
-        .stdin_tready(stdin_tready),
-        .stdin_tvalid(stdin_tvalid),
-        .stdout_tdata(stdout_tdata),
-        .stdout_tkeep(stdout_tkeep),
-        .stdout_tlast(stdout_tlast),
-        .stdout_tready(stdout_tready),
-        .stdout_tvalid(stdout_tvalid),
         .ja(ja),
         .jb(jb),
         .ar(ar),
@@ -161,7 +165,45 @@ module mother_board_sv(
         .eth_mosi(eth_mosi),
         .eth_miso(eth_miso),
         .eth_sck(eth_sck),
+        .uart_tx_push(uart_tx_push),
+        .uart_tx_data(uart_tx_data),
+        .uart_tx_not_full(uart_tx_not_full),
+        .uart_rx_pop(uart_rx_pop),
+        .uart_rx_head(uart_rx_head),
+        .uart_rx_not_empty(uart_rx_not_empty),
         .gpio(gpio)
+    );
+
+    // UARTの橋渡し回路
+    uart_bridge_sv uart_bridge_sv_0 (
+        .clk(clk), .resetn(resetn),
+        // CPUとの受け渡し
+        .tx_push(uart_tx_push),
+        .tx_data(uart_tx_data),
+        .tx_not_full(uart_tx_not_full),
+        .rx_pop(uart_rx_pop),
+        .rx_head(uart_rx_head),
+        .rx_not_empty(uart_rx_not_empty),
+        // PSのUART0との読み書き
+        .m_axi_araddr(m_axi_araddr),
+        .m_axi_arprot(m_axi_arprot),
+        .m_axi_arvalid(m_axi_arvalid),
+        .m_axi_arready(m_axi_arready),
+        .m_axi_rdata(m_axi_rdata),
+        .m_axi_rresp(m_axi_rresp),
+        .m_axi_rvalid(m_axi_rvalid),
+        .m_axi_rready(m_axi_rready),
+        .m_axi_awaddr(m_axi_awaddr),
+        .m_axi_awprot(m_axi_awprot),
+        .m_axi_awvalid(m_axi_awvalid),
+        .m_axi_awready(m_axi_awready),
+        .m_axi_wdata(m_axi_wdata),
+        .m_axi_wstrb(m_axi_wstrb),
+        .m_axi_wvalid(m_axi_wvalid),
+        .m_axi_wready(m_axi_wready),
+        .m_axi_bresp(m_axi_bresp),
+        .m_axi_bvalid(m_axi_bvalid),
+        .m_axi_bready(m_axi_bready)
     );
 
     // プログラムメモリ

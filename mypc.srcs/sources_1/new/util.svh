@@ -11,7 +11,7 @@ package util_p;
     parameter bool_t TRUE  = 1'b1;
     parameter bool_t FALSE = 1'b0;
 
-    // メモリ読み出し・書き込みや標準入出力など各処理の実行状態
+    // メモリ読み出し・書き込みなど各処理の実行状態
     typedef enum logic [1:0] {
         IDLE,          // 待機状態
         EXECUTE,       // 実行

@@ -1,6 +1,7 @@
 // システムコールの受付関数．実行ファイルから番号と引数を受け取り，番号に対応するOSの機能(各システムコールの処理)へ振り分ける
 // シェルは実行ファイルを呼び出す直前に，この関数の番地をシステムコールの入口へ書き込む
 #pragma once
+#include "console.pn"
 #include "fat.pn"
 #include "lib/syscall_number.pn"
 
@@ -83,8 +84,49 @@ int syscall_file_write(int a, int b, int c) {
     return 0;
 }
 
+// コンソールから1行を受け取り，番地aからのbバイトの格納先へヌル終端付きで格納し，格納した文字数を返す
+int syscall_console_read(int a, int b) {
+    char *buf = (char *)a;  // 格納先
+    int length = 0;         // 格納した文字数
+
+    // 格納先を書き込めないか，ヌル終端の1バイトも格納できなければ受け取れない
+    if (buf == nullptr || b < 1) {
+        return SYSCALL_ERR_INVALID;
+    }
+    // コンソールから，エコーと1行の編集をしながら受け取る
+    // 受け取る途中で新たな端末がtelnetで接続すれば，受け取り途中の行を捨てて受け取り直す(新たに接続した相手へOS名を出すのはシェルだけのため，ここでは何も出力しない)
+    while (console_read_line(buf, b) == CONSOLE_LINE_NEW_CONNECTION) {
+    }
+    // 行を確定したときの改行のエコーをtelnetで接続した端末へ送る(送れなければ，この中で接続が閉じる)
+    // TCPの出力バッファの中身は，シェルが次に入力を待つまで送られない
+    // ここで送らないと，実行ファイルが受け取った後に長く計算する間，相手の端末のカーソルが入力した行の末尾に残る
+    console_tcp_flush();
+    // ヌル終端までの文字数を数える
+    while (buf[length] != '\0') {
+        length++;
+    }
+    return length;
+}
+
+// 番地aからのbバイトをコンソールへ出力し，0を返す
+int syscall_console_write(int a, int b) {
+    char *data = (char *)a;  // 出力するバイト列
+
+    // バイト列を読めないか，出力するバイトが1つも無ければ出力できない
+    if (data == nullptr || b < 1) {
+        return SYSCALL_ERR_INVALID;
+    }
+    // コンソールへ出力する
+    // telnetでの接続が切れたことは送るときに分かり，そのときまでにためていたtelnetで接続した端末への出力と，分かった後のtelnetで接続した端末への出力は失われる
+    console_write(data, b);
+    // TCPの出力バッファの中身をtelnetで接続した端末へ送る(送れなければ，この中で接続が閉じる)
+    // TCPの出力バッファの中身はシェルが次に入力を待つまで送られないため，実行ファイルが出力の後に長く計算すると表示が遅れる
+    console_tcp_flush();
+    return 0;
+}
+
 // 番号numberのシステムコールの処理を引数a〜dで実行し，その結果を返す(戻り値: 0以上は成功，負の値はエラー)
-// 画面には何も出力しない(エラーを表示するかどうかは，呼び出した実行ファイルが決めるため)
+// コンソールへ出すのは，実行ファイルが出力を求めたバイト列と，1行を受け取る間のエコーだけである(エラーを表示するかどうかは，呼び出した実行ファイルが決めるため)
 int syscall_dispatch(int number, int a, int b, int c, int d) {
     // 番号に対応する機能を実行する
     switch (number) {
@@ -97,6 +139,12 @@ int syscall_dispatch(int number, int a, int b, int c, int d) {
         // ファイルの内容を丸ごと書き込む
         case SYS_FILE_WRITE:
             return syscall_file_write(a, b, c);
+        // コンソールから1行を受け取る
+        case SYS_CONSOLE_READ:
+            return syscall_console_read(a, b);
+        // コンソールへ出力する
+        case SYS_CONSOLE_WRITE:
+            return syscall_console_write(a, b);
     }
     // どの番号とも一致しなければ，未定義の番号としてエラーを返す
     return SYSCALL_ERR_UNKNOWN;

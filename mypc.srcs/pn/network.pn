@@ -1,0 +1,45 @@
+// Qosmosのネットワークの設定と，Ethernetモジュール(W5100S)をその設定で通信に使える状態にする処理．画面への出力は行わない(結果の伝え方は呼び出し元が決める)
+#pragma once
+#include "eth.pn"
+
+// ネットワークの設定(IPv4アドレスは1つの値に上位バイトから並べる)
+const unsigned int NET_MAC_HIGH = 0x0200;         // MACアドレスの上位2バイト(先頭バイトの0x02はローカル管理のユニキャストアドレスを表す)
+const unsigned int NET_MAC_LOW = 0x00000001;      // MACアドレスの下位4バイト(02:00:00:00:00:01)
+const unsigned int NET_IP_ADDRESS = 0xc0a80ac8;   // 自身のIPアドレス(192.168.10.200)
+const unsigned int NET_SUBNET_MASK = 0xffffff00;  // サブネットマスク(255.255.255.0)
+const unsigned int NET_GATEWAY = 0xc0a80a01;      // ゲートウェイのIPアドレス(192.168.10.1)
+
+// 通信に使える状態にした結果
+const int NETWORK_OK = 0;                 // 成功
+const int NETWORK_NO_RESPONSE = 1;        // リセットの後にモジュールが応答しない(モジュールが接続されていない場合に起きる)
+const int NETWORK_BAD_VERSION = 2;        // 応答したがW5100Sのバージョンではない(別の機器が応答しているか，通信が乱れている)
+const int NETWORK_SETTINGS_MISMATCH = 3;  // 書き込んだ設定を読み出すと，書き込んだとおりではない
+
+int network_version = 0;  // 最後にリセットしたときにモジュールから読み出したバージョン
+
+// モジュールが接続されていて応答するかを，リセットせずにバージョンを読み出して確かめる
+// 戻り値: 1(応答する) / 0(応答しない)
+int network_module_responds(void) {
+    // 0xff以外の値を読めば応答するとみなす(モジュールを接続していない場合は，MISOのプルアップにより0xffを読む)
+    return eth_read(ETH_VERR) != 0xff;
+}
+
+// モジュールをリセットし，ネットワークの設定を書き込んで通信に使える状態にする
+// 戻り値: NETWORK_OK / NETWORK_NO_RESPONSE / NETWORK_BAD_VERSION / NETWORK_SETTINGS_MISMATCH
+int network_setup(void) {
+    // モジュールをリセットし，読み出したバージョンを控える(失敗の理由を伝えるときに添えるため)
+    network_version = eth_reset();
+    // 無応答(0xff)はモジュールが接続されていない場合に起きるため，他の値と分けて伝える
+    if (network_version == 0xff) {
+        return NETWORK_NO_RESPONSE;
+    }
+    // 応答はあってもW5100Sのバージョンでなければ，設定を書き込まない
+    if (network_version != ETH_VERSION) {
+        return NETWORK_BAD_VERSION;
+    }
+    // ネットワークの設定を書き込み，読み出した値が書き込んだとおりかを確かめる
+    if (eth_configure(NET_MAC_HIGH, NET_MAC_LOW, NET_IP_ADDRESS, NET_SUBNET_MASK, NET_GATEWAY) == 0) {
+        return NETWORK_SETTINGS_MISMATCH;
+    }
+    return NETWORK_OK;
+}

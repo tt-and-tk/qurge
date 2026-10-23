@@ -1,91 +1,38 @@
-// 自作OS Qosmosの本体(ROMに書き込むプログラムの入口)．起動時にハードウェアを初期化してOS名を表示した後，シェルとして動く
-// シェルは標準入力から1行受け取り，先頭のトークンをコマンド名として解析し，対応する処理を呼び出す
+// 自作OS Qosmosの本体(ROMに書き込むプログラムの入口)．起動時にハードウェアを初期化した後，コンソール(telnetで接続した端末と，UARTで接続した端末の2つで共有する入出力)へOS名を表示し，シェルとして動く
+// シェルはコンソールから1行受け取り，先頭のトークンをコマンド名として解析し，対応する処理を呼び出す
 #include "args.pn"
+#include "console.pn"
 #include "hex.pn"
 #include "sd.pn"
-#include "eth.pn"
-#include "tcp.pn"
+#include "network.pn"
 #include "fat.pn"
 #include "syscall_dispatch.pn"
 
-const int INPUT_SIZE = 64;          // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
-const int ERROR_MESSAGE_SIZE = 32;  // エラーメッセージを出力する一時バッファの要素数
+const int INPUT_SIZE = CONSOLE_LINE_SIZE;  // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
 const int CODE_ADDRESS = 0x8000;    // メモリの後半の先頭番地(実行ファイルの読み込み先)
 const int CODE_SIZE = SYSCALL_ENTRY_ADDRESS - CODE_ADDRESS;  // 読み込める実行ファイルの大きさの上限(メモリの後半のうち，末尾のシステムコールの入口より手前のバイト数)
 const int CODE_PC = 0x4000;         // メモリの後半の先頭の命令を指すPC(実行ファイルを呼び出す先)
 const int INSTRUCTION_SIZE = 8;     // 1命令のバイト数(実行ファイルの大きさはこの倍数になる)
 const int ARGV_SIZE = INPUT_SIZE / 2 + 1;  // 実行ファイルへ渡すargvの要素数(1行から取り出せる引数の最大数と，末尾のnullptrの分)
-const int DECIMAL_TEXT_SIZE = 12;   // 10進数を出力する一時バッファの要素数(intで最も長い"-2147483648"とヌル終端の分)
 const int EXIT_SUCCESS = 0;         // 組み込みコマンドが成功した場合の終了状態
 const int EXIT_FAILURE = 1;         // 組み込みコマンドがエラーになった場合と，実行ファイルを実行できなかった場合の終了状態
 
-// ネットワークの設定(IPv4アドレスは1つの値に上位バイトから並べる)
-const unsigned int NET_MAC_HIGH = 0x0200;         // MACアドレスの上位2バイト(先頭バイトの0x02はローカル管理のユニキャストアドレスを表す)
-const unsigned int NET_MAC_LOW = 0x00000001;      // MACアドレスの下位4バイト(02:00:00:00:00:01)
-const unsigned int NET_IP_ADDRESS = 0xc0a80ac8;   // 自身のIPアドレス(192.168.10.200)
-const unsigned int NET_SUBNET_MASK = 0xffffff00;  // サブネットマスク(255.255.255.0)
-const unsigned int NET_GATEWAY = 0xc0a80a01;      // ゲートウェイのIPアドレス(192.168.10.1)
-const int NET_ECHO_PORT = 7;                      // tcpechoコマンドが待ち受けるポート番号(エコーサービスの標準のポート番号)
-const int NET_ECHO_BUFFER_SIZE = 64;              // tcpechoコマンドが1回に読み出して送り返すバイト数の上限
-
 char input[INPUT_SIZE];  // 1行分の入力バッファ
 char cmd[INPUT_SIZE];    // 入力の先頭トークン(コマンド名)
-int exit_status = 0;     // 直前のコマンドの終了状態(起動直後はまだコマンドを実行していないため成功と同じ0)
+int exit_status = 0;     // statusコマンドで出力する終了状態(電源を入れたときの起動の成否か，その後に実行した直前のコマンドの成否)
 
 // エラーメッセージの前置き"<コマンド名>: "を出力する(どのコマンドが出したエラーかが分かるようにするため)
 void print_error_head(void) {
     // 実行中のコマンド名に区切りを続けて出力する
-    print(cmd);
-    print(": ");
+    console_print(cmd);
+    console_print(": ");
 }
 
 // エラーを"<コマンド名>: <msg>"の形式で出力する(msgは末尾の改行まで含めて渡す)
 void print_error(char *msg) {
-    char msg_buf[ERROR_MESSAGE_SIZE];  // 出力用の一時バッファ(printは配列変数のみ受け付けるため)
-    int i = 0;                         // msgから写した文字数
-    // msgをヌル終端かバッファ幅の手前まで一時バッファへ写し，終端する
-    while (msg[i] != '\0' && i < ERROR_MESSAGE_SIZE - 1) {
-        msg_buf[i] = msg[i];
-        i = i + 1;
-    }
-    msg_buf[i] = '\0';
     // 前置きに続けてメッセージを出力する
     print_error_head();
-    print(msg_buf);
-}
-
-// valueを符号付きの10進数で出力する(改行は付けない)
-void print_decimal(int value) {
-    char text[DECIMAL_TEXT_SIZE];             // 出力する文字列
-    char reversed[DECIMAL_TEXT_SIZE];         // 数字を下の桁から順に並べたもの
-    unsigned int rest = (unsigned int)value;  // まだ数字にしていない上位の桁の値
-    int count = 0;                            // reversedに並べた桁数
-    int length = 0;                           // textに書いた文字数
-
-    // 負の数は符号を書き，符号なしのまま反転して絶対値にする(intの最小値を符号付きで反転すると桁あふれするため)
-    if (value < 0) {
-        text[length] = '-';
-        length++;
-        rest = 0 - rest;
-    }
-    // 下の桁から1桁ずつ数字にする(値が0でも1桁は出力するため，判定は1桁作った後に行う)
-    while (1) {
-        reversed[count] = '0' + rest % 10;
-        count++;
-        rest = rest / 10;
-        if (rest == 0) {
-            break;
-        }
-    }
-    // 上の桁から順になるよう並べ直す
-    while (count > 0) {
-        count--;
-        text[length] = reversed[count];
-        length++;
-    }
-    // 終端して出力する
-    text[length] = '\0';
-    print(text);
+    console_print(msg);
 }
 
 // FAT32の各関数が返した失敗を，実行中のコマンドのエラーとして出力する
@@ -120,8 +67,8 @@ int handle_echo(int pos) {
     char args[INPUT_SIZE];  // コマンド名を除いた引数部分
     // コマンド名より後ろを丸ごと取り出し，改行を付けて出力する
     extract_text_arg(input, pos, args, INPUT_SIZE);
-    print(args);
-    print("\n");
+    console_print(args);
+    console_print("\n");
     return EXIT_SUCCESS;
 }
 
@@ -131,13 +78,13 @@ int print_entry(struct FatEntry *entry) {
     char text[FAT_NAME_TEXT_SIZE];  // 表示用の名前
     // エントリの名前を"NAME.EXT"形式に整えて出力する
     fat_format_name(entry, text);
-    print(text);
+    console_print(text);
     // ディレクトリであれば，ファイルと見分けられるよう末尾に'/'を付ける
     if ((entry->attr & ATTR_DIRECTORY) != 0) {
-        print("/");
+        console_print("/");
     }
     // 1エントリを1行とする
-    print("\n");
+    console_print("\n");
     // 全エントリを出力するため，走査は打ち切らない
     return 0;
 }
@@ -195,22 +142,19 @@ int handle_cat(int pos) {
         if (status != FAT_OK) {
             // 途中まで出力した内容とエラーメッセージが同じ行に並ばないよう改行を挟む
             if (last != '\n') {
-                print("\n");
+                console_print("\n");
             }
             print_fat_error(status);
             return EXIT_FAILURE;
         }
         // 末尾に改行を補うかどうか判断できるよう，内容の最後の文字を控える
         last = fat_sector[length - 1];
-        // printはヌル終端か配列の終わりまでを出力するため，内容がセクタの途中で終わる場合だけ終端を置く
-        if (length < SD_BLOCK_SIZE) {
-            fat_sector[length] = '\0';
-        }
-        print(fat_sector);
+        // 読み込んだセクタのうち，内容にあたる部分を出力する
+        console_write((char *)fat_sector, length);
     }
     // 内容が改行で終わっていなければ，次のプロンプトが同じ行に並ばないよう改行を補う
     if (last != '\n') {
-        print("\n");
+        console_print("\n");
     }
     return EXIT_SUCCESS;
 }
@@ -398,8 +342,8 @@ int handle_pwd(int pos) {
         print_fat_error(status);
         return EXIT_FAILURE;
     }
-    print(path);
-    print("\n");
+    console_print(path);
+    console_print("\n");
     return EXIT_SUCCESS;
 }
 
@@ -415,14 +359,14 @@ int init_storage(void) {
         return 0;
     }
     // 初期化できたカードのファイルシステムをマウントし，その成否を出力する
-    // print_errorを使わないのは，起動時はコマンド名が入っておらず，行もprint_errorのバッファに収まらないため
+    // コマンド名を前置するエラーの出力を使わないのは，起動時はコマンド名が入っていないため
     status = fat_mount();
     if (status != FAT_OK) {
-        print("[FAIL] FAT32: mount: ");
+        console_print("[FAIL] FAT32: mount: ");
         fat_print_error(status);
         return 0;
     }
-    print("[ OK ] FAT32: mount\n");
+    console_print("[ OK ] FAT32: mount\n");
     return 1;
 }
 
@@ -430,10 +374,10 @@ int init_storage(void) {
 void print_ipv4(unsigned int address) {
     // 上位のバイトから順に10進数で出力し，間を'.'で区切る
     for (int i = 3; i >= 0; i--) {
-        print_decimal((address >> (i << 3)) & 0xff);
+        console_print_decimal((address >> (i << 3)) & 0xff);
         // 最後のバイトの後には区切りを付けない
         if (i > 0) {
-            print(".");
+            console_print(".");
         }
     }
 }
@@ -441,145 +385,115 @@ void print_ipv4(unsigned int address) {
 // Ethernetモジュールを初期化し，ネットワークの設定を書き込む．各段階の成否を[ OK ]・[FAIL]の行で出力する
 // 戻り値: 1(設定まで成功) / 0(失敗)
 int init_network(void) {
-    int version;  // リセット後にモジュールから読み出したバージョン
+    int status;  // 初期化と設定の結果
 
-    // モジュールをリセットし，読み出したバージョンでW5100Sが応答しているかを確かめる
-    version = eth_reset();
-    // 無応答(0xff)はモジュールが接続されていない場合に起きるため，他の値と分けて伝える
-    if (version == 0xff) {
-        print("[FAIL] Ethernet: reset: no response");
-        print_response(version);
+    // モジュールをリセットし，ネットワークの設定を書き込む
+    status = network_setup();
+    // リセットの後にモジュールが応答しなければ，読み出した値を添えてリセットの段階の失敗を出力する
+    if (status == NETWORK_NO_RESPONSE) {
+        console_print("[FAIL] Ethernet: reset: no response");
+        print_response(network_version);
         return 0;
     }
-    // 応答はあってもW5100Sのバージョンでなければ，別の機器が応答しているか通信が乱れている
-    if (version != ETH_VERSION) {
-        print("[FAIL] Ethernet: reset: unexpected version");
-        print_response(version);
+    // 応答したバージョンがW5100Sのものでなければ，読み出した値を添えてリセットの段階の失敗を出力する
+    if (status == NETWORK_BAD_VERSION) {
+        console_print("[FAIL] Ethernet: reset: unexpected version");
+        print_response(network_version);
         return 0;
     }
-    print("[ OK ] Ethernet: reset\n");
+    console_print("[ OK ] Ethernet: reset\n");
 
-    // ネットワークの設定を書き込み，読み出した値が書き込んだとおりかを確かめる
-    if (eth_configure(NET_MAC_HIGH, NET_MAC_LOW, NET_IP_ADDRESS, NET_SUBNET_MASK, NET_GATEWAY) == 0) {
-        print("[FAIL] Ethernet: network settings: mismatch\n");
+    // 書き込んだ設定が読み出した値と食い違えば，設定の段階の失敗を出力する
+    if (status == NETWORK_SETTINGS_MISMATCH) {
+        console_print("[FAIL] Ethernet: network settings: mismatch\n");
         return 0;
     }
     // 設定したIPアドレスを添えて成功を出力する
-    print("[ OK ] Ethernet: network settings (IP ");
+    console_print("[ OK ] Ethernet: network settings (IP ");
     print_ipv4(NET_IP_ADDRESS);
-    print(")\n");
+    console_print(")\n");
     return 1;
 }
 
 // OS名Qosmosを大きな文字(アスキーアート)で出力し，副題を添える
 void print_banner(void) {
     // figletのstandardフォントで描いた5行と，空行を挟んだ副題を出力する
-    print("  ___\n");
-    print(" / _ \\  ___  ___ _ __ ___   ___  ___\n");
-    print("| | | |/ _ \\/ __| '_ ` _ \\ / _ \\/ __|\n");
-    print("| |_| | (_) \\__ \\ | | | | | (_) \\__ \\\n");
-    print(" \\__\\_\\\\___/|___/_| |_| |_|\\___/|___/\n");
-    print("\n");
-    print("   order out of chaos, on Qurge\n");
+    console_print("  ___\n");
+    console_print(" / _ \\  ___  ___ _ __ ___   ___  ___\n");
+    console_print("| | | |/ _ \\/ __| '_ ` _ \\ / _ \\/ __|\n");
+    console_print("| |_| | (_) \\__ \\ | | | | | (_) \\__ \\\n");
+    console_print(" \\__\\_\\\\___/|___/_| |_| |_|\\___/|___/\n");
+    console_print("\n");
+    console_print("   order out of chaos, on Qurge\n");
 }
 
-// OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，ネットワークを設定してOS名を出力する
-// 呼ぶたびにハードウェアの初期化からやり直すため，再起動にもそのまま使える．全て成功すればEXIT_SUCCESS，いずれかが失敗すればEXIT_FAILUREを返す
+// OS名を出力し，ファイルシステムをマウントしていなければ，やり直し方を出力する
+// ネットワークの設定の失敗は伝えない．起動時の行で伝えており，失敗していてもtelnetでの接続を受け付けられるまで設定をやり直すため
+void print_welcome(void) {
+    // OS名を出力する
+    print_banner();
+    // ファイルシステムをマウントしていなければ，カードを差してrebootでやり直すよう伝える
+    if (fat_mounted == 0) {
+        console_print("Storage is not available. Insert a card and run reboot.\n");
+    }
+}
+
+// OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，telnetでの接続を閉じてからネットワークを設定する
+// 呼ぶたびにハードウェアの初期化からやり直すため，再起動にもそのまま使える．戻り値は終了状態で，マウントに成功すれば成功，失敗すれば失敗を表す
+// ネットワークの設定の成否は戻り値に含めない．失敗しても，telnetでの接続を受け付けられるまで設定をやり直すため
 int boot(void) {
-    int mounted;    // ファイルシステムをマウントできたか(0:失敗，1:成功)
-    int networked;  // ネットワークを設定できたか(0:失敗，1:成功)
+    int mounted;  // ファイルシステムをマウントできたか(0:失敗，1:成功)
 
     // ハードウェアを初期化し，ファイルシステムをマウントする
     mounted = init_storage();
+    // ネットワークの設定でEthernetモジュールをリセットすると接続が切れるため，先に相手へ切断を伝えて閉じる
+    // 閉じた後の出力は，UARTで接続した端末にだけ届く
+    console_tcp_close();
     // SDカードとEthernetモジュールは互いに依存しないため，マウントの成否によらずネットワークを設定する
-    networked = init_network();
-    // 成否によらずOS名を出力する
-    print_banner();
-    // 失敗してもrebootでやり直せるよう，シェルはそのまま起動し，失敗したものごとにやり直し方を伝える
+    init_network();
+    // マウントに失敗していれば，起動の失敗とする
     if (mounted == 0) {
-        print("Storage is not available. Insert a card and run reboot.\n");
-    }
-    if (networked == 0) {
-        print("Network is not available. Check the Ethernet module and run reboot.\n");
-    }
-    // いずれかが失敗していれば，起動の失敗とする
-    if (
-        // ファイルシステムをマウントできなかった
-        mounted == 0
-        // ネットワークを設定できなかった
-        || networked == 0
-    ) {
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;
 }
 
-// rebootコマンド: OSを再起動する(電源投入時と同じ起動処理をやり直す)
+// rebootコマンド: OSを再起動する(電源投入時と同じ起動処理をやり直し，OS名を出力する)
 int handle_reboot(int pos) {
+    int status;  // 起動処理の終了状態
+
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
         return EXIT_FAILURE;
     }
-    // 起動処理をやり直す(失敗も各段階の行で伝わるため，コマンド名を前置したエラーは出さない)
-    return boot();
+    // 起動処理をやり直す
+    // コマンド名を前置したエラーは出さない．ストレージの失敗は，起動時と同じ形の行と終了状態で伝わるため
+    status = boot();
+    // 電源を入れたときと同じく，OS名を出力する
+    print_welcome();
+    return status;
 }
 
-// tcpechoコマンド: TCPの接続を1つ受け付け，受信したデータをそのまま送り返す．相手が切断したら接続を閉じて終える
-// 待ち受け中と接続中は，この処理の中にとどまる(キー入力は，届くまで待つ方法でしか確かめられないため)
-int handle_tcpecho(int pos) {
-    char buf[NET_ECHO_BUFFER_SIZE];  // 受信したデータ
-    int length;                      // 受信したデータのバイト数
-    int status;                      // TCPの各関数の結果
-
+// exitコマンド: TCPの出力バッファの中身を送ってからtelnetでの接続を閉じる
+int handle_exit(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
         return EXIT_FAILURE;
     }
-    // 待ち受けを始める
-    status = tcp_listen(NET_ECHO_PORT);
-    // 起動時のネットワークの設定に失敗していれば，ネットワークを使えないことを出力する
-    if (status == TCP_ERR_NOT_READY) {
-        print_error("network is not available\n");
+    // 閉じる接続が無ければ失敗とする．次のいずれかの場合が当たる
+    if (
+        // UARTで接続した端末から入力された
+        console_last_input_terminal != CONSOLE_TERMINAL_TCP
+        // コマンドを受け取った後の出力の送信で，telnetでの接続が切れた
+        || console_tcp_state != CONSOLE_TCP_CONNECTED
+    ) {
+        print_error("not connected\n");
         return EXIT_FAILURE;
     }
-    // モジュールが待ち受けの状態にならなければ，待ち受けを始められないことを出力する
-    if (status != TCP_OK) {
-        print_error("cannot listen\n");
-        return EXIT_FAILURE;
-    }
-    // 待ち受けを始めたことを，ポート番号を添えて出力する
-    print("listening on port ");
-    print_decimal(NET_ECHO_PORT);
-    print("\n");
-
-    // 相手が接続するまで待つ
-    status = tcp_accept();
-    // 確立できれば，相手のIPアドレスを出力する
-    if (status == TCP_OK) {
-        print("connected from ");
-        print_ipv4(tcp_peer_address());
-        print("\n");
-    }
-    // 接続が閉じるまで，受信したデータをそのまま送り返す(確立の途中で相手が中断した場合は送り返さずに終える)
-    while (status == TCP_OK) {
-        // 受信したデータを読み出す
-        status = tcp_recv(buf, NET_ECHO_BUFFER_SIZE, &length);
-        // 読み出したデータがあれば送り返す
-        if (
-            // 接続が続いている
-            status == TCP_OK
-            // 1バイト以上読み出した
-            && length > 0
-        ) {
-            status = tcp_send(buf, length);
-        }
-    }
-    // 接続を閉じる
-    tcp_close();
-    // 閉じたことを出力する
-    print("disconnected\n");
+    // TCPの出力バッファの中身を送ってから接続を閉じる(切断したことは相手の端末で分かるため，閉じる前の表示はしない)
+    console_tcp_close();
     return EXIT_SUCCESS;
 }
 
@@ -591,25 +505,25 @@ int handle_help(int pos) {
         return EXIT_FAILURE;
     }
     // シェルが受け付けるコマンド名を1行ずつ出力する
-    print("echo\n");
-    print("help\n");
-    print("status\n");
-    print("ls\n");
-    print("cat\n");
-    print("touch\n");
-    print("write\n");
-    print("rm\n");
-    print("mv\n");
-    print("mkdir\n");
-    print("rmdir\n");
-    print("cd\n");
-    print("pwd\n");
-    print("reboot\n");
-    print("tcpecho\n");
+    console_print("echo\n");
+    console_print("help\n");
+    console_print("status\n");
+    console_print("ls\n");
+    console_print("cat\n");
+    console_print("touch\n");
+    console_print("write\n");
+    console_print("rm\n");
+    console_print("mv\n");
+    console_print("mkdir\n");
+    console_print("rmdir\n");
+    console_print("cd\n");
+    console_print("pwd\n");
+    console_print("reboot\n");
+    console_print("exit\n");
     return EXIT_SUCCESS;
 }
 
-// statusコマンド: 直前のコマンドの終了状態を10進数で出力する
+// statusコマンド: 保持している終了状態(電源を入れたときの起動の成否か，直前のコマンドの成否)を10進数で出力する
 // 何度実行しても同じ値を確かめられるよう，引数の誤りも含め，保持している終了状態をそのまま返して値を変えない
 int handle_status(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
@@ -618,8 +532,8 @@ int handle_status(int pos) {
         return exit_status;
     }
     // 終了状態を1行で出力する
-    print_decimal(exit_status);
-    print("\n");
+    console_print_decimal(exit_status);
+    console_print("\n");
     return exit_status;
 }
 
@@ -720,6 +634,8 @@ int run_executable(void) {
     // 実行ファイルがシステムコールを呼べるよう，受付関数の番地をシステムコールの入口へ書き込む
     // (起動時に1回だけ書くのではなく呼び出すたびに書くのは，以前に実行した実行ファイルが入口を書き換えていても元に戻すため)
     *(int *)SYSCALL_ENTRY_ADDRESS = (int)syscall_dispatch;
+    // TCPの出力バッファの中身は実行ファイルが戻るまで送られずに残るため，呼び出す前に送る
+    console_tcp_flush();
     // 実行ファイルの先頭の命令を，通常の関数と同じ呼び出し規約でargc・argvを渡して呼び出す．実行ファイルがRETで戻れば，RAXで返された値をそのまま返す
     return ((int (*)(int, char **))CODE_PC)(argc, argv);
 }
@@ -756,8 +672,8 @@ int dispatch(int pos) {
         return handle_pwd(pos);
     } else if (streq(cmd, "reboot")) {
         return handle_reboot(pos);
-    } else if (streq(cmd, "tcpecho")) {
-        return handle_tcpecho(pos);
+    } else if (streq(cmd, "exit")) {
+        return handle_exit(pos);
     }
     return run_executable();
 }
@@ -765,12 +681,27 @@ int dispatch(int pos) {
 void main(void) {
     int pos;  // コマンド名の直後の位置(引数の取り出し開始位置)
 
-    // OSを起動する(まだコマンドを実行していないため，起動の成否は終了状態に含めない)
-    boot();
+    // OSを起動し，起動の成否を終了状態とする
+    // 起動時の出力はUARTで接続した端末にだけ届き，後からtelnetで接続した端末には届かない
+    // そのため，起動の成否はtelnetで接続した端末からもstatusコマンドで確かめられるよう終了状態に残す
+    exit_status = boot();
+    // OS名を出力する
+    print_welcome();
     // 1行受け取るごとに，先頭のトークンをコマンド名として取り出して処理を呼び出す
     while (1) {
-        print("> ");  // 入力待ちであることを示すプロンプト
-        scan(input);
+        // コマンドの実行中に新たな端末がtelnetで接続していれば，プロンプトより先にOS名を出力する
+        if (console_poll_connection()) {
+            print_welcome();
+        }
+        // 入力待ちであることを示すプロンプトを出力する
+        console_print("> ");
+        // コンソールから1行受け取る
+        // 受け取る途中で新たな端末がtelnetで接続すれば，受け取り途中の行を捨て，行を改めてOS名を出力してからプロンプトを出し直す
+        if (console_read_line(input, INPUT_SIZE) == CONSOLE_LINE_NEW_CONNECTION) {
+            console_print("\n");
+            print_welcome();
+            continue;
+        }
         pos = extract_arg(input, 0, cmd, INPUT_SIZE);
         // コマンド名が無い行(改行だけ・空白だけの行など)は何もせず次のプロンプトへ戻る
         if (cmd[0] != '\0') {

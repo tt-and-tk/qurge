@@ -38,7 +38,7 @@
 // - 取り込み段: 取得した命令(ROMからは最大2命令)を命令キューの末尾へ取り込む
 // - 確認段: 命令キューの先頭の命令(以下，先頭と書く)が実行できるかを確認し，レジスタから値を読み出して実行段へ渡す．
 //   命令キューで先頭の次にある命令(以下，2番目と書く)が同時実行の条件を満たせば，先頭と同じサイクルに渡す
-// - 実行段: 命令を実行する．メモリ・標準入出力の応答待ちや割り算の完了待ちなど，複数サイクルかかる命令の
+// - 実行段: 命令を実行する．メモリの応答待ちや割り算の完了待ちなど，複数サイクルかかる命令の
 //   実行中は，確認段の命令を待たせる．同時実行する2命令のうち，先頭の命令は1本目のパイプラインで，2番目の命令は
 //   2本目のパイプラインで実行する．2本目は，1サイクルで完了しレジスタへ書き込む以外の動作を持たない命令(以下，単純な演算と書く)
 //   だけを扱う
@@ -69,7 +69,8 @@
 // - 2本目の命令の結果: その命令が完了した次のサイクル(レジスタへ書き込むサイクル)で後の命令が確認段にいれば，
 //   同じサイクルに確認段でレジスタの値の代わりに受け取る
 // 1サイクルで終わる命令の結果をパイプラインごとに保持して次のサイクルに受け取るのは，完了したサイクルに確認段で受け取ると，
-// 演算結果から確認段の比較・選択を経て実行段の入力に至る経路が1クロックを超えるため
+// 演算結果から確認段の比較・選択を経て実行段の入力に至る経路が1クロックを超えるため．
+// 確認段で受け取る結果は，メモリ・除算IPの出力や，掛け算と2本目の命令の結果を保持するレジスタから出る値であり，経路が短い
 //
 // 取得段は，分岐・ジャンプの後も順番どおりに次の番地を取得していく．行き先が順番どおりでないと分かった時点で，
 // それより後に取得していた命令を捨て，飛び先の番地の命令から順に取得し直す．
@@ -118,19 +119,6 @@ module alu_sv (
     input  logic [63:0] divu_dout_tdata,
     input  logic        divu_dout_tvalid,
 
-    // 標準入出力
-    input  logic [31:0] stdin_tdata,
-    input  logic [ 3:0] stdin_tkeep,
-    input  logic        stdin_tlast,
-    output logic        stdin_tready,
-    input  logic        stdin_tvalid,
-
-    output logic [31:0] stdout_tdata,
-    output logic [ 3:0] stdout_tkeep,
-    output logic        stdout_tlast,
-    input  logic        stdout_tready,
-    output logic        stdout_tvalid,
-
     // Pmod A・Pmod B
     output logic [7:0] ja,
     output logic [7:0] jb,
@@ -152,6 +140,14 @@ module alu_sv (
     output logic        eth_mosi,  // MOSI(AR11)
     input  logic        eth_miso,  // MISO(AR12)
     output logic        eth_sck,   // SCK(AR13)
+
+    // UARTの橋渡し回路(PSのUART0を使って，USBのシリアル通信でバイトを送受信する)
+    output logic        uart_tx_push,       // この信号が1のサイクルに，送信するデータを送信バッファへ入れるよう橋渡し回路へ指示する
+    output logic [7:0]  uart_tx_data,       // 送信するデータ
+    input  logic        uart_tx_not_full,   // 送信バッファに空きがあるか(1:ある)
+    output logic        uart_rx_pop,        // この信号が1のサイクルに，受信バッファの先頭のバイトを読み終えたことを橋渡し回路へ伝える
+    input  logic [7:0]  uart_rx_head,       // 受信バッファの先頭のバイト
+    input  logic        uart_rx_not_empty,  // 受信バッファに受信したバイトがあるか(1:ある)
 
     // ラズパイヘッダー
     output logic [26:8] gpio
@@ -371,9 +367,7 @@ module alu_sv (
         // 演算系・シフト系・代入系
         command_next1.m_type == P_TYPE || command_next1.m_type == S_TYPE || command_next1.m_type == A_TYPE
         // メモリ読み込み
-        || (command_next1.m_type == M_TYPE && (command_next1.func == RM || command_next1.func == RMR))
-        // 標準入力
-        || (command_next1.m_type == IO_TYPE && command_next1.func == SCAN);
+        || (command_next1.m_type == M_TYPE && (command_next1.func == RM || command_next1.func == RMR));
     // 先頭が割り算の余りを書き込むか．同時実行してよいかの判定に使う．書き込み先はimm[5:0]
     util_p::bool_t check_writes_remainder;
     assign check_writes_remainder =
@@ -552,13 +546,11 @@ module alu_sv (
         : ex2_rs2_from_ex2_alu_r ? ex2_alu_result_r
         : ex2_rs2_val_r;
 
-    // ===== メモリ・標準入出力・割り算回路とのハンドシェイク状態 =====
+    // ===== メモリ・割り算回路とのハンドシェイク状態 =====
     // それぞれの命令の実行が複数サイクルにまたがる間，どこまで進んだかを保持する
 
     util_p::state_enum ram_read_state = IDLE;  // メモリ読み込み(RM・RMR)とRETの実行状態
     util_p::state_enum ram_write_state = IDLE; // メモリ書き込み(WM・WMR)とCALLの実行状態
-    util_p::state_enum stdin_state = IDLE;     // 標準入力(SCAN)の実行状態
-    util_p::state_enum stdout_state = IDLE;    // 標準出力(PRINT)の実行状態
     util_p::state_enum mul_state = IDLE;       // 掛け算(MUL)の実行状態
     util_p::state_enum div_state = IDLE;       // 割り算(DIV/DIVU)の実行状態
 
@@ -1114,21 +1106,6 @@ module alu_sv (
                     endcase
                 end
 
-                // 標準入出力系
-                IO_TYPE: begin
-                    unique case (func_r)
-                        // 標準入力は，値が届いたら受け取った値を書き込む
-                        SCAN: begin
-                            ex_completes     = (stdin_state == EXECUTE) && stdin_tvalid;
-                            late_write_valid = (stdin_state == EXECUTE) && stdin_tvalid;
-                            late_write_value = stdin_tdata;
-                        end
-                        // 標準出力は，値が受け取られたら次の命令へ進む
-                        PRINT: ex_completes = (stdout_state == EXECUTE) && stdout_tready;
-                        default: ;
-                    endcase
-                end
-
                 default: ;
             endcase
         end
@@ -1147,6 +1124,45 @@ module alu_sv (
     // 2本目に命令が入っていれば，1本目の命令と同じサイクルに完了する(理由はファイル冒頭の命令パイプライン処理の概要を参照)
     logic ex2_completes;
     assign ex2_completes = ex2_occupied && ex_completes;
+
+    // このサイクルに命令の結果をUARTのレジスタへ書き込むかと，書き込む値を求める
+    // UARTのレジスタへの書き込みは，橋渡し回路(CPUとPSのUART0の間でバイトを受け渡すPL上の回路)への送信の指示や読み終えた通知を伝える
+    // 書き込んだ値はUARTのレジスタに残らない(使わないビットとして0になる)ため，指示や通知は，UARTのレジスタの値からではなく書き込む値から読み取る
+    // 命令の結果をレジスタへ書き込む経路は次の4つで，どの経路の結果もUARTのレジスタを書き込み先にできるため，すべてを調べる
+    // (経路はこのALUの中にしか無いため，指示や通知を取り出す処理もALUに置く)
+    logic      uart_write;
+    register_t uart_write_value;
+    always_comb begin
+        // 既定値として「書き込まない」を与え，UARTのレジスタへ書き込む経路があれば上書きする
+        uart_write       = 1'b0;
+        uart_write_value = '0;
+        // 1サイクルに複数の経路が同時にUARTのレジスタへ書き込むことがある
+        // そのときに指示として使う値を，レジスタへの書き込みで最後に残る値と揃えるため，経路をレジスタへの書き込みと同じ順に並べる(後の経路の値が優先される)
+        // 前のサイクルに2本目のパイプラインで完了した命令の結果
+        if (ex2_write_pending && ex2_pending_addr == UART_ADDR) begin
+            uart_write       = 1'b1;
+            uart_write_value = ex2_alu_result_r;
+        end
+        // 複数サイクルかけて得た結果
+        if (late_write_valid && late_write_addr == UART_ADDR) begin
+            uart_write       = 1'b1;
+            uart_write_value = late_write_value;
+        end
+        // 割り算の余り
+        if (remainder_write_valid && remainder_write_addr == UART_ADDR) begin
+            uart_write       = 1'b1;
+            uart_write_value = remainder_write_value;
+        end
+        // 1本目のパイプラインの1サイクルで完了する命令の結果
+        if (ex_alu_write && rd_addr_r == UART_ADDR) begin
+            uart_write       = 1'b1;
+            uart_write_value = write_value;
+        end
+    end
+
+    // UARTのレジスタへ指示や通知を書き込んだ次のサイクルか
+    // 指示や通知は書き込んだ次のサイクルに橋渡し回路へ届き，その次のサイクルに橋渡し回路の状態へ反映される
+    logic uart_settling = 1'b0;
 
     // ===== 確認段から実行段への受け渡し(組み合わせ回路) =====
 
@@ -1173,8 +1189,8 @@ module alu_sv (
     endfunction
 
     // 一部だけ反映されるレジスタへの命令の結果の書き込みを終えておらず，確認段の命令がそのレジスタを読み出すか．
-    // 一部だけ反映されるレジスタへ書き込む命令はレジスタ全体(32ビット)の値を書き込むが，書き込んだ値で変わるのは
-    // ピンへ出力するビットだけであり，ピンの値を写すビットと使わないビットは書き込んだ値にならない．
+    // 一部だけ反映されるレジスタへ書き込む命令はレジスタ全体(32ビット)の値を書き込むが，書き込んだ値が残るのは
+    // ピンへ出力するビットだけであり，ピンの値や周辺回路の状態を写すビットと使わないビットは書き込んだ値にならない．
     // 書き込む32ビットの値を，レジスタへの書き込みを待たずに確認段の命令へ渡す(フォワーディングする)ことはしない．
     // 渡すと，これらのビットが書き込んだ値になって誤るため．
     // 正しい値は書き込みを終えたレジスタからしか読めないため，確認段の命令を実行段へ進めず，レジスタを読めるようになるまで待たせる．
@@ -1310,10 +1326,6 @@ module alu_sv (
         // 最下位ビットを0・1にした番地をそれぞれ偶数番地・奇数番地とし，加算器を経ずに組の2つの番地を作る
         rom_read1.pc = rom_p::pc_bus_t'({fetch_pc[31:1], 1'b0});
         rom_read2.pc = rom_p::pc_bus_t'({fetch_pc[31:1], 1'b1});
-
-        // 標準入出力
-        stdout_tkeep = 4'hf;
-        stdout_tlast = 1'b1;
     end
 
     // 外部ピンからの非同期入力の同期化．準安定状態をシフトレジスタで消してからメインの順序回路で取り込む
@@ -1402,12 +1414,11 @@ module alu_sv (
             ram_read_state <= IDLE;
             ram_write_state <= IDLE;
 
-            // 標準入出力の状態と，受け渡しを行っていることを表す信号をリセット
-            stdin_state <= IDLE;
-            stdout_state <= IDLE;
-            stdin_tready <= 1'b0;
-            stdout_tvalid <= 1'b0;
-            stdout_tdata <= '0;
+            // UARTの橋渡し回路への指示を取り消す
+            uart_tx_push <= 1'b0;
+            uart_tx_data <= '0;
+            uart_rx_pop <= 1'b0;
+            uart_settling <= 1'b0;
 
             // メモリ読み書き
             ram_read.address <= 0;
@@ -1812,87 +1823,6 @@ module alu_sv (
                         endcase
                     end
 
-                    // 標準入出力系
-                    IO_TYPE: begin
-                        unique case (func_r)
-                            // 標準入力
-                            SCAN: begin
-                                unique case (stdin_state)
-                                    // 待機
-                                    IDLE: begin
-                                        // 実行を指示
-                                        stdin_state <= EXECUTE;
-                                        stdin_tready <= 1'b1;
-                                    end
-
-                                    // 実行
-                                    EXECUTE: begin
-                                        // データが送られてきているなら(受け取った値は共通の処理で書き込む)
-                                        if (stdin_tvalid) begin
-                                            // 一文字ずつ読み込むため，これだけ読みこんだら終了する
-                                            stdin_state <= IDLE;
-                                            stdin_tready <= 1'b0;
-                                        end
-                                        else begin
-                                            // 読み取り準備が整っていることを送る
-                                            stdin_tready <= 1'b1;
-                                        end
-                                    end
-
-                                    // その他
-                                    default: begin
-                                        is_halted <= 1'b1;
-                                    end
-                                endcase
-                            end
-
-                            // 標準出力
-                            PRINT: begin
-                                unique case (stdout_state)
-                                    // 待機
-                                    IDLE: begin
-                                        // イミディエイトデータを使用するなら
-                                        if (imm_r[32]) begin
-                                            // データを送る
-                                            stdout_tdata <= imm_r[31:0];
-                                        end
-                                        // rs1のデータを使用するなら
-                                        else begin
-                                            stdout_tdata <= rs1_val;
-                                        end
-
-                                        // 実行を指示
-                                        stdout_tvalid <= 1'b1;
-                                        stdout_state <= EXECUTE;
-                                    end
-
-                                    // 実行
-                                    EXECUTE: begin
-                                        // データの送信に成功したなら
-                                        if (stdout_tready) begin
-                                            // 一文字ずつ書き込むため，これだけ書き込んだら終了する
-                                            stdout_state <= IDLE;
-                                            stdout_tvalid <= 1'b0;
-                                        end
-                                        else begin
-                                            // 書き込み準備が終わっていることを送る
-                                            stdout_tvalid <= 1'b1;
-                                        end
-                                    end
-
-                                    // その他
-                                    default: begin
-                                        is_halted <= 1'b1;
-                                    end
-                                endcase
-                            end
-
-                            default: begin
-                                is_halted <= 1'b1;
-                            end
-                        endcase
-                    end
-
                     default: begin
                         is_halted <= 1'b1;
                     end
@@ -1927,6 +1857,15 @@ module alu_sv (
                 register[rd_addr_r] <= write_value;
                 ex1_alu_result_r <= write_value;
             end
+            // UARTのレジスタへ書き込んだ指示や通知を，次のサイクルに橋渡し回路へ1サイクルだけ渡す
+            // 送信の指示
+            uart_tx_push <= uart_write && uart_write_value[UART_TX_REQUEST];
+            // 送信するデータ
+            uart_tx_data <= uart_write_value[UART_TX_DATA_LSB +: 8];
+            // 読み終えた通知
+            uart_rx_pop <= uart_write && uart_write_value[UART_RX_POP];
+            // UARTのレジスタへ書き込んだ次のサイクルであることを控える
+            uart_settling <= uart_write;
             // 実行段の1本目・2本目のパイプラインに命令が入っているかを更新する
             // 実行できる命令を受け取れば入り，2本目には同時実行する場合だけ入る
             // (分岐・ジャンプで後の命令を捨てる場合は，同じサイクルに受け取った命令も2命令とも捨てるため除く)
@@ -1953,7 +1892,7 @@ module alu_sv (
             // ===== IOからレジスタへの取り込み・使わないビットの0固定 =====
             // 同じクロックで同じ変数へ複数のノンブロッキング代入を行うと，代入する値はどれも代入前の値から求まるが，
             // 変数に残るのは後に実行した代入の値になる．この性質を使い，以下の代入は命令による書き込みより後に置いている．
-            // これにより，命令が同じサイクルに書き込んでも，ピンの値を写すビットにはピンの値が残り，使わないビットは0になる
+            // これにより，命令が同じサイクルに書き込んでも，ピンの値や周辺回路の状態を写すビットには以下で取り込む値が残り，使わないビットは0になる
 
             // タクトスイッチ・DIPスイッチは同期化後の値で，ピンの値が届くまでこの1段と合わせて3サイクルかかる
             register[BTN_ADDR] <= {4'b0, btn_sync[1]};
@@ -1965,6 +1904,28 @@ module alu_sv (
             register[AR8_13_ADDR][4] <= eth_miso_sync[1];
             // AR_SPI・AR8_13のピンへ出力するビットには，ここでは触れない
             // 命令が書き込んだ値をそのまま保持するため
+            // UARTの橋渡し回路の状態を毎サイクル取り込む
+            // - 受信バッファの先頭のバイト: 橋渡し回路が示す値をそのまま取り込む
+            // - 受信したバイトがあるか・送信バッファに空きがあるか: 指示や通知を書き込んだサイクルとその次のサイクルは0とし，それ以外のサイクルは橋渡し回路が示す値を取り込む
+            //   その2サイクルには指示や通知を反映する前の状態が届き，そのまま写すと取り出したバイトをもう一度取り出したり，満杯の送信バッファへ入れたりするため
+            // 受信バッファの先頭のバイト
+            register[UART_ADDR][UART_RX_HEAD_LSB +: 8] <= uart_rx_head;
+            // 受信したバイトがあるか
+            register[UART_ADDR][UART_RX_NOT_EMPTY] <=
+                // 橋渡し回路が，受信したバイトがあると示している
+                uart_rx_not_empty
+                // かつ，指示や通知を書き込んだサイクルではない
+                && !uart_write
+                // かつ，指示や通知を書き込んだ次のサイクルではない
+                && !uart_settling;
+            // 送信バッファに空きがあるか
+            register[UART_ADDR][UART_TX_NOT_FULL] <=
+                // 橋渡し回路が，送信バッファに空きがあると示している
+                uart_tx_not_full
+                // かつ，指示や通知を書き込んだサイクルではない
+                && !uart_write
+                // かつ，指示や通知を書き込んだ次のサイクルではない
+                && !uart_settling;
 
             // 各レジスタの使わないビットは，命令が書き込んだ値によらず毎サイクル0にする
             // 0のまま変わらないビットとして，合成でフリップフロップを削除させるため

@@ -10,10 +10,10 @@ PYNQ-Z2(Zynq-7000)上に実装する自作CPUと，それを動かすソフト�
 
 | リポジトリ(GitHub) | ディレクトリ(`pc/`配下) | 役割 |
 |:-|:-|:-|
-| `specification` | `specification/` | CPUアーキテクチャ・ISA・アセンブリ言語・コンパイラ・Qosmosの仕様のドキュメント(唯一の一次情報源) |
+| `specification` | `specification/` | CPUアーキテクチャ・ISA・アセンブリ言語・コンパイラ・Qosmosの仕様と，実機の構成のドキュメント(唯一の一次情報源) |
 | `pyntaxis` | `assembler/` | 自作アセンブリ言語Pyntaxis(`.pt`) → SystemVerilog ROM(`.sv`)，または自作OS Qosmosの実行ファイルへのアセンブラ |
 | `pynesis` | `compiler/` | 自作プログラミング言語Pynesis(`.pn`) → アセンブリ言語Pyntaxisへのコンパイラ．`pyntaxis`のソースファイルをincludeして使用し，`.sv`または実行ファイルまで一貫変換も可能 |
-| `qurge`(本リポジトリ) | `mypc/` | CPU・メモリ・ROM等のハードウェア全体のVivadoプロジェクト(SystemVerilog + PS側C++)と，ROM上で動く自作OS Qosmos(シェルやファイルシステムなど．Pynesisで記述．仕様は`specification`の`qosmos.md`) |
+| `qurge`(本リポジトリ) | `mypc/` | CPU・メモリ・ROM等のハードウェア全体のVivadoプロジェクト(SystemVerilog)と，ROM上で動く自作OS Qosmos(シェルやファイルシステムなど．Pynesisで記述．仕様は`specification`の`qosmos.md`) |
 | `for-pynthesis-skills` | `for-pynthesis-skills/` | 上記各リポジトリで共有するissue起票・対応支援スキルを提供する．特定のリポジトリが主担当と判断できない，全リポジトリに影響するissueの起票先(受け皿)でもある |
 
 ```
@@ -51,21 +51,36 @@ pn2mc.exe -pn mypc.srcs/pn/qosmos.pn -pt mypc.srcs/pn/qosmos.pt -sv mypc.srcs/so
 
 生成し直した`rom_sv.sv`に差分が出たらコミットする．`.pn`の変更によるものはその変更と同じコミットに含め，コンパイラ・アセンブラの更新によるものは単独でコミットする．チェックアウトした直後に変換ツールなしで合成できるよう，`rom_sv.sv`もGit管理下に置いているためである．
 
-### CPUのシミュレーション
+### シミュレーション
 
-CPUの命令の動作は，合成せずVivado付属のシミュレータで検証できる．Vivadoのbinディレクトリ(`xvlog`・`xelab`・`xsim`)にPATHを通した上で，コマンドプロンプトから`mypc.srcs\sim_1\run_cpu_tb.bat`を実行する．全テストケースが合格すれば終了コード0で終わり，不合格があればその内容を表示して0以外で終わる．引数に`gui`を付けると，実行せずに波形ビューア付きのシミュレータを開く．コンパイル結果とログは`mypc.sim/cpu_tb/`(Git管理外)に出力される．
+CPUと，UARTの橋渡し回路(PSのUART0を使ってUSBのシリアル通信を行う回路)の動作は，合成せずVivado付属のシミュレータで検証できる．Vivadoのbinディレクトリ(`xvlog`・`xelab`・`xsim`)にPATHを通した上で，コマンドプロンプトから検証対象ごとのバッチファイルを実行する．全テストケースが合格すれば終了コード0で終わり，不合格があればその内容を表示して0以外で終わる．引数に`gui`を付けると，実行せずに波形ビューア付きのシミュレータを開く．コンパイル結果とログは`mypc.sim/`(Git管理外)の下の，テストベンチと同じ名前のディレクトリに出力される．
 
-テストベンチはCPU本体とメインメモリを実物のまま使い，ROMと除算IPをモデルに差し替える．このため，ROMの内容(`rom_sv.sv`)とブロックダイアグラムは検証の対象外である．タイミング違反の有無も確認できないため，従来どおり合成と実機で確認する．\
+| バッチファイル | 検証対象 | 実物を使うもの | モデルに差し替えるもの |
+|:-|:-|:-|:-|
+| `mypc.srcs\sim_1\run_cpu_tb.bat` | CPUの命令の動作 | CPU本体・メインメモリ | ROM・除算IP・UARTの橋渡し回路 |
+| `mypc.srcs\sim_1\run_uart_bridge_tb.bat` | UARTの橋渡し回路の動作 | UARTの橋渡し回路 | PSのUART0 |
+
+ROMの内容(`rom_sv.sv`)とブロックダイアグラムは，どちらのテストベンチでも検証の対象外である．これらとタイミング違反の有無は，合成と実機で確認する．\
 `mypc.xpr`のシミュレーション機能は使わない．ブロックダイアグラムのシミュレーション用出力生成物まで生成・コンパイルすることになり，テストベンチに不要な時間がかかるためである．
 
-## PS側(ARM/C++)のビルド・書き込み方法
+## 実機での起動方法
 
-`mypc.srcs/cpp/`配下のC++プログラムは，開発用のパソコンでのクロスコンパイルは行わず，**PYNQ-Z2ボード上のLinux環境で直接ビルド・実行する**．
+PYNQ-Z2は，電源を入れるとボードのSDカードスロットに挿したカードのBOOT.BINから起動する．BOOT.BINには，FSBLとビットストリームだけを入れる．FSBL(First Stage Boot Loader)は，PS(ARM)が最初に実行するプログラムで，PSを初期化してからビットストリームをPLへ書き込む．書き込み後にプログラムを実行するのはPL上のCPUだけで，PSのCPUは何も実行しない．\
+書き込み後もPSが受け持つのは，CPUへのクロックとリセットの供給と，UART0(USBのシリアル通信の回路)の2つである．クロックとリセットは，PSを初期化して初めて供給される．PYNQ-Z2の電源用のUSBはUART0にだけつながっているため，PL上のUARTの橋渡し回路が，PSのS_AXI_GP0ポート(PLの回路がPS内の周辺回路のレジスタを読み書きするための入口)を通してUART0のレジスタを読み書きする．通信速度などのUART0の設定はFSBLが済ませる．
 
-1. ボード上の任意の作業ディレクトリへ，`mypc.srcs/cpp/`配下のファイル(`run.cpp`・`compile.sh`)と，Vivadoが生成したビットストリームを転送する
-2. その作業ディレクトリの直下に`bit/`ディレクトリを作成し，ビットストリームを`bit/top_wrapper.bit`として配置する(`run.cpp`が実行時のカレントディレクトリからの相対パス`./bit/top_wrapper.bit`でこれを参照するため)
-3. 作業ディレクトリ内で`bash compile.sh`を実行してビルドする(内容は`g++ -o run run.cpp -lpynq -lcma -lpthread`)
-4. `./run`を実行する(root権限は不要)
+SDカードは，BOOT.BINを置くボードのカードと，Qosmosのファイルシステムを置くシールド(ボードのArduinoヘッダに重ねる拡張基板)のカードの2枚を使う．カードの置き方・ジャンパの設定，シールドの重ね方と配線などの実機の構成は，`specification`の`board.md`を参照する．
+
+### BOOT.BINの作成
+
+VivadoとVitis(版はVivadoと揃える)のbinディレクトリ(`vivado`・`xsct`・`bootgen`)にPATHを通し，コマンドプロンプトから次を行う．出力はリポジトリ直下の`mypc.boot/`(Git管理外)に置かれる．
+
+1. Vivadoで`Generate Bitstream`を実行する
+2. 最初の1回と，ブロックダイアグラムでPS(`processing_system7_0`)の設定を変えたときは，`mypc.srcs\boot\make_fsbl.bat`を実行してFSBLを作る．FSBLはPSの設定だけに依存するため，自作HDLやROMの内容を変えただけなら作り直さなくてよい
+3. `mypc.srcs\boot\make_boot.bat`を実行すると，`mypc.boot\BOOT.BIN`ができる
+
+### 開発中の書き込み
+
+動作を確かめる段階では，BOOT.BINを置いたカードで一度起動した後に，VivadoのHardware ManagerからJTAG(USB)でビットストリームを書き込んで上書きしてよい．ビットストリームを作り直すたびにBOOT.BINを作り直さずに済む．先にBOOT.BINで起動しておくのは，JTAGではPSを初期化せず，CPUのクロックとリセットがFSBLの起動で初めて供給されるためである．
 
 ## ディレクトリ構造
 
@@ -73,8 +88,8 @@ CPUの命令の動作は，合成せずVivado付属のシミュレータで検�
 mypc/                                  # リポジトリルート(Vivadoプロジェクトルート)
 ├── mypc.xpr                           # Vivadoプロジェクトファイル
 └── mypc.srcs/
+    ├── boot/                          # BOOT.BINを作るスクリプト  ← 編集可(Vivado標準構成にはなく，独自に追加したディレクトリ)
     ├── constrs_1/new/top.xdc          # PYNQ-Z2ボードのピン制約  ← 編集可
-    ├── cpp/                           # PS(ARM)側のC++プログラム ← 編集可(Vivado標準構成にはなく，独自に追加したディレクトリ)
     ├── pn/                            # ROM上で動くQosmosのPynesisソース ← 編集可(Vivado標準構成にはなく，独自に追加したディレクトリ)
     ├── sim_1/                         # テストベンチ              ← 編集可
     ├── sources_1/
@@ -102,6 +117,6 @@ mypc/                                  # リポジトリルート(Vivadoプロ�
 |-------------|------|
 | `mypc.srcs/sources_1/new/` | カスタムCPUのHDLソース(主な作業対象)．このうちROMの内容(`rom_sv.sv`)は手で編集せず，「QosmosのROMの生成」の手順で生成する |
 | `mypc.srcs/constrs_1/new/` | PYNQ-Z2ボードのピン制約 (top.xdc) |
-| `mypc.srcs/cpp/` | PS(ARM)側のC++プログラムと，それをPYNQ-Z2ボード上でビルドするスクリプト．ビルド手順は「PS側(ARM/C++)のビルド・書き込み方法」を参照 |
+| `mypc.srcs/boot/` | BOOT.BINを作るスクリプトと，BOOT.BINの構成(`boot.bif`)．手順は「実機での起動方法」の「BOOT.BINの作成」を参照 |
 | `mypc.srcs/pn/` | ROM上で動くQosmosのPynesisソース(`.pn`)．入口は`qosmos.pn`で，「QosmosのROMの生成」の手順で`rom_sv.sv`へ変換する．`lib/`は，Qosmosの実行ファイルのソースが取り込むライブラリ(ROMには入らない．番号などの取り決めを置くファイルはシェルも取り込む) |
-| `mypc.srcs/sim_1/` | テストベンチ(`new/`)と，それをコンパイル・実行するスクリプト．実行方法は「CPUのシミュレーション」を参照 |
+| `mypc.srcs/sim_1/` | テストベンチ(`new/`)と，それをコンパイル・実行するスクリプト．実行方法は「シミュレーション」を参照 |
