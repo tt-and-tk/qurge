@@ -68,6 +68,27 @@ module mother_board(
     input  wire         eth_miso,
     output wire         eth_sck,
 
+    // PSのUART0を読み書きするAXI4-Liteのマスタ(PSのS_AXI_GP0ポートへつなぐ)
+    output wire [31:0] m_axi_araddr,
+    output wire [ 2:0] m_axi_arprot,
+    output wire        m_axi_arvalid,
+    input  wire        m_axi_arready,
+    input  wire [31:0] m_axi_rdata,
+    input  wire [ 1:0] m_axi_rresp,
+    input  wire        m_axi_rvalid,
+    output wire        m_axi_rready,
+    output wire [31:0] m_axi_awaddr,
+    output wire [ 2:0] m_axi_awprot,
+    output wire        m_axi_awvalid,
+    input  wire        m_axi_awready,
+    output wire [31:0] m_axi_wdata,
+    output wire [ 3:0] m_axi_wstrb,
+    output wire        m_axi_wvalid,
+    input  wire        m_axi_wready,
+    input  wire [ 1:0] m_axi_bresp,
+    input  wire        m_axi_bvalid,
+    output wire        m_axi_bready,
+
     // ラズパイヘッダー
     output wire [26:8] gpio
     );
@@ -110,6 +131,27 @@ module mother_board(
         .eth_mosi(eth_mosi),
         .eth_miso(eth_miso),
         .eth_sck(eth_sck),
+
+        .m_axi_araddr(m_axi_araddr),
+        .m_axi_arprot(m_axi_arprot),
+        .m_axi_arvalid(m_axi_arvalid),
+        .m_axi_arready(m_axi_arready),
+        .m_axi_rdata(m_axi_rdata),
+        .m_axi_rresp(m_axi_rresp),
+        .m_axi_rvalid(m_axi_rvalid),
+        .m_axi_rready(m_axi_rready),
+        .m_axi_awaddr(m_axi_awaddr),
+        .m_axi_awprot(m_axi_awprot),
+        .m_axi_awvalid(m_axi_awvalid),
+        .m_axi_awready(m_axi_awready),
+        .m_axi_wdata(m_axi_wdata),
+        .m_axi_wstrb(m_axi_wstrb),
+        .m_axi_wvalid(m_axi_wvalid),
+        .m_axi_wready(m_axi_wready),
+        .m_axi_bresp(m_axi_bresp),
+        .m_axi_bvalid(m_axi_bvalid),
+        .m_axi_bready(m_axi_bready),
+
         .gpio(gpio)
     );
 

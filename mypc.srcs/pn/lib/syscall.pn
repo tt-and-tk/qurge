@@ -1,7 +1,7 @@
 // Qosmosの実行ファイルからOSの機能(システムコール)を呼び出すライブラリ．実行ファイルのソースから取り込んで使う
 // 各関数の戻り値は，0以上が成功，負の値がエラー(値の意味はsyscall_number.pnのSYSCALL_ERR_*)を表す
 // ファイルを扱う関数に渡す名前はいずれも，シェルの現在のディレクトリの直下にあるファイルの"NAME.EXT"形式の名前(パスは指定できない)
-// コンソールを扱う関数は，シェルと同じコンソール(TCPで接続した相手)を使う
+// コンソールを扱う関数は，シェルと同じコンソール(telnetで接続した端末と，UARTで接続した端末の2つで共有する入出力)を使う
 #pragma once
 #include "syscall_number.pn"
 
@@ -36,7 +36,7 @@ int file_write(char *name, char *data, int length) {
 
 /// コンソールから改行までの1行を受け取り，sizeバイトの配列bufへヌル終端付きで格納し，格納した文字数を返す(改行は格納しない)
 // 1行がsize-1文字を超えれば，超えた分は捨てる
-// 打った文字の表示と1行の編集はQosmosが行う．接続が切れていて受け取れなければSYSCALL_ERR_DISCONNECTEDを返す
+// 打った文字の表示と1行の編集はQosmosが行う
 int console_read(char *buf, int size) {
     // 番号SYS_CONSOLE_READのシステムコールを呼び出す
     return syscall(SYS_CONSOLE_READ, (int)buf, size, 0, 0);

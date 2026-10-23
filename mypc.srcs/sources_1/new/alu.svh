@@ -19,8 +19,7 @@ package alu_p;
         A_TYPE,   // 代入系
         F_TYPE,   // 分岐系
         J_TYPE,   // ジャンプ系
-        M_TYPE,   // メモリ系
-        IO_TYPE   // 標準入出力系
+        M_TYPE    // メモリ系
     } type_enum;
 
     // 変数型
@@ -96,8 +95,11 @@ package alu_p;
         // GPIO
         else if (6'h2d <= addr && addr <= 6'h30)
             is_readable = util_p::FALSE;
+        // UART
+        else if (addr == 6'h31)
+            is_readable = util_p::TRUE;
         // 空き
-        else if (6'h31 <= addr && addr <= 6'h34)
+        else if (6'h32 <= addr && addr <= 6'h34)
             is_readable = util_p::FALSE;
         // 定義されていない
         else
@@ -169,8 +171,11 @@ package alu_p;
         // GPIO
         else if (6'h2d <= addr && addr <= 6'h30)
             is_writable = util_p::TRUE;
+        // UART
+        else if (addr == 6'h31)
+            is_writable = util_p::TRUE;
         // 空き
-        else if (6'h31 <= addr && addr <= 6'h34)
+        else if (6'h32 <= addr && addr <= 6'h34)
             is_writable = util_p::FALSE;
         // 定義されていない
         else
@@ -251,8 +256,12 @@ package alu_p;
         // GPIO24〜GPIO26
         else if (addr == 6'h30)
             used_bits = 32'h7;
+        // UART．使うビットは，値を保持する，橋渡し回路の状態を写すビット(16〜25ビット目)である
+        // 書き込む値のビット(0〜9ビット目)は，指示や通知として橋渡し回路へ伝わり，値を保持せず常に0として読む
+        else if (addr == 6'h31)
+            used_bits = 32'h03ff_0000;
         // 空き
-        else if (6'h31 <= addr && addr <= 6'h34)
+        else if (6'h32 <= addr && addr <= 6'h34)
             used_bits = '0;
         // 定義されていない
         else
@@ -371,16 +380,6 @@ package alu_p;
                         // レジスタ相対のメモリ書き込み: 書き込むデータと番地の基準になる読み出し元が有効で，
                         // かつ番地に足すイミディエイトデータを指定しているか
                         WMR:     is_instruction_executable = is_readable(rs1) && is_readable(rs2) && imm[32];
-                        // それ以外は不正な命令として無効扱い
-                        default: is_instruction_executable = util_p::FALSE;
-                    endcase
-                end
-                IO_TYPE: begin
-                    unique case (func)
-                        // 標準入力: 書き込み先が有効か
-                        SCAN:    is_instruction_executable = is_writable(rd);
-                        // 標準出力: 出力するデータをイミディエイトデータで指定するか，読み出し元が有効か
-                        PRINT:   is_instruction_executable = imm[32] || is_readable(rs1);
                         // それ以外は不正な命令として無効扱い
                         default: is_instruction_executable = util_p::FALSE;
                     endcase

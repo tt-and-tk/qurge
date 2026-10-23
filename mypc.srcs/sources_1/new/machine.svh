@@ -54,8 +54,6 @@ package machine_p;
     localparam func_t BWM  = 6'h03;
     localparam func_t RMR  = 6'h04;
     localparam func_t WMR  = 6'h05;
-    localparam func_t SCAN  = 6'h00;
-    localparam func_t PRINT = 6'h01;
 
     // 処理を実行しない(N系)
     function machine_t nop(
@@ -324,19 +322,6 @@ package machine_p;
         input imm_t imm
     );
         wmr = {3'h6, WMR, mask, rs1, rs2, 6'h00, imm};
-    endfunction
-
-    // 標準入出力系(IO系)
-    function machine_t scan(
-        input addr_t rd
-    );
-        scan = {3'h7, SCAN, 4'h0, 6'h00, 6'h00, rd, 33'h000000000};
-    endfunction
-    function machine_t print(
-        input addr_t rs1,
-        input imm_t imm
-    );
-        print = {3'h7, PRINT, 4'h0, rs1, 6'h00, 6'h00, imm};
     endfunction
 
 endpackage
