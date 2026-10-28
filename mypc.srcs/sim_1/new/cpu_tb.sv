@@ -437,7 +437,7 @@ module cpu_tb;
 
     // 直前の実行を終えた時点の動作状態を確かめる
     function automatic void expect_kernel_mode(input bit value);
-        // 日本語の文字列は値として渡すと文字化けするため(BEGIN_TESTの説明を参照)，期待値ごとに書式へ直接書く
+        // 期待値ごとに，日本語の文字列を書式へ直接書く(xsimは日本語の文字列リテラルを値として渡すと文字化けさせるため)
         if (kernel_mode !== value) begin
             if (value)
                 fail($sformatf("動作状態: 期待値カーネルモード，実際ユーザーモード"));
