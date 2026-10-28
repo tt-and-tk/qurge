@@ -1101,7 +1101,7 @@ module cpu_tb;
         expect_halt(0);
     endtask
 
-    // 仕様(register.md)の表に基づき，その番地のレジスタをカーネルモードで命令のオペランドとして読めるかを返す
+    // 仕様で定めた読み書きの可否に基づき，その番地のレジスタをカーネルモードで命令のオペランドとして読めるかを返す
     function automatic bit spec_readable(input addr_t addr);
         case (addr) inside
             [6'h00:6'h12], [6'h1c:6'h21], 6'h26, 6'h2a, 6'h31: return 1'b1;
@@ -1109,7 +1109,7 @@ module cpu_tb;
         endcase
     endfunction
 
-    // 仕様(register.md)の表に基づき，その番地のレジスタをカーネルモードで命令のオペランドとして書けるかを返す
+    // 仕様で定めた読み書きの可否に基づき，その番地のレジスタをカーネルモードで命令のオペランドとして書けるかを返す
     function automatic bit spec_writable(input addr_t addr);
         case (addr) inside
             [6'h00:6'h12], 6'h1d, 6'h1e, [6'h22:6'h28], 6'h2a, [6'h2d:6'h31]: return 1'b1;
@@ -1117,7 +1117,7 @@ module cpu_tb;
         endcase
     endfunction
 
-    // 仕様(register.md)に基づき，その番地のレジスタがユーザーモードでも読み書きの対象にできるかを返す．
+    // 仕様で定めた読み書きの可否に基づき，その番地のレジスタがユーザーモードでも読み書きの対象にできるかを返す．
     // できる番地の読み書きの可否は，カーネルモードと同じになる
     function automatic bit spec_user_accessible(input addr_t addr);
         case (addr) inside
