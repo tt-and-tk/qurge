@@ -1261,7 +1261,7 @@ module cpu_tb;
     // 動作状態(カーネルモード・ユーザーモード)と，それを切り替えるシステムコール・その復帰
     task automatic test_mode();
         machine_queue_t body;      // ユーザーモードへ移る前置きを含めた命令列
-        operand_case_t  cases[$];  // ユーザーモードで停止するかを確かめる命令
+        operand_case_t  cases[$];  // ユーザーモードで停止するかを命令ごとに確かめるテストケース
 
         // r1・r2へ0以外を入れてから，書き込む前の入口と戻り先を読み出す
         `BEGIN_TEST("リセット直後の入口と戻り先は0である");
@@ -1288,8 +1288,9 @@ module cpu_tb;
         // 停止を検出した次のクロックで，レジスタの初期化とともにカーネルモードに戻る
         @(posedge clk);
         #1;
-        if (dut.alu_sv_0.kernel_mode !== 1'b1)
+        if (dut.alu_sv_0.kernel_mode !== 1'b1) begin
             fail($sformatf("停止した後の動作状態がカーネルモードではない"));
+        end
 
         // 戻り先を3番地にして復帰する
         `BEGIN_TEST("SYSRETは戻り先の番地へユーザーモードで飛ぶ");
@@ -1401,11 +1402,12 @@ module cpu_tb;
         expect_reg(3, 32'd0);
         expect_kernel_mode(1'b1);
 
-        // 命令の種類ごとに，ユーザーモードで読み書きできないレジスタを，使うオペランド・使わないオペランドに入れた命令を実行する
+        // ユーザーモードで読み書きできないレジスタをオペランドに入れた命令を，命令の種類ごとに実行する．
+        // そのオペランドを命令が使う場合は停止し，即値を使うために無視する場合は停止しない
         cases = '{
             '{$sformatf("ユーザーモードでrs2が読めないADDは停止する"),                              add(1, SW_ADDR, 3),                     1'b1},
-            '{$sformatf("ユーザーモードでrs2でシフト量を指定し，rs2が読めないと停止する"),          sll(1, SW_ADDR, 3, NO_IMM),             1'b1},
-            '{$sformatf("ユーザーモードで即値でシフト量を指定すると，rs2が読めなくても停止しない"), sll(1, SW_ADDR, 3, im(1)),              1'b0},
+            '{$sformatf("ユーザーモードのシフトは，シフト量を指定するrs2が読めないと停止する"),     sll(1, SW_ADDR, 3, NO_IMM),             1'b1},
+            '{$sformatf("ユーザーモードのシフトは，シフト量が即値ならrs2が読めなくても停止しない"), sll(1, SW_ADDR, 3, im(1)),              1'b0},
             '{$sformatf("ユーザーモードでrs1が読めない分岐は停止する"),                             eq(BTN_ADDR, 0, im(1)),                 1'b1},
             '{$sformatf("ユーザーモードでrs1が読めないレジスタの番地へのJMPは停止する"),            jmp(KENTRY_ADDR, NO_IMM),               1'b1},
             '{$sformatf("ユーザーモードで即値の番地へのJMPは，rs1が読めなくても停止しない"),        jmp(KENTRY_ADDR, im(4)),                1'b0},
@@ -1424,10 +1426,12 @@ module cpu_tb;
             body = {enter_user_mode(), movi(2, 32'd1), cases[i].instruction};
             run(body);
             // 停止するなら確かめる命令の番地で停止し，停止しないなら正常終了する
-            if (cases[i].halts)
+            if (cases[i].halts) begin
                 expect_halt(3);
-            else
+            end
+            else begin
                 expect_end();
+            end
         end
     endtask
 
