@@ -234,17 +234,20 @@ module cpu_tb;
     int             cycles;                           // 直前の実行の所要サイクル数
     bit             redirect_met_early_jump;          // 直前の実行で，実行段が分岐・ジャンプで取得し直すサイクルに，先行取得する即値のジャンプがROMから届いたことがあるか
     register_t      regs[0:REGISTER_MAX_ADDR];        // 直前の実行を終えた時点のレジスタの値
+    bit             kernel_mode;                      // 直前の実行を終えた時点で，動作状態がカーネルモードか(0ならユーザーモード)
     int             end_pc;                           // 正常終了を表す命令の番地
     machine_queue_t code_area;                        // 実行前にコード領域へ直接置く命令列
     int             code_area_index = 0;              // code_areaを置き始める，メモリの後半の先頭からの命令の順番
     machine_queue_t rom_tail;                         // 実行前にROMの末尾(最後の命令をROMの命令数の上限の直前の番地に揃える位置)へ置く命令列
 
-    // CPUの現在のレジスタの値を，実行を終えた時点の値として写し取る
+    // CPUの現在のレジスタの値と動作状態を，実行を終えた時点の値として写し取る
     function automatic void take_snapshot();
         for (int i = 0; i <= REGISTER_MAX_ADDR; i++)
             regs[i] = dut.alu_sv_0.register[i];
         // PCはレジスタ配列ではなく，実行段の命令の番地を保持するex_pcから写し取る(実行段で停止した場合は停止した番地になる)
         regs[PC_ADDR] = dut.alu_sv_0.ex_pc;
+        // 動作状態はレジスタ配列ではなく，CPUの中の状態から写し取る
+        kernel_mode = dut.alu_sv_0.kernel_mode;
     endfunction
 
     // メインメモリをすべて0にする
@@ -430,6 +433,17 @@ module cpu_tb;
     function automatic void expect_reg(input addr_t addr, input logic [31:0] value);
         if (regs[addr] !== value)
             fail($sformatf("レジスタ0x%02h: 期待値0x%08h，実際0x%08h", addr, value, regs[addr]));
+    endfunction
+
+    // 直前の実行を終えた時点の動作状態を確かめる
+    function automatic void expect_kernel_mode(input bit value);
+        // 日本語の文字列は値として渡すと文字化けするため(BEGIN_TESTの説明を参照)，期待値ごとに書式へ直接書く
+        if (kernel_mode !== value) begin
+            if (value)
+                fail($sformatf("動作状態: 期待値カーネルモード，実際ユーザーモード"));
+            else
+                fail($sformatf("動作状態: 期待値ユーザーモード，実際カーネルモード"));
+        end
     endfunction
 
     // メインメモリの指定した番地の1バイトを返す
@@ -939,7 +953,7 @@ module cpu_tb;
 
         // J系で未定義のfuncを持つ命令を実行する
         `BEGIN_TEST("J系で未定義のfuncは停止する");
-        run('{raw(3'h5, 6'h03, 0, 0, 0, im(1))});
+        run('{raw(3'h5, 6'h05, 0, 0, 0, im(1))});
         // その命令の番地で停止する
         expect_halt(0);
     endtask
@@ -1087,30 +1101,50 @@ module cpu_tb;
         expect_halt(0);
     endtask
 
-    // 仕様(register.md)の表に基づき，その番地のレジスタを命令のオペランドとして読めるかを返す
+    // 仕様(register.md)の表に基づき，その番地のレジスタをカーネルモードで命令のオペランドとして読めるかを返す
     function automatic bit spec_readable(input addr_t addr);
         case (addr) inside
-            [6'h00:6'h10], [6'h1c:6'h21], 6'h26, 6'h2a, 6'h31: return 1'b1;
+            [6'h00:6'h12], [6'h1c:6'h21], 6'h26, 6'h2a, 6'h31: return 1'b1;
             default: return 1'b0;
         endcase
     endfunction
 
-    // 仕様(register.md)の表に基づき，その番地のレジスタを命令のオペランドとして書けるかを返す
+    // 仕様(register.md)の表に基づき，その番地のレジスタをカーネルモードで命令のオペランドとして書けるかを返す
     function automatic bit spec_writable(input addr_t addr);
         case (addr) inside
-            [6'h00:6'h10], 6'h1d, 6'h1e, [6'h22:6'h28], 6'h2a, [6'h2d:6'h31]: return 1'b1;
+            [6'h00:6'h12], 6'h1d, 6'h1e, [6'h22:6'h28], 6'h2a, [6'h2d:6'h31]: return 1'b1;
             default: return 1'b0;
         endcase
     endfunction
 
-    // 全番地のレジスタの読み書き可否
+    // 仕様(register.md)に基づき，その番地のレジスタがユーザーモードでも読み書きの対象にできるかを返す．
+    // できる番地の読み書きの可否は，カーネルモードと同じになる
+    function automatic bit spec_user_accessible(input addr_t addr);
+        case (addr) inside
+            KENTRY_ADDR, KRET_ADDR, [6'h20:6'h3f]: return 1'b0;
+            default: return 1'b1;
+        endcase
+    endfunction
+
+    // ユーザーモードへ移ってから命令列を実行するための前置き．カーネルモードからの戻り先を前置きの直後(2番地)にして復帰する
+    function automatic machine_queue_t enter_user_mode();
+        return '{movi(KRET_ADDR, 32'd2), sysret()};
+    endfunction
+
+    // 全番地のレジスタの，カーネルモード・ユーザーモードそれぞれでの読み書き可否
     task automatic test_register_access();
         for (int addr = 0; addr <= REGISTER_MAX_ADDR; addr++) begin
+            bit             user_readable;  // ユーザーモードで読み出せるか
+            bit             user_writable;  // ユーザーモードで書き込めるか
+            machine_queue_t body;           // ユーザーモードへ移る前置きを含めた命令列
+            user_readable = spec_readable(addr) && spec_user_accessible(addr);
+            user_writable = spec_writable(addr) && spec_user_accessible(addr);
+
             // 読み出せるかどうかを名前に含めてテストケースを始める
             if (spec_readable(addr))
-                begin_test($sformatf("レジスタ0x%02hは読み出せる", addr));
+                begin_test($sformatf("レジスタ0x%02hはカーネルモードで読み出せる", addr));
             else
-                begin_test($sformatf("レジスタ0x%02hを読み出すと停止する", addr));
+                begin_test($sformatf("レジスタ0x%02hをカーネルモードで読み出すと停止する", addr));
             // その番地のレジスタをMOVでr2へ読み出す
             run('{movi(1, 32'h77), movr(2, addr)});
             // 読み出せるなら正常終了し，読み出せないならMOVの番地で停止してr2は書き換わらない
@@ -1124,9 +1158,9 @@ module cpu_tb;
 
             // 書き込めるかどうかを名前に含めてテストケースを始める
             if (spec_writable(addr))
-                begin_test($sformatf("レジスタ0x%02hへ書き込める", addr));
+                begin_test($sformatf("レジスタ0x%02hへカーネルモードで書き込める", addr));
             else
-                begin_test($sformatf("レジスタ0x%02hへ書き込むと停止する", addr));
+                begin_test($sformatf("レジスタ0x%02hへカーネルモードで書き込むと停止する", addr));
             // その番地のレジスタへMOVで0を書き込む
             run('{nop(), movi(addr, 32'h0)});
             // 書き込めるなら正常終了し，書き込めないならMOVの番地で停止する
@@ -1134,6 +1168,41 @@ module cpu_tb;
                 expect_end();
             else
                 expect_halt(1);
+
+            // ユーザーモードで読み出せるかどうかを名前に含めてテストケースを始める
+            if (user_readable)
+                begin_test($sformatf("レジスタ0x%02hはユーザーモードで読み出せる", addr));
+            else
+                begin_test($sformatf("レジスタ0x%02hをユーザーモードで読み出すと停止する", addr));
+            // ユーザーモードへ移ってから，その番地のレジスタをMOVでr2へ読み出す
+            body = {enter_user_mode(), movi(1, 32'h77), movr(2, addr)};
+            run(body);
+            // 読み出せるならユーザーモードのまま正常終了し，読み出せないならMOVの番地で停止してr2は書き換わらない
+            if (user_readable) begin
+                expect_end();
+                expect_kernel_mode(1'b0);
+            end
+            else begin
+                expect_halt(3);
+                expect_reg(2, 32'h0);
+            end
+
+            // ユーザーモードで書き込めるかどうかを名前に含めてテストケースを始める
+            if (user_writable)
+                begin_test($sformatf("レジスタ0x%02hへユーザーモードで書き込める", addr));
+            else
+                begin_test($sformatf("レジスタ0x%02hへユーザーモードで書き込むと停止する", addr));
+            // ユーザーモードへ移ってから，その番地のレジスタへMOVで0を書き込む
+            body = {enter_user_mode(), nop(), movi(addr, 32'h0)};
+            run(body);
+            // 書き込めるならユーザーモードのまま正常終了し，書き込めないならMOVの番地で停止する
+            if (user_writable) begin
+                expect_end();
+                expect_kernel_mode(1'b0);
+            end
+            else begin
+                expect_halt(3);
+            end
         end
     endtask
 
@@ -1146,27 +1215,27 @@ module cpu_tb;
 
     // 命令の種類ごとに，実際に使うオペランドだけが読み書き可否の判定対象になるか
     task automatic test_operand_checks();
-        // 読み込み不可の番地として0x11，書き込み不可の番地としてPCを，使うオペランド・使わないオペランドに入れた命令
+        // 読み込み不可の番地として0x1b，書き込み不可の番地としてPCを，使うオペランド・使わないオペランドに入れた命令
         operand_case_t cases[$] = '{
-            '{$sformatf("即値を使うMOVはrs1が読み込み不可でも停止しない"),       mov(4'hf, 6'h11, 1, im(5)),                   1'b0},
-            '{$sformatf("即値でシフト量を指定するとrs2が読み込み不可でも停止しない"), sll(1, 6'h11, 3, im(1)),                  1'b0},
-            '{$sformatf("NOTはrs2が読み込み不可でも停止しない"),                   raw(3'h1, NOT, 1, 6'h11, 3, NO_IMM),          1'b0},
+            '{$sformatf("即値を使うMOVはrs1が読み込み不可でも停止しない"),       mov(4'hf, 6'h1b, 1, im(5)),                   1'b0},
+            '{$sformatf("即値でシフト量を指定するとrs2が読み込み不可でも停止しない"), sll(1, 6'h1b, 3, im(1)),                  1'b0},
+            '{$sformatf("NOTはrs2が読み込み不可でも停止しない"),                   raw(3'h1, NOT, 1, 6'h1b, 3, NO_IMM),          1'b0},
             '{$sformatf("imm未使用のDIVは余りの格納先が書き込み不可でも停止しない"), div(1, 2, 3, {1'b0, 26'h0, PC_ADDR}),       1'b0},
-            '{$sformatf("即値の番地へのJMPはrs1が読み込み不可でも停止しない"),     jmp(6'h11, im(2)),                            1'b0},
-            '{$sformatf("即値の番地のRMはrs1が読み込み不可でも停止しない"),       rm(4'hf, 6'h11, 3, im(32'h100)),              1'b0},
+            '{$sformatf("即値の番地へのJMPはrs1が読み込み不可でも停止しない"),     jmp(6'h1b, im(2)),                            1'b0},
+            '{$sformatf("即値の番地のRMはrs1が読み込み不可でも停止しない"),       rm(4'hf, 6'h1b, 3, im(32'h100)),              1'b0},
             '{$sformatf("WMは使わないrdが書き込み不可でも停止しない"),             raw(3'h6, WM, 0, 2, PC_ADDR, im(32'h100)),    1'b0},
-            '{$sformatf("rs2でシフト量を指定するとrs2が読み込み不可なら停止する"), sll(1, 6'h11, 3, NO_IMM),                   1'b1},
+            '{$sformatf("rs2でシフト量を指定するとrs2が読み込み不可なら停止する"), sll(1, 6'h1b, 3, NO_IMM),                   1'b1},
             '{$sformatf("imm使用のDIVは余りの格納先が書き込み不可なら停止する"),   div(1, 2, 3, im(PC_ADDR)),                    1'b1},
             '{$sformatf("imm使用のDIVは余りの格納先が番地の上限を超えると停止する"), div(1, 2, 3, im(REGISTER_MAX_ADDR + 1)),       1'b1},
             '{$sformatf("imm使用のDIVは余りの格納先の上位ビットが立つと停止する"),  div(1, 2, 3, im(32'h41)),                     1'b1},
             '{$sformatf("imm使用のDIVは余りの格納先の最上位ビットが立つと停止する"), div(1, 2, 3, im(32'h8000_0001)),              1'b1},
-            '{$sformatf("レジスタの番地へのJMPはrs1が読み込み不可なら停止する"),   jmp(6'h11, NO_IMM),                           1'b1},
-            '{$sformatf("レジスタの番地へのCALLはrs1が読み込み不可なら停止する"),  call(6'h11, NO_IMM),                          1'b1},
-            '{$sformatf("分岐はrs1が読み込み不可なら停止する"),                   eq(6'h11, 0, im(1)),                          1'b1},
+            '{$sformatf("レジスタの番地へのJMPはrs1が読み込み不可なら停止する"),   jmp(6'h1b, NO_IMM),                           1'b1},
+            '{$sformatf("レジスタの番地へのCALLはrs1が読み込み不可なら停止する"),  call(6'h1b, NO_IMM),                          1'b1},
+            '{$sformatf("分岐はrs1が読み込み不可なら停止する"),                   eq(6'h1b, 0, im(1)),                          1'b1},
             '{$sformatf("RMは書き込み先が書き込み不可なら停止する"),               rm(4'hf, 6'h00, PC_ADDR, im(32'h100)),        1'b1},
-            '{$sformatf("WMは書き込むデータのrs2が読み込み不可なら停止する"),     wm(4'hf, 6'h00, 6'h11, im(32'h100)),          1'b1},
-            '{$sformatf("RMRは番地の基準のrs1が読み込み不可なら停止する"),       rmr(4'hf, 6'h11, 3, im(0)),                   1'b1},
-            '{$sformatf("WMRは書き込むデータのrs2が読み込み不可なら停止する"),   wmr(4'hf, 2, 6'h11, im(0)),                   1'b1}
+            '{$sformatf("WMは書き込むデータのrs2が読み込み不可なら停止する"),     wm(4'hf, 6'h00, 6'h1b, im(32'h100)),          1'b1},
+            '{$sformatf("RMRは番地の基準のrs1が読み込み不可なら停止する"),       rmr(4'hf, 6'h1b, 3, im(0)),                   1'b1},
+            '{$sformatf("WMRは書き込むデータのrs2が読み込み不可なら停止する"),   wmr(4'hf, 2, 6'h1b, im(0)),                   1'b1}
         };
 
         foreach (cases[i]) begin
@@ -1187,6 +1256,118 @@ module cpu_tb;
         // 即値は無視され，rs1とrs2の和になる
         expect_end();
         expect_reg(3, 32'd7);
+    endtask
+
+    // 動作状態(カーネルモード・ユーザーモード)と，それを切り替えるシステムコール・その復帰
+    task automatic test_mode();
+        machine_queue_t body;  // ユーザーモードへ移る前置きを含めた命令列
+
+        // 入口と戻り先へ値を書き込んでから読み出す
+        `BEGIN_TEST("リセット直後はカーネルモードで，入口と戻り先を読み書きできる");
+        run('{movi(KENTRY_ADDR, 32'h1234), movi(KRET_ADDR, 32'h5678), movr(1, KENTRY_ADDR), movr(2, KRET_ADDR)});
+        // 書き込んだ値が読め，カーネルモードのまま終わる
+        expect_end();
+        expect_reg(1, 32'h1234);
+        expect_reg(2, 32'h5678);
+        expect_kernel_mode(1'b1);
+
+        // 戻り先を3番地にして復帰する
+        `BEGIN_TEST("SYSRETは戻り先の番地へユーザーモードで飛ぶ");
+        run('{movi(KRET_ADDR, 32'd3), sysret(), movi(1, 32'd1), movi(2, 32'd2)});
+        // 2番地の代入を飛び越えて3番地から実行し，ユーザーモードで終わる
+        expect_end();
+        expect_reg(1, 32'd0);
+        expect_reg(2, 32'd2);
+        expect_kernel_mode(1'b0);
+
+        // 入口を5番地にしてユーザーモードへ移り，3番地でシステムコールを呼ぶ
+        `BEGIN_TEST("SYSCALLは次の命令の番地を戻り先へ保存し，入口へカーネルモードで飛ぶ");
+        run('{movi(KENTRY_ADDR, 32'd5), movi(KRET_ADDR, 32'd3), sysret(), syscall(), movi(1, 32'd1), movr(2, KRET_ADDR)});
+        // 4番地の代入を飛び越えて入口から実行し，戻り先には4番地が入り，カーネルモードで終わる
+        expect_end();
+        expect_reg(1, 32'd0);
+        expect_reg(2, 32'd4);
+        expect_kernel_mode(1'b1);
+
+        // ユーザーモードの3番地でシステムコールを呼び，入口(6番地)でr2へ代入してから復帰する
+        `BEGIN_TEST("SYSCALLの入口からSYSRETで戻ると，呼び出しの次の命令から実行する");
+        run('{movi(KENTRY_ADDR, 32'd6), movi(KRET_ADDR, 32'd3), sysret(), syscall(), movi(1, 32'd1), jmp(6'h00, im(8)),
+              movi(2, 32'd2), sysret()});
+        // 入口の代入と，戻った4番地の代入がどちらも実行され，ユーザーモードで終わる
+        expect_end();
+        expect_reg(1, 32'd1);
+        expect_reg(2, 32'd2);
+        expect_kernel_mode(1'b0);
+
+        // カーネルモードのまま，入口を3番地にしてシステムコールを呼ぶ
+        `BEGIN_TEST("カーネルモードでもSYSCALLは戻り先を保存して入口へ飛ぶ");
+        run('{movi(KENTRY_ADDR, 32'd3), syscall(), movi(1, 32'd1), movr(2, KRET_ADDR)});
+        // 2番地の代入を飛び越え，戻り先には2番地が入り，カーネルモードで終わる
+        expect_end();
+        expect_reg(1, 32'd0);
+        expect_reg(2, 32'd2);
+        expect_kernel_mode(1'b1);
+
+        // ユーザーモードへ移ってから，もう一度復帰する
+        `BEGIN_TEST("ユーザーモードでのSYSRETは停止する");
+        run('{movi(KRET_ADDR, 32'd2), sysret(), sysret()});
+        // 2つ目の復帰の番地で停止する
+        expect_halt(2);
+
+        // ユーザーモードのシステムコールの直後に，ユーザーモードでは読めないタクトスイッチを読む命令を置く
+        `BEGIN_TEST("ユーザーモードのSYSCALLの直後の命令は，ユーザーモードで読めないレジスタを読んでも停止しない");
+        run('{movi(KENTRY_ADDR, 32'd5), movi(KRET_ADDR, 32'd3), sysret(), syscall(), movr(1, BTN_ADDR)});
+        // 直後の命令は実行されず，入口(正常終了を表す命令)へ進む
+        expect_end();
+        expect_reg(1, 32'd0);
+        expect_kernel_mode(1'b1);
+
+        // 戻り先へ範囲外の9番地を書き込んだ後，1本目のパイプラインで5番地へ書き換えてすぐに復帰する
+        `BEGIN_TEST("直前に1本目で書き込んだ戻り先へSYSRETで飛ぶ");
+        run('{movi(KRET_ADDR, 32'd9), movi(1, 32'd1), movi(KRET_ADDR, 32'd5), sysret(), movi(2, 32'd2)});
+        // 書き換えた後の5番地へ飛び，4番地の代入は実行されない
+        expect_end();
+        expect_reg(2, 32'd0);
+        expect_kernel_mode(1'b0);
+
+        // 戻り先へ範囲外の9番地を書き込んだ後，NOPを先頭とする同時実行の2番目で5番地へ書き換えてすぐに復帰する
+        `BEGIN_TEST("直前に2本目で書き込んだ戻り先へSYSRETで飛ぶ");
+        run('{movi(KRET_ADDR, 32'd9), nop(), movi(KRET_ADDR, 32'd5), sysret(), movi(2, 32'd2)});
+        // 書き換えた後の5番地へ飛び，4番地の代入は実行されない
+        expect_end();
+        expect_reg(2, 32'd0);
+        expect_kernel_mode(1'b0);
+
+        // 入口へ範囲外の9番地を書き込んだ後，1本目のパイプラインで5番地へ書き換えてすぐにシステムコールを呼ぶ
+        `BEGIN_TEST("直前に1本目で書き込んだ入口へSYSCALLで飛ぶ");
+        run('{movi(KENTRY_ADDR, 32'd9), movi(1, 32'd1), movi(KENTRY_ADDR, 32'd5), syscall(), movi(2, 32'd2)});
+        // 書き換えた後の5番地へ飛び，4番地の代入は実行されない
+        expect_end();
+        expect_reg(2, 32'd0);
+
+        // 入口へ範囲外の9番地を書き込んだ後，NOPを先頭とする同時実行の2番目で5番地へ書き換えてすぐにシステムコールを呼ぶ
+        `BEGIN_TEST("直前に2本目で書き込んだ入口へSYSCALLで飛ぶ");
+        run('{movi(KENTRY_ADDR, 32'd9), nop(), movi(KENTRY_ADDR, 32'd5), syscall(), movi(2, 32'd2)});
+        // 書き換えた後の5番地へ飛び，4番地の代入は実行されない
+        expect_end();
+        expect_reg(2, 32'd0);
+
+        // ユーザーモードで，余りの格納先をLEDにした割り算を実行する
+        `BEGIN_TEST("ユーザーモードで読み書きできないレジスタを余りの格納先にした割り算は停止する");
+        body = {enter_user_mode(), movi(1, 32'd6), movi(2, 32'd4), div(1, 2, 3, im(LED_ADDR))};
+        run(body);
+        // 割り算の番地で停止する
+        expect_halt(4);
+
+        // メモリの後半の先頭へ復帰し，そこでr1へ代入してからシステムコールを呼ぶ．入口(3番地)で戻り先を読む
+        `BEGIN_TEST("メモリの後半へSYSRETで移り，そこからSYSCALLでROMの入口へ戻る");
+        code_area = '{movi(1, 32'd1), syscall()};
+        run('{movi(KENTRY_ADDR, 32'd3), movi(KRET_ADDR, CODE_AREA_PC), sysret(), movr(2, KRET_ADDR)});
+        // メモリの後半の代入が実行され，戻り先にはシステムコールの次の番地が入り，カーネルモードで終わる
+        expect_end();
+        expect_reg(1, 32'd1);
+        expect_reg(2, CODE_AREA_PC + 2);
+        expect_kernel_mode(1'b1);
     endtask
 
     // ボード上の入出力ピンにつながるレジスタ
@@ -2277,6 +2458,7 @@ module cpu_tb;
         // 命令の種類をまたぐテストケースを実行する
         test_register_access();
         test_operand_checks();
+        test_mode();
         test_pins();
         test_uart();
         test_common();

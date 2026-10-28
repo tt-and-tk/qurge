@@ -48,6 +48,8 @@ package machine_p;
     localparam func_t JMP  = 6'h00;
     localparam func_t CALL = 6'h01;
     localparam func_t RET  = 6'h02;
+    localparam func_t SYSCALL = 6'h03;
+    localparam func_t SYSRET  = 6'h04;
     localparam func_t RM   = 6'h00;
     localparam func_t WM   = 6'h01;
     localparam func_t BRM  = 6'h02;
@@ -270,6 +272,18 @@ package machine_p;
 
     );
         ret = {3'h5, RET, 4'h0, 6'h00, 6'h00, 6'h00, 33'h000000000};
+    endfunction
+    // システムコール(次の命令の番地を戻り先として保存し，カーネルモードで入口へ飛ぶ．引数なし)
+    function machine_t syscall(
+
+    );
+        syscall = {3'h5, SYSCALL, 4'h0, 6'h00, 6'h00, 6'h00, 33'h000000000};
+    endfunction
+    // システムコールからの復帰(保存した戻り先へ，ユーザーモードで飛ぶ．引数なし)
+    function machine_t sysret(
+
+    );
+        sysret = {3'h5, SYSRET, 4'h0, 6'h00, 6'h00, 6'h00, 33'h000000000};
     endfunction
 
     // メモリ系(M系)
