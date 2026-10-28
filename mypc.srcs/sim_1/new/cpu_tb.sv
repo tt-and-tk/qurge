@@ -1260,7 +1260,16 @@ module cpu_tb;
 
     // 動作状態(カーネルモード・ユーザーモード)と，それを切り替えるシステムコール・その復帰
     task automatic test_mode();
-        machine_queue_t body;  // ユーザーモードへ移る前置きを含めた命令列
+        machine_queue_t body;      // ユーザーモードへ移る前置きを含めた命令列
+        operand_case_t  cases[$];  // ユーザーモードで停止するかを確かめる命令
+
+        // r1・r2へ0以外を入れてから，書き込む前の入口と戻り先を読み出す
+        `BEGIN_TEST("リセット直後の入口と戻り先は0である");
+        run('{movi(1, 32'h77), movi(2, 32'h77), movr(1, KENTRY_ADDR), movr(2, KRET_ADDR)});
+        // どちらも0が読める
+        expect_end();
+        expect_reg(1, 32'h0);
+        expect_reg(2, 32'h0);
 
         // 入口と戻り先へ値を書き込んでから読み出す
         `BEGIN_TEST("リセット直後はカーネルモードで，入口と戻り先を読み書きできる");
@@ -1270,6 +1279,17 @@ module cpu_tb;
         expect_reg(1, 32'h1234);
         expect_reg(2, 32'h5678);
         expect_kernel_mode(1'b1);
+
+        // ユーザーモードへ移ってから，もう一度復帰する．停止を検出した次のクロックの動作状態も見る
+        `BEGIN_TEST("ユーザーモードでのSYSRETは停止し，停止するとカーネルモードに戻る");
+        run('{movi(KRET_ADDR, 32'd2), sysret(), sysret()});
+        // 2つ目の復帰の番地で停止する
+        expect_halt(2);
+        // 停止を検出した次のクロックで，レジスタの初期化とともにカーネルモードに戻る
+        @(posedge clk);
+        #1;
+        if (dut.alu_sv_0.kernel_mode !== 1'b1)
+            fail($sformatf("停止した後の動作状態がカーネルモードではない"));
 
         // 戻り先を3番地にして復帰する
         `BEGIN_TEST("SYSRETは戻り先の番地へユーザーモードで飛ぶ");
@@ -1307,12 +1327,6 @@ module cpu_tb;
         expect_reg(1, 32'd0);
         expect_reg(2, 32'd2);
         expect_kernel_mode(1'b1);
-
-        // ユーザーモードへ移ってから，もう一度復帰する
-        `BEGIN_TEST("ユーザーモードでのSYSRETは停止する");
-        run('{movi(KRET_ADDR, 32'd2), sysret(), sysret()});
-        // 2つ目の復帰の番地で停止する
-        expect_halt(2);
 
         // ユーザーモードのシステムコールの直後に，ユーザーモードでは読めないタクトスイッチを読む命令を置く
         `BEGIN_TEST("ユーザーモードのSYSCALLの直後の命令は，ユーザーモードで読めないレジスタを読んでも停止しない");
@@ -1352,6 +1366,22 @@ module cpu_tb;
         expect_end();
         expect_reg(2, 32'd0);
 
+        // 入口を5番地にし，NOPを先頭とする同時実行の2番目で戻り先へ書き込んだ直後に，システムコールを呼ぶ
+        `BEGIN_TEST("同時実行の2番目が戻り先へ書き込んだ直後のSYSCALLは，保存した戻り先を残す");
+        run('{movi(KENTRY_ADDR, 32'd5), nop(), movi(KRET_ADDR, 32'h99), syscall(), movi(2, 32'd2), movr(1, KRET_ADDR)});
+        // 入口で読む戻り先は，システムコールの次の4番地になる
+        expect_end();
+        expect_reg(1, 32'd4);
+        expect_reg(2, 32'd0);
+
+        // メモリへ5を書き込み，そこから戻り先へ読み込んだ直後に復帰する
+        `BEGIN_TEST("直前にメモリから読み込んだ戻り先へSYSRETで飛ぶ");
+        run('{movi(1, 32'd5), wm(4'hf, 6'h00, 1, im(32'h100)), rm(4'hf, 6'h00, KRET_ADDR, im(32'h100)), sysret(), movi(2, 32'd2)});
+        // 読み込んだ5番地へ飛び，4番地の代入は実行されない
+        expect_end();
+        expect_reg(2, 32'd0);
+        expect_kernel_mode(1'b0);
+
         // ユーザーモードで，余りの格納先をLEDにした割り算を実行する
         `BEGIN_TEST("ユーザーモードで読み書きできないレジスタを余りの格納先にした割り算は停止する");
         body = {enter_user_mode(), movi(1, 32'd6), movi(2, 32'd4), div(1, 2, 3, im(LED_ADDR))};
@@ -1361,13 +1391,44 @@ module cpu_tb;
 
         // メモリの後半の先頭へ復帰し，そこでr1へ代入してからシステムコールを呼ぶ．入口(3番地)で戻り先を読む
         `BEGIN_TEST("メモリの後半へSYSRETで移り，そこからSYSCALLでROMの入口へ戻る");
-        code_area = '{movi(1, 32'd1), syscall()};
+        code_area = '{movi(1, 32'd1), syscall(), movi(3, 32'd3)};
         run('{movi(KENTRY_ADDR, 32'd3), movi(KRET_ADDR, CODE_AREA_PC), sysret(), movr(2, KRET_ADDR)});
-        // メモリの後半の代入が実行され，戻り先にはシステムコールの次の番地が入り，カーネルモードで終わる
+        // メモリの後半の代入が実行され，システムコールの次の代入は実行されない．
+        // 戻り先にはシステムコールの次の番地が入り，カーネルモードで終わる
         expect_end();
         expect_reg(1, 32'd1);
         expect_reg(2, CODE_AREA_PC + 2);
+        expect_reg(3, 32'd0);
         expect_kernel_mode(1'b1);
+
+        // 命令の種類ごとに，ユーザーモードで読み書きできないレジスタを，使うオペランド・使わないオペランドに入れた命令を実行する
+        cases = '{
+            '{$sformatf("ユーザーモードでrs2が読めないADDは停止する"),                              add(1, SW_ADDR, 3),                     1'b1},
+            '{$sformatf("ユーザーモードでrs2でシフト量を指定し，rs2が読めないと停止する"),          sll(1, SW_ADDR, 3, NO_IMM),             1'b1},
+            '{$sformatf("ユーザーモードで即値でシフト量を指定すると，rs2が読めなくても停止しない"), sll(1, SW_ADDR, 3, im(1)),              1'b0},
+            '{$sformatf("ユーザーモードでrs1が読めない分岐は停止する"),                             eq(BTN_ADDR, 0, im(1)),                 1'b1},
+            '{$sformatf("ユーザーモードでrs1が読めないレジスタの番地へのJMPは停止する"),            jmp(KENTRY_ADDR, NO_IMM),               1'b1},
+            '{$sformatf("ユーザーモードで即値の番地へのJMPは，rs1が読めなくても停止しない"),        jmp(KENTRY_ADDR, im(4)),                1'b0},
+            '{$sformatf("ユーザーモードでrs1が読めないレジスタの番地へのCALLは停止する"),           call(KENTRY_ADDR, NO_IMM),              1'b1},
+            '{$sformatf("ユーザーモードで書き込み先が書けないRMは停止する"),                        rm(4'hf, 6'h00, LED_ADDR, im(32'h100)), 1'b1},
+            '{$sformatf("ユーザーモードで書き込むデータのrs2が読めないWMは停止する"),               wm(4'hf, 6'h00, BTN_ADDR, im(32'h100)), 1'b1},
+            '{$sformatf("ユーザーモードで番地のrs1が読めないWMは停止する"),                         wm(4'hf, SW_ADDR, 1, NO_IMM),           1'b1},
+            '{$sformatf("ユーザーモードで番地の基準のrs1が読めないRMRは停止する"),                  rmr(4'hf, KENTRY_ADDR, 3, im(0)),       1'b1},
+            '{$sformatf("ユーザーモードで書き込むデータのrs2が読めないWMRは停止する"),              wmr(4'hf, 2, KRET_ADDR, im(0)),         1'b1}
+        };
+
+        foreach (cases[i]) begin
+            // 命令ごとの名前でテストケースを始める
+            begin_test(cases[i].name);
+            // ユーザーモードへ移り，r2へ1を入れてから，確かめる命令を実行する
+            body = {enter_user_mode(), movi(2, 32'd1), cases[i].instruction};
+            run(body);
+            // 停止するなら確かめる命令の番地で停止し，停止しないなら正常終了する
+            if (cases[i].halts)
+                expect_halt(3);
+            else
+                expect_end();
+        end
     endtask
 
     // ボード上の入出力ピンにつながるレジスタ
