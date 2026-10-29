@@ -279,7 +279,7 @@ package machine_p;
     );
         syscall = {3'h5, SYSCALL, 4'h0, 6'h00, 6'h00, 6'h00, 33'h000000000};
     endfunction
-    // システムコールからの復帰(保存した戻り先へ，ユーザーモードで飛ぶ．引数なし)
+    // カーネルモードからの復帰(保存した戻り先へ，ユーザーモードで飛ぶ．引数なし)
     function machine_t sysret(
 
     );

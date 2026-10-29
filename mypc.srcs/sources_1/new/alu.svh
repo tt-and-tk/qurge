@@ -413,7 +413,7 @@ package alu_p;
                         RET:       is_instruction_executable = util_p::TRUE;
                         // システムコールは引数を使わず，どちらの動作状態でも有効
                         SYSCALL:   is_instruction_executable = util_p::TRUE;
-                        // システムコールからの復帰は引数を使わず，カーネルモードでだけ有効
+                        // カーネルモードからの復帰は引数を使わず，カーネルモードでだけ有効
                         SYSRET:    is_instruction_executable = kernel_mode;
                         // それ以外は不正な命令として無効扱い
                         default:   is_instruction_executable = util_p::FALSE;
