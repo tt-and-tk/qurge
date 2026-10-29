@@ -1126,7 +1126,7 @@ module cpu_tb;
         endcase
     endfunction
 
-    // ユーザーモードへ移ってから命令列を実行するための前置き．カーネルモードからの戻り先を前置きの直後(2番地)にして復帰する
+    // ユーザーモードへ移ってから命令列を実行するための前置き．カーネルモードからの戻り先を前置きの直後(2番地)にしてSYSRETを実行する
     function automatic machine_queue_t enter_user_mode();
         return '{movi(KRET_ADDR, 32'd2), sysret()};
     endfunction
@@ -1280,10 +1280,10 @@ module cpu_tb;
         expect_reg(2, 32'h5678);
         expect_kernel_mode(1'b1);
 
-        // ユーザーモードへ移ってから，もう一度復帰する．停止を検出した次のクロックの動作状態も見る
+        // ユーザーモードへ移ってから，もう一度SYSRETを実行する．停止を検出した次のクロックの動作状態も見る
         `BEGIN_TEST("ユーザーモードでのSYSRETは停止し，停止するとカーネルモードに戻る");
         run('{movi(KRET_ADDR, 32'd2), sysret(), sysret()});
-        // 2つ目の復帰の番地で停止する
+        // 2つ目のSYSRETの番地で停止する
         expect_halt(2);
         // 停止を検出した次のクロックで，レジスタの初期化とともにカーネルモードに戻る
         @(posedge clk);
@@ -1292,7 +1292,7 @@ module cpu_tb;
             fail($sformatf("停止した後の動作状態がカーネルモードではない"));
         end
 
-        // 戻り先を3番地にして復帰する
+        // 戻り先を3番地にしてSYSRETを実行する
         `BEGIN_TEST("SYSRETは戻り先の番地へユーザーモードで飛ぶ");
         run('{movi(KRET_ADDR, 32'd3), sysret(), movi(1, 32'd1), movi(2, 32'd2)});
         // 2番地の代入を飛び越えて3番地から実行し，ユーザーモードで終わる
@@ -1310,7 +1310,7 @@ module cpu_tb;
         expect_reg(2, 32'd4);
         expect_kernel_mode(1'b1);
 
-        // ユーザーモードの3番地でシステムコールを呼び，入口(6番地)でr2へ代入してから復帰する
+        // ユーザーモードの3番地でシステムコールを呼び，入口(6番地)でr2へ代入してからSYSRETで戻る
         `BEGIN_TEST("SYSCALLの入口からSYSRETで戻ると，呼び出しの次の命令から実行する");
         run('{movi(KENTRY_ADDR, 32'd6), movi(KRET_ADDR, 32'd3), sysret(), syscall(), movi(1, 32'd1), jmp(6'h00, im(8)),
               movi(2, 32'd2), sysret()});
@@ -1337,7 +1337,7 @@ module cpu_tb;
         expect_reg(1, 32'd0);
         expect_kernel_mode(1'b1);
 
-        // 戻り先へ範囲外の9番地を書き込んだ後，1本目のパイプラインで5番地へ書き換えてすぐに復帰する
+        // 戻り先へ範囲外の9番地を書き込んだ後，1本目のパイプラインで5番地へ書き換えてすぐにSYSRETを実行する
         `BEGIN_TEST("直前に1本目で書き込んだ戻り先へSYSRETで飛ぶ");
         run('{movi(KRET_ADDR, 32'd9), movi(1, 32'd1), movi(KRET_ADDR, 32'd5), sysret(), movi(2, 32'd2)});
         // 書き換えた後の5番地へ飛び，4番地の代入は実行されない
@@ -1345,7 +1345,7 @@ module cpu_tb;
         expect_reg(2, 32'd0);
         expect_kernel_mode(1'b0);
 
-        // 戻り先へ範囲外の9番地を書き込んだ後，NOPを先頭とする同時実行の2番目で5番地へ書き換えてすぐに復帰する
+        // 戻り先へ範囲外の9番地を書き込んだ後，NOPを先頭とする同時実行の2番目で5番地へ書き換えてすぐにSYSRETを実行する
         `BEGIN_TEST("直前に2本目で書き込んだ戻り先へSYSRETで飛ぶ");
         run('{movi(KRET_ADDR, 32'd9), nop(), movi(KRET_ADDR, 32'd5), sysret(), movi(2, 32'd2)});
         // 書き換えた後の5番地へ飛び，4番地の代入は実行されない
@@ -1375,7 +1375,7 @@ module cpu_tb;
         expect_reg(1, 32'd4);
         expect_reg(2, 32'd0);
 
-        // メモリへ5を書き込み，そこから戻り先へ読み込んだ直後に復帰する
+        // メモリへ5を書き込み，そこから戻り先へ読み込んだ直後にSYSRETを実行する
         `BEGIN_TEST("直前にメモリから読み込んだ戻り先へSYSRETで飛ぶ");
         run('{movi(1, 32'd5), wm(4'hf, 6'h00, 1, im(32'h100)), rm(4'hf, 6'h00, KRET_ADDR, im(32'h100)), sysret(), movi(2, 32'd2)});
         // 読み込んだ5番地へ飛び，4番地の代入は実行されない
@@ -1390,7 +1390,7 @@ module cpu_tb;
         // 割り算の番地で停止する
         expect_halt(4);
 
-        // メモリの後半の先頭へ復帰し，そこでr1へ代入してからシステムコールを呼ぶ．入口(3番地)で戻り先を読む
+        // メモリの後半の先頭へSYSRETで移り，そこでr1へ代入してからシステムコールを呼ぶ．入口(3番地)で戻り先を読む
         `BEGIN_TEST("メモリの後半へSYSRETで移り，そこからSYSCALLでROMの入口へ戻る");
         code_area = '{movi(1, 32'd1), syscall(), movi(3, 32'd3)};
         run('{movi(KENTRY_ADDR, 32'd3), movi(KRET_ADDR, CODE_AREA_PC), sysret(), movr(2, KRET_ADDR)});
