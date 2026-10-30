@@ -12,7 +12,8 @@
 // - 先読み: CPUが命令を実行している間に，次の命令をROMから取得しておくこと
 // - メインメモリの後半: カーネルモードのPCのうちROMの命令数の上限に続く範囲が，ここに置いた命令に対応する(仕様はrom.md)．命令列を置いた部分をコード領域と呼ぶ
 // - 領域: ユーザーモードのプログラムが使うメインメモリの範囲．先頭の番地と大きさをカーネルモードでUBASE・USIZEへ書き込んで決める．
-//   ユーザーモードの番地(領域の中の番地)は領域の先頭を0とし，PCがpの命令は領域の中の番地p × 8に置く(仕様はmode.md)
+//   ユーザーモードの番地(領域の中の番地)は領域の先頭を0とするバイト単位の番地である．ユーザーモードのPCも領域の先頭の命令を0として数え，
+//   PCがpの命令は領域の中の番地p × 8に置く(仕様はmode.md)
 // - フォワーディング: 直前の命令がレジスタへ書き込む値を，次の命令がレジスタを経由せずに受け取ること
 // - 同時実行: 連続した2命令の実行を，同じサイクルに始めること．2命令のうち先に実行する命令を先頭，後の命令を2番目と呼ぶ．
 //   2番目にできるのは単純な演算(1サイクルで完了し，レジスタへ書き込む以外の動作を持たない命令)だけである
@@ -1153,7 +1154,7 @@ module cpu_tb;
         return '{movi(UBASE_ADDR, user_base), movi(USIZE_ADDR, user_size)};
     endfunction
 
-    // 領域を設定し，領域の中の番地のPCがstart_pcの命令から，ユーザーモードで実行する命令列．
+    // 領域を設定し，PCがstart_pcの命令から，ユーザーモードで実行する命令列．
     // カーネルモードからの戻り先をstart_pcにしてSYSRETを実行する
     function automatic machine_queue_t enter_user_mode(input int start_pc = 0);
         return {set_user_region(), movi(KRET_ADDR, start_pc), sysret()};
@@ -1310,7 +1311,7 @@ module cpu_tb;
         `BEGIN_TEST("ユーザーモードでのSYSRETは停止し，停止するとカーネルモードに戻る");
         user_code = '{sysret()};
         run(enter_user_mode());
-        // 領域の中の番地が0のSYSRETで停止する
+        // PCが0のSYSRETで停止する
         expect_halt(0);
         // 停止を検出した次のクロックで，レジスタの初期化とともにカーネルモードに戻る
         @(posedge clk);
@@ -1319,31 +1320,31 @@ module cpu_tb;
             fail($sformatf("停止した後の動作状態がカーネルモードではない"));
         end
 
-        // 戻り先を領域の中の番地1にしてSYSRETを実行する
+        // 戻り先をPC 1にしてSYSRETを実行する
         `BEGIN_TEST("SYSRETは戻り先の番地へユーザーモードで飛ぶ");
         user_code = '{movi(1, 32'd1), movi(2, 32'd2)};
         run(enter_user_mode(1));
-        // 番地0の代入を飛び越えて番地1から実行し，ユーザーモードで終わる
+        // PC 0の代入を飛び越えてPC 1から実行し，ユーザーモードで終わる
         expect_end();
         expect_reg(1, 32'd0);
         expect_reg(2, 32'd2);
         expect_kernel_mode(1'b0);
 
-        // 入口をROMの5番地にしてユーザーモードへ移り，領域の中の番地0でシステムコールを呼ぶ
+        // 入口をROMの5番地にしてユーザーモードへ移り，PC 0でシステムコールを呼ぶ
         `BEGIN_TEST("SYSCALLは次の命令の番地を戻り先へ保存し，入口へカーネルモードで飛ぶ");
         user_code = '{syscall(), movi(1, 32'd1)};
         run({movi(KENTRY_ADDR, 32'd5), enter_user_mode(), movr(2, KRET_ADDR)});
-        // 番地1の代入を飛び越えて入口から実行し，戻り先には領域の中の番地1が入り，カーネルモードで終わる
+        // PC 1の代入を飛び越えて入口から実行し，戻り先にはPC 1が入り，カーネルモードで終わる
         expect_end();
         expect_reg(1, 32'd0);
         expect_reg(2, 32'd1);
         expect_kernel_mode(1'b1);
 
-        // 領域の中の番地0でシステムコールを呼び，入口(ROMの5番地)でr2へ代入してからSYSRETで戻る
+        // PC 0でシステムコールを呼び，入口(ROMの5番地)でr2へ代入してからSYSRETで戻る
         `BEGIN_TEST("SYSCALLの入口からSYSRETで戻ると，呼び出しの次の命令から実行する");
         user_code = '{syscall(), movi(1, 32'd1)};
         run({movi(KENTRY_ADDR, 32'd5), enter_user_mode(), movi(2, 32'd2), sysret()});
-        // 入口の代入と，戻った番地1の代入がどちらも実行され，ユーザーモードで終わる
+        // 入口の代入と，戻ったPC 1の代入がどちらも実行され，ユーザーモードで終わる
         expect_end();
         expect_reg(1, 32'd1);
         expect_reg(2, 32'd2);
@@ -1367,20 +1368,20 @@ module cpu_tb;
         expect_reg(1, 32'd0);
         expect_kernel_mode(1'b1);
 
-        // 戻り先へ領域の中の番地9を書き込んだ後，1本目のパイプラインで番地1へ書き換えてすぐにSYSRETを実行する
+        // 戻り先へPC 9を書き込んだ後，1本目のパイプラインでPC 1へ書き換えてすぐにSYSRETを実行する
         `BEGIN_TEST("直前に1本目で書き込んだ戻り先へSYSRETで飛ぶ");
         user_code = '{movi(2, 32'd2), nop()};
         run({set_user_region(), movi(KRET_ADDR, 32'd9), movi(1, 32'd1), movi(KRET_ADDR, 32'd1), sysret()});
-        // 書き換えた後の番地1へ飛び，番地0の代入は実行されない
+        // 書き換えた後のPC 1へ飛び，PC 0の代入は実行されない
         expect_end();
         expect_reg(2, 32'd0);
         expect_kernel_mode(1'b0);
 
-        // 戻り先へ領域の中の番地9を書き込んだ後，NOPを先頭とする同時実行の2番目で番地1へ書き換えてすぐにSYSRETを実行する
+        // 戻り先へPC 9を書き込んだ後，NOPを先頭とする同時実行の2番目でPC 1へ書き換えてすぐにSYSRETを実行する
         `BEGIN_TEST("直前に2本目で書き込んだ戻り先へSYSRETで飛ぶ");
         user_code = '{movi(2, 32'd2), nop()};
         run({set_user_region(), movi(KRET_ADDR, 32'd9), nop(), movi(KRET_ADDR, 32'd1), sysret()});
-        // 書き換えた後の番地1へ飛び，番地0の代入は実行されない
+        // 書き換えた後のPC 1へ飛び，PC 0の代入は実行されない
         expect_end();
         expect_reg(2, 32'd0);
         expect_kernel_mode(1'b0);
@@ -1411,7 +1412,7 @@ module cpu_tb;
         `BEGIN_TEST("直前にメモリから読み込んだ戻り先へSYSRETで飛ぶ");
         user_code = '{movi(2, 32'd2), nop()};
         run({set_user_region(), movi(1, 32'd1), wm(4'hf, 6'h00, 1, im(32'h100)), rm(4'hf, 6'h00, KRET_ADDR, im(32'h100)), sysret()});
-        // 読み込んだ番地1へ飛び，番地0の代入は実行されない
+        // 読み込んだPC 1へ飛び，PC 0の代入は実行されない
         expect_end();
         expect_reg(2, 32'd0);
         expect_kernel_mode(1'b0);
@@ -1494,11 +1495,11 @@ module cpu_tb;
         expect_reg(1, 32'd0);
         expect_reg(2, 32'd2);
 
-        // 領域の中の番地1・3の命令でPCを読む．番地2は複数サイクルかかるRMにする
-        `BEGIN_TEST("ユーザーモードでPCを読むと，領域の中の番地が読める");
+        // PC 1・3の命令でPCを読む．PC 2は複数サイクルかかるRMにする
+        `BEGIN_TEST("ユーザーモードでPCを読むと，領域の先頭の命令を0として数えたPCが読める");
         user_code = '{nop(), movr(1, PC_ADDR), rm(4'hf, 6'h00, 2, im(32'h100)), movr(3, PC_ADDR)};
         run(enter_user_mode());
-        // それぞれのMOV自身の領域の中の番地が入る
+        // それぞれのMOV自身のPCが入る
         expect_end();
         expect_reg(1, 32'd1);
         expect_reg(3, 32'd3);
@@ -1558,21 +1559,21 @@ module cpu_tb;
         expect_halt(2);
         expect_mem32(32'hfffc, 32'h55);
 
-        // 領域の大きさを2命令ぶんにし，番地0の命令と，番地1の正常終了を表す命令を置く
+        // 領域の大きさを2命令ぶんにし，PC 0の命令と，PC 1の正常終了を表す命令を置く
         `BEGIN_TEST("ユーザーモードで領域の末尾の命令を実行できる");
         user_size = 16;
         user_code = '{movi(1, 32'd1)};
         run(enter_user_mode());
-        // 番地1の正常終了を表す命令まで実行する
+        // PC 1の正常終了を表す命令まで実行する
         expect_end();
         expect_reg(1, 32'd1);
 
-        // 領域の大きさを1命令ぶんにし，番地0の命令の次へ進む
+        // 領域の大きさを1命令ぶんにし，PC 0の命令の次へ進む
         `BEGIN_TEST("ユーザーモードで領域の末尾の命令の次へ進むと停止する");
         user_size = 8;
         user_code = '{movi(1, 32'd1)};
         run(enter_user_mode());
-        // 番地0の命令は実行され，その次の番地で停止する
+        // PC 0の命令は実行され，その次のPCで停止する
         expect_halt(1);
         expect_reg(1, 32'd1);
 
@@ -1592,11 +1593,11 @@ module cpu_tb;
         // ジャンプ先の番地で停止する
         expect_halt(USER_SIZE_DEFAULT / 8);
 
-        // 8を掛けると32ビットで折り返して0になる番地へジャンプする
-        `BEGIN_TEST("ユーザーモードで，8を掛けるとあふれる番地へジャンプすると停止する");
+        // 8を掛けると32ビットで折り返して0になるPCへジャンプする
+        `BEGIN_TEST("ユーザーモードで，8を掛けるとあふれるPCへジャンプすると停止する");
         user_code = '{jmp(6'h00, im(32'h2000_0000))};
         run(enter_user_mode());
-        // 折り返した番地0の命令を実行せず，ジャンプ先の番地で停止する
+        // 8を掛けて折り返したPC 0の命令を実行せず，ジャンプ先のPCで停止する
         expect_halt(32'h2000_0000);
 
         // 領域の大きさをメモリの末尾より先まで広げ，メモリの末尾を超える位置に当たる番地へジャンプする
@@ -1609,14 +1610,14 @@ module cpu_tb;
         expect_halt(32'h1000 / 8);
 
         // メモリの後半に対応するカーネルモードのPCを，ユーザーモードの戻り先にしてSYSRETを実行する
-        `BEGIN_TEST("メモリの後半に対応するカーネルモードのPCも，ユーザーモードでは領域の中の番地として扱う");
+        `BEGIN_TEST("メモリの後半に対応するカーネルモードのPCも，ユーザーモードでは領域の先頭の命令から数えたPCとして扱う");
         code_area = '{movi(1, 32'd1)};
         run(enter_user_mode(CODE_AREA_PC));
         // メモリの後半の命令を実行せず，領域の外の番地として停止する
         expect_halt(CODE_AREA_PC);
         expect_reg(1, 32'd0);
 
-        // ユーザーモードで，SPを設定してから番地4の関数をCALLで呼び，その中でSPを読んでからRETで戻る
+        // ユーザーモードで，SPを設定してからPC 4の関数をCALLで呼び，その中でSPを読んでからRETで戻る
         `BEGIN_TEST("ユーザーモードのCALL・RETは領域の中のスタックを使う");
         user_code = '{movi(SP_ADDR, 32'h800), call(6'h00, im(4)), movi(2, 32'd2), jmp(6'h00, im(7)),
                       movi(1, 32'd1), movr(3, SP_ADDR), ret()};
