@@ -197,6 +197,15 @@ module alu_sv (
     // (停止状態から自力で抜けると，外部からのリセットを経ずに同じ命令を再実行する動作になる)．
     logic is_halted = 1'b0;
 
+    // 動作状態がカーネルモードか(0ならユーザーモード)．リセット直後と停止中はカーネルモードにする．
+    // 確認段は，命令の実行可否をこの値で判定する．
+    // 動作状態を変えるのは，システムコールの命令(SYSCALL)と，カーネルモードからの復帰の命令(SYSRET)の2つだけである．
+    // どちらも実行段で完了したときに，後の命令(それより後に取得していた命令)を捨て，飛び先の命令から取得し直す．
+    // このため，動作状態を変える前に確認段で判定された後の命令は，実行されない．
+    // また，どちらも他の命令と同時実行しない(同時実行する2命令の先頭にも2番目にもならない)．
+    // このため，同時実行する2命令の動作状態は常に同じになる
+    logic kernel_mode = 1'b1;
+
     // ===== 取得段: ROMからの命令の取得 =====
 
     // 順番どおりに取得していく場合に，次にROMへ出す番地．
@@ -307,7 +316,7 @@ module alu_sv (
     // 確認段の命令が実行できるか
     util_p::bool_t check_executable1;
     assign check_executable1 = is_instruction_executable(
-        queue_pc_valid[0], command_next1.m_type, command_next1.func,
+        kernel_mode, queue_pc_valid[0], command_next1.m_type, command_next1.func,
         command_next1.rs1, command_next1.rs2, command_next1.rd, command_next1.imm
     );
 
@@ -321,7 +330,7 @@ module alu_sv (
     // 2番目の命令が実行できるか
     util_p::bool_t check_executable2;
     assign check_executable2 = is_instruction_executable(
-        queue_pc_valid[1], command_next2.m_type, command_next2.func,
+        kernel_mode, queue_pc_valid[1], command_next2.m_type, command_next2.func,
         command_next2.rs1, command_next2.rs2, command_next2.rd, command_next2.imm
     );
 
@@ -865,14 +874,27 @@ module alu_sv (
     // 飛び先を指定してプログラムカウンタを書き換える命令かどうか(定義されていない命令コードはfalseとして扱う)
     logic is_jumping;
     assign is_jumping = (command.m_type == J_TYPE)
-        && (func_r == JMP || func_r == CALL || func_r == RET);
+        && (func_r == JMP || func_r == CALL || func_r == RET || func_r == SYSCALL || func_r == SYSRET);
 
-    // 移動する命令の飛び先．関数リターンはメモリ上のスタックから読み出した戻り先(読み出しが
-    // 完了したサイクルにのみ有効)，それ以外はイミディエイトデータまたはレジスタで指定された番地になる
+    // 移動する命令の飛び先．
+    // システムコール(SYSCALL)と，カーネルモードからの復帰(SYSRET)の飛び先は，オペランドではなく決まったレジスタから，実行段に入ってから読む．
+    // 前の命令がそのレジスタへ書き込む値は，実行段に入るまでにレジスタへ書き込まれているか，2本目の結果として書き込みを待っている．
+    // このため，2本目の結果を含めたレジスタの値を読めば最新の値になる．
+    // assignではなくalways_combで求めるのは，register_value()が引数以外に読む値の変化でも求め直させるため
     register_t jump_target;
-    assign jump_target = (func_r == RET) ? ram_read.data
-                       : imm_r[32]       ? imm_r[31:0]
-                       : rs1_val;
+    always_comb begin
+        jump_target =
+            // 関数リターンは，メモリ上のスタックから読み出した戻り先(読み出しが完了したサイクルにのみ有効)
+            (func_r == RET)       ? ram_read.data
+            // システムコールは，カーネルモードの入口
+            : (func_r == SYSCALL) ? register_value(KENTRY_ADDR)
+            // カーネルモードからの復帰は，カーネルモードからの戻り先
+            : (func_r == SYSRET)  ? register_value(KRET_ADDR)
+            // それ以外で即値を使う命令は，イミディエイトデータで指定された番地
+            : imm_r[32]           ? imm_r[31:0]
+            // それ以外は，レジスタで指定された番地
+            : rs1_val;
+    end
 
     // CALL・RETが戻り先を積み下ろす番地を求めるのに使う，スタックポインタの値．
     // 直前に同時実行した2本目の命令の結果をこのサイクルにスタックポインタへ書き込むならその結果を使う．
@@ -1087,6 +1109,10 @@ module alu_sv (
                         end
                         // 関数リターンは，戻り先をスタックから読み出し終えたら戻り先へ進む
                         RET:  ex_completes = (ram_read_state == EXECUTE) && ram_read.ready;
+                        // システムコールは，カーネルモードの入口へ進む
+                        SYSCALL: ex_completes = 1'b1;
+                        // カーネルモードからの復帰は，カーネルモードからの戻り先へ進む
+                        SYSRET:  ex_completes = 1'b1;
                         default: ;
                     endcase
                 end
@@ -1432,6 +1458,9 @@ module alu_sv (
             // レジスタ
             register <= REGISTER_INIT;
 
+            // 動作状態をカーネルモードに戻す
+            kernel_mode <= 1'b1;
+
             // 実行できない命令を検出して停止した状態は，外部からのリセットが
             // 入っているときだけ解除する．自ら解除するとプログラムの先頭から
             // 同じ命令を踏み直すだけになるため，解除の判断は外部に委ねる．
@@ -1749,6 +1778,20 @@ module alu_sv (
                                     default: is_halted <= 1'b1;
                                 endcase
                             end
+
+                            // システムコール．戻り先(次の命令の番地)を保存し，カーネルモードへ切り替える(カーネルモードの入口へ進むのは共通の処理で行う)．
+                            // 戻り先は，確認段へ回さずにカーネルモードからの戻り先のレジスタへ直接書き込む．
+                            // 後の命令は捨てられ，カーネルモードの入口の番地にある命令が確認段に届くのは，書き込んだ後になるため．
+                            // システムコールは他の命令と同時実行しない．常に1本目で実行し，そのとき2本目には命令が入らない．
+                            // システムコールより前の別の2命令を同時実行していた場合は，その2本目の命令の結果も，システムコールが完了するこのサイクルにレジスタへ書き込まれる．
+                            // 書き込み先がこのレジスタと同じ場合に戻り先を残すため，戻り先の代入は，2本目の命令の結果の代入より後に置いている
+                            SYSCALL: begin
+                                register[KRET_ADDR] <= sequential_pc;
+                                kernel_mode <= 1'b1;
+                            end
+
+                            // カーネルモードからの復帰．ユーザーモードへ切り替える(戻り先へ進むのは共通の処理で行う)
+                            SYSRET: kernel_mode <= 1'b0;
 
                             // それ以外はオミット
                             default: begin

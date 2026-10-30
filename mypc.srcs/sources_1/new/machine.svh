@@ -19,41 +19,43 @@ package machine_p;
     typedef logic [32:0] imm_t;       // イミディエイトデータのサイズ．最上位ビットはイミディエイトデータを使用するかのフラグ
 
     // 各機械語
-    localparam func_t NOP  = 6'h00;
-    localparam func_t AND  = 6'h00;
-    localparam func_t OR   = 6'h01;
-    localparam func_t XOR  = 6'h02;
-    localparam func_t NOT  = 6'h03;
-    localparam func_t NAND = 6'h04;
-    localparam func_t ADD  = 6'h05;
-    localparam func_t SUB  = 6'h06;
-    localparam func_t MUL  = 6'h07;
-    localparam func_t DIV  = 6'h08;
-    localparam func_t DIVU = 6'h09;
-    localparam func_t SLL  = 6'h00;
-    localparam func_t SRL  = 6'h01;
-    localparam func_t SLA  = 6'h02;
-    localparam func_t SRA  = 6'h03;
-    localparam func_t MOV  = 6'h00;
-    localparam func_t EQ   = 6'h00;
-    localparam func_t NE   = 6'h01;
-    localparam func_t LT   = 6'h02;
-    localparam func_t GT   = 6'h03;
-    localparam func_t ELT  = 6'h04;
-    localparam func_t EGT  = 6'h05;
-    localparam func_t LTU  = 6'h06;
-    localparam func_t GTU  = 6'h07;
-    localparam func_t ELTU = 6'h08;
-    localparam func_t EGTU = 6'h09;
-    localparam func_t JMP  = 6'h00;
-    localparam func_t CALL = 6'h01;
-    localparam func_t RET  = 6'h02;
-    localparam func_t RM   = 6'h00;
-    localparam func_t WM   = 6'h01;
-    localparam func_t BRM  = 6'h02;
-    localparam func_t BWM  = 6'h03;
-    localparam func_t RMR  = 6'h04;
-    localparam func_t WMR  = 6'h05;
+    localparam func_t NOP     = 6'h00;
+    localparam func_t AND     = 6'h00;
+    localparam func_t OR      = 6'h01;
+    localparam func_t XOR     = 6'h02;
+    localparam func_t NOT     = 6'h03;
+    localparam func_t NAND    = 6'h04;
+    localparam func_t ADD     = 6'h05;
+    localparam func_t SUB     = 6'h06;
+    localparam func_t MUL     = 6'h07;
+    localparam func_t DIV     = 6'h08;
+    localparam func_t DIVU    = 6'h09;
+    localparam func_t SLL     = 6'h00;
+    localparam func_t SRL     = 6'h01;
+    localparam func_t SLA     = 6'h02;
+    localparam func_t SRA     = 6'h03;
+    localparam func_t MOV     = 6'h00;
+    localparam func_t EQ      = 6'h00;
+    localparam func_t NE      = 6'h01;
+    localparam func_t LT      = 6'h02;
+    localparam func_t GT      = 6'h03;
+    localparam func_t ELT     = 6'h04;
+    localparam func_t EGT     = 6'h05;
+    localparam func_t LTU     = 6'h06;
+    localparam func_t GTU     = 6'h07;
+    localparam func_t ELTU    = 6'h08;
+    localparam func_t EGTU    = 6'h09;
+    localparam func_t JMP     = 6'h00;
+    localparam func_t CALL    = 6'h01;
+    localparam func_t RET     = 6'h02;
+    localparam func_t SYSCALL = 6'h03;
+    localparam func_t SYSRET  = 6'h04;
+    localparam func_t RM      = 6'h00;
+    localparam func_t WM      = 6'h01;
+    localparam func_t BRM     = 6'h02;
+    localparam func_t BWM     = 6'h03;
+    localparam func_t RMR     = 6'h04;
+    localparam func_t WMR     = 6'h05;
 
     // 処理を実行しない(N系)
     function machine_t nop(
@@ -270,6 +272,18 @@ package machine_p;
 
     );
         ret = {3'h5, RET, 4'h0, 6'h00, 6'h00, 6'h00, 33'h000000000};
+    endfunction
+    // システムコール(次の命令の番地を戻り先として保存し，カーネルモードで入口へ飛ぶ．引数なし)
+    function machine_t syscall(
+
+    );
+        syscall = {3'h5, SYSCALL, 4'h0, 6'h00, 6'h00, 6'h00, 33'h000000000};
+    endfunction
+    // カーネルモードからの復帰(保存した戻り先へ，ユーザーモードで飛ぶ．引数なし)
+    function machine_t sysret(
+
+    );
+        sysret = {3'h5, SYSRET, 4'h0, 6'h00, 6'h00, 6'h00, 33'h000000000};
     endfunction
 
     // メモリ系(M系)

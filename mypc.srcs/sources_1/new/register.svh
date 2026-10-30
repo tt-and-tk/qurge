@@ -9,6 +9,8 @@
 
 // アドレスの定義
 parameter machine_p::func_t SP_ADDR            = 6'h10;
+parameter machine_p::func_t KENTRY_ADDR        = 6'h11;
+parameter machine_p::func_t KRET_ADDR          = 6'h12;
 parameter machine_p::func_t FLG_ADDR           = 6'h1c;
 parameter machine_p::func_t RSI_ADDR           = 6'h1d;
 parameter machine_p::func_t RAX_ADDR           = 6'h1e;

@@ -29,7 +29,7 @@ package alu_p;
     localparam machine_p::addr_t REGISTER_MAX_ADDR = 6'h34;   // レジスタ配列の最大有効番地(0x00〜この値が有効)
 
     // 関数
-    function util_p::bool_t is_readable(   // そのアドレスのレジスタが読み込み可能か
+    function util_p::bool_t is_readable(   // そのアドレスのレジスタが，カーネルモードで読み込み可能か
         machine_p::addr_t addr
     );
         // CPU内のレジスタ
@@ -38,8 +38,14 @@ package alu_p;
         // スタックポインタ
         else if (addr == 6'h10)
             is_readable = util_p::TRUE;
+        // カーネルモードの入口
+        else if (addr == 6'h11)
+            is_readable = util_p::TRUE;
+        // カーネルモードからの戻り先
+        else if (addr == 6'h12)
+            is_readable = util_p::TRUE;
         // 空き
-        else if (6'h11 <= addr && addr <= 6'h1b)
+        else if (6'h13 <= addr && addr <= 6'h1b)
             is_readable = util_p::FALSE;
         // フラグ
         else if (addr == 6'h1c)
@@ -105,7 +111,7 @@ package alu_p;
         else
             is_readable = util_p::FALSE;
     endfunction
-    function util_p::bool_t is_writable(  // そのアドレスのレジスタが書き込み可能か
+    function util_p::bool_t is_writable(  // そのアドレスのレジスタが，カーネルモードで書き込み可能か
         machine_p::addr_t addr
     );
         // CPU内のレジスタ
@@ -114,8 +120,14 @@ package alu_p;
         // スタックポインタ
         else if (addr == 6'h10)
             is_writable = util_p::TRUE;
+        // カーネルモードの入口
+        else if (addr == 6'h11)
+            is_writable = util_p::TRUE;
+        // カーネルモードからの戻り先
+        else if (addr == 6'h12)
+            is_writable = util_p::TRUE;
         // 空き
-        else if (6'h11 <= addr && addr <= 6'h1b)
+        else if (6'h13 <= addr && addr <= 6'h1b)
             is_writable = util_p::FALSE;
         // フラグ
         else if (addr == 6'h1c)
@@ -190,8 +202,14 @@ package alu_p;
         // スタックポインタ
         else if (addr == 6'h10)
             used_bits = '1;
+        // カーネルモードの入口
+        else if (addr == 6'h11)
+            used_bits = '1;
+        // カーネルモードからの戻り先
+        else if (addr == 6'h12)
+            used_bits = '1;
         // 空き
-        else if (6'h11 <= addr && addr <= 6'h1b)
+        else if (6'h13 <= addr && addr <= 6'h1b)
             used_bits = '0;
         // フラグ．値を格納する命令がない
         else if (addr == 6'h1c)
@@ -279,10 +297,41 @@ package alu_p;
             && used_bits(addr) != '1;
     endfunction
 
-    // 命令のデコード時点で分かる情報(命令種別・func・レジスタ番地)から，その命令が実行可能かを
+    function util_p::bool_t is_kernel_only(  // そのアドレスのレジスタが，カーネルモードでだけ読み書きできるレジスタか
+        machine_p::addr_t addr
+    );
+        is_kernel_only =
+            // カーネルモードの入口と戻り先
+            (addr == 6'h11 || addr == 6'h12)
+            // または，周辺機器のレジスタ(OSが状態を持つため，実行ファイルに書き換えさせない)
+            || addr >= 6'h20;
+    endfunction
+    function util_p::bool_t is_readable_in_mode(  // そのアドレスのレジスタが，指定した動作状態で読み込み可能か
+        logic             kernel_mode,  // カーネルモードか(0ならユーザーモード)
+        machine_p::addr_t addr
+    );
+        is_readable_in_mode =
+            // カーネルモードで読み込める
+            is_readable(addr)
+            // かつ，カーネルモードであるか，カーネルモードでだけ読み書きできるレジスタではない
+            && (kernel_mode || !is_kernel_only(addr));
+    endfunction
+    function util_p::bool_t is_writable_in_mode(  // そのアドレスのレジスタが，指定した動作状態で書き込み可能か
+        logic             kernel_mode,  // カーネルモードか(0ならユーザーモード)
+        machine_p::addr_t addr
+    );
+        is_writable_in_mode =
+            // カーネルモードで書き込める
+            is_writable(addr)
+            // かつ，カーネルモードであるか，カーネルモードでだけ読み書きできるレジスタではない
+            && (kernel_mode || !is_kernel_only(addr));
+    endfunction
+
+    // 命令のデコード時点で分かる情報(命令種別・func・レジスタ番地)と動作状態から，その命令が実行可能かを
     // 判定する．
     function util_p::bool_t is_instruction_executable(
-        logic             pc_valid,  // 命令を，命令を置ける番地(ROMの範囲内またはメモリの後半)から取得できたか
+        logic             kernel_mode,  // 命令を実行する動作状態がカーネルモードか(0ならユーザーモード)
+        logic             pc_valid,     // 命令を，命令を置ける番地(ROMの範囲内またはメモリの後半)から取得できたか
         machine_p::type_t m_type,
         machine_p::func_t func,
         machine_p::addr_t rs1,
@@ -307,20 +356,20 @@ package alu_p;
                     unique case (func)
                         // 単項演算: 読み出し元1つと書き込み先が有効か
                         NOT:
-                            is_instruction_executable = is_readable(rs1) && is_writable(rd);
+                            is_instruction_executable = is_readable_in_mode(kernel_mode, rs1) && is_writable_in_mode(kernel_mode, rd);
                         // 二項演算: 読み出し元2つと書き込み先が有効か
                         AND, OR, XOR, NAND, ADD, SUB, MUL:
-                            is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd);
+                            is_instruction_executable = is_readable_in_mode(kernel_mode, rs1) && is_readable_in_mode(kernel_mode, rs2) && is_writable_in_mode(kernel_mode, rd);
                         // 割り算: 読み出し元2つと書き込み先(イミディエイトデータ使用時は余りの書き込み先も)が有効か
                         DIV, DIVU:
-                            is_instruction_executable = is_readable(rs1) && is_readable(rs2) && is_writable(rd)
+                            is_instruction_executable = is_readable_in_mode(kernel_mode, rs1) && is_readable_in_mode(kernel_mode, rs2) && is_writable_in_mode(kernel_mode, rd)
                                 // イミディエイトデータを使わないなら，余りを書き込まないため判定しない
                                 && (!imm[32]
                                     // 余りの書き込み先の番地が，イミディエイトデータ全体で上限以下である
                                     // (下位6ビットだけで判定すると，上限を超える番地が下位6ビットで折り返した番地として通るため)
                                     || (imm[31:0] <= REGISTER_MAX_ADDR
                                         // かつ，その番地が書き込み可能である(上限以下のため下位6ビットで表せる)
-                                        && is_writable(imm[5:0])));
+                                        && is_writable_in_mode(kernel_mode, imm[5:0])));
                         // それ以外は不正な命令として無効扱い
                         default: is_instruction_executable = util_p::FALSE;
                     endcase
@@ -330,8 +379,8 @@ package alu_p;
                         // シフト系: イミディエイトデータ使用時は読み出し元1つ，未使用時は読み出し元2つと書き込み先が有効か
                         SLL, SRL, SLA, SRA:
                             is_instruction_executable = imm[32]
-                                ? (is_readable(rs1) && is_writable(rd))
-                                : (is_readable(rs1) && is_readable(rs2) && is_writable(rd));
+                                ? (is_readable_in_mode(kernel_mode, rs1) && is_writable_in_mode(kernel_mode, rd))
+                                : (is_readable_in_mode(kernel_mode, rs1) && is_readable_in_mode(kernel_mode, rs2) && is_writable_in_mode(kernel_mode, rd));
                         // それ以外は不正な命令として無効扱い
                         default: is_instruction_executable = util_p::FALSE;
                     endcase
@@ -341,8 +390,8 @@ package alu_p;
                         // 代入系: イミディエイトデータ使用時は書き込み先のみ，未使用時は読み出し元と書き込み先が有効か
                         MOV:
                             is_instruction_executable = imm[32]
-                                ? is_writable(rd)
-                                : (is_readable(rs1) && is_writable(rd));
+                                ? is_writable_in_mode(kernel_mode, rd)
+                                : (is_readable_in_mode(kernel_mode, rs1) && is_writable_in_mode(kernel_mode, rd));
                         // それ以外は不正な命令として無効扱い
                         default: is_instruction_executable = util_p::FALSE;
                     endcase
@@ -351,7 +400,7 @@ package alu_p;
                     unique case (func)
                         // 分岐系: 読み出し元2つが有効で，かつ分岐先はイミディエイトデータでの指定に限る
                         EQ, NE, LT, GT, ELT, EGT, LTU, GTU, ELTU, EGTU:
-                            is_instruction_executable = is_readable(rs1) && is_readable(rs2) && imm[32];
+                            is_instruction_executable = is_readable_in_mode(kernel_mode, rs1) && is_readable_in_mode(kernel_mode, rs2) && imm[32];
                         // それ以外は不正な命令として無効扱い
                         default: is_instruction_executable = util_p::FALSE;
                     endcase
@@ -359,9 +408,13 @@ package alu_p;
                 J_TYPE: begin
                     unique case (func)
                         // ジャンプ・関数呼び出し: ジャンプ先をイミディエイトデータで指定するか，読み出し元が有効か
-                        JMP, CALL: is_instruction_executable = imm[32] || is_readable(rs1);
+                        JMP, CALL: is_instruction_executable = imm[32] || is_readable_in_mode(kernel_mode, rs1);
                         // 関数リターンは引数を使わないので，デコード時点では常に有効(実行時にも別途判定する)
                         RET:       is_instruction_executable = util_p::TRUE;
+                        // システムコールは引数を使わず，どちらの動作状態でも有効
+                        SYSCALL:   is_instruction_executable = util_p::TRUE;
+                        // カーネルモードからの復帰は引数を使わず，カーネルモードでだけ有効
+                        SYSRET:    is_instruction_executable = kernel_mode;
                         // それ以外は不正な命令として無効扱い
                         default:   is_instruction_executable = util_p::FALSE;
                     endcase
@@ -370,16 +423,16 @@ package alu_p;
                     unique case (func)
                         // メモリ読み込み: 書き込み先が有効で，かつ読み込みアドレスをイミディエイトデータで
                         // 指定するか読み出し元が有効か
-                        RM:      is_instruction_executable = is_writable(rd) && (imm[32] || is_readable(rs1));
+                        RM:      is_instruction_executable = is_writable_in_mode(kernel_mode, rd) && (imm[32] || is_readable_in_mode(kernel_mode, rs1));
                         // メモリ書き込み: 書き込むデータの読み出し元が有効で，かつ書き込みアドレスを
                         // イミディエイトデータで指定するか読み出し元が有効か
-                        WM:      is_instruction_executable = is_readable(rs2) && (imm[32] || is_readable(rs1));
+                        WM:      is_instruction_executable = is_readable_in_mode(kernel_mode, rs2) && (imm[32] || is_readable_in_mode(kernel_mode, rs1));
                         // レジスタ相対のメモリ読み込み: 書き込み先と番地の基準になる読み出し元が有効で，
                         // かつ番地に足すイミディエイトデータを指定しているか
-                        RMR:     is_instruction_executable = is_readable(rs1) && is_writable(rd) && imm[32];
+                        RMR:     is_instruction_executable = is_readable_in_mode(kernel_mode, rs1) && is_writable_in_mode(kernel_mode, rd) && imm[32];
                         // レジスタ相対のメモリ書き込み: 書き込むデータと番地の基準になる読み出し元が有効で，
                         // かつ番地に足すイミディエイトデータを指定しているか
-                        WMR:     is_instruction_executable = is_readable(rs1) && is_readable(rs2) && imm[32];
+                        WMR:     is_instruction_executable = is_readable_in_mode(kernel_mode, rs1) && is_readable_in_mode(kernel_mode, rs2) && imm[32];
                         // それ以外は不正な命令として無効扱い
                         default: is_instruction_executable = util_p::FALSE;
                     endcase
