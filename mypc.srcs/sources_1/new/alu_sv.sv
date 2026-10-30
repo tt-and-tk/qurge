@@ -1011,7 +1011,7 @@ module alu_sv (
     // mem_addressが読み書きしてよい範囲に収まっているかと，mem_addressの物理番地．
     // カーネルモードでは，このサイクルのmem_addressから求めた値を使う．
     // ユーザーモードでは，命令の種類によらず，領域の中の番地が範囲内であれば読み書きできる(スタックも領域の中に置く)．
-    // その判定と物理番地は，前のサイクルにmem_addressから求めて控えた値を使う(控える処理はメモリへ要求を出すタスクを参照)
+    // その判定と物理番地は，前のサイクルにmem_addressから求めて控えた値を使う(控える処理は，ユーザーモードで範囲内かと物理番地を控えるタスクを参照)
     util_p::bool_t       mem_address_in_range;
     ram_p::address_bus_t mem_physical_address;
     assign mem_address_in_range = kernel_mode ? mem_address_in_kernel_range : user_mem_in_range_r;
@@ -1370,8 +1370,8 @@ module alu_sv (
 
     // メモリを読み書きする命令が，メモリへ要求を出す際に呼ぶタスク．要求を出すまで，命令の実行を始めたサイクルから毎サイクル呼ぶ．
     // ユーザーモードで番地の変換結果をまだ控えていなければ，控えるだけにし，要求は次のサイクルに出す．
-    // 番地はmem_addressの物理番地(mem_physical_address)を使い，
-    // 読み書きしてよい範囲(mem_address_in_range)を外れる場合は，折り返した番地へアクセスせず要求を出さずに停止する
+    // メモリへ出す番地には，命令から見た番地の物理番地を使う．
+    // 命令から見た番地が読み書きしてよい範囲を外れる場合は，折り返した番地へアクセスせず，要求を出さずに停止する
     // (停止した命令はメモリ・レジスタをいずれも書き換えない)
     task automatic request_ram_read(
         input machine_p::mask_t mask  // 読み込むバイトの指定
