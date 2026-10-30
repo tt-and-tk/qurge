@@ -1696,7 +1696,8 @@ module cpu_tb;
         expect_end();
         expect_reg(2, 32'd2);
 
-        // ユーザーモードで，r1が5になるまで1つ前のPCへ戻るループを回し，その後r4に入れたPCへのJMPでr5への代入を飛び越える
+        // ユーザーモードで，r1が5になるまで1つ前のPCへ戻るループを回す．
+        // ループを抜けた後は，r4に入れたPCへのJMPで，r5への代入を飛び越える
         `BEGIN_TEST("ユーザーモードでF系の分岐とレジスタで指定したJMPが働く");
         user_code = '{movi(3, 32'd1), movi(2, 32'd5), add(1, 3, 1), ne(1, 2, im(-32'sd1)),
                       movi(4, 32'd7), jmp(4, NO_IMM), movi(5, 32'd1)};
@@ -1721,7 +1722,7 @@ module cpu_tb;
         user_size = ram_p::RAM_SIZE;
         user_code = '{movi(1, 32'h1234), wm(4'hf, 6'h00, 1, im(ram_p::RAM_SIZE - 4)), rm(4'hf, 6'h00, 2, im(ram_p::RAM_SIZE - 4))};
         run(enter_user_mode());
-        // 書いた値が読め，大きさは使うビットで切り捨てられない
+        // 書いた値が読める．領域の大きさのレジスタには，メモリの容量がそのまま残る
         expect_end();
         expect_mem32(ram_p::RAM_SIZE - 4, 32'h1234);
         expect_reg(2, 32'h1234);
