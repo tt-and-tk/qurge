@@ -30,11 +30,11 @@
 // 命令パイプライン処理の概要．命令は次の4段を1サイクルずつ進み，各段は別々の命令を同時に処理する．
 // 確認段・実行段は2本のパイプラインを持ち，条件を満たす連続した2命令を同じサイクルに処理する(以下，同時実行と書く)．
 // 分岐・ジャンプや複数サイクルかかる命令がなければ，毎サイクル1〜2命令ずつ実行が終わる．
-// - 取得段: 取得用のプログラムカウンタ(fetch_pc)が指す命令を，ROMかメインメモリの後半から読み出す．
+// - 取得段: 取得用のプログラムカウンタ(fetch_pc)が指す命令を，ROMかメインメモリから読み出す．
 //   ROMからは，番地入力へ読み出す命令の番地を与えると(以下，ROMへ番地を出すと書く)，次のサイクルに命令が確定する
 //   (クロックに同期した読み出しのため)．ROMは読み出しポートを2つ持ち，偶数番地とその次の奇数番地の2命令を
 //   1組として同時に読み出す(以下，この2命令を組と書く)．fetch_pcが奇数番地のときは，組のうち奇数番地の命令だけを使う．
-//   メインメモリの後半からは，パイプラインが空になってから1命令ずつ読み出す(理由はこの概要の最後の段落)
+//   メインメモリからは，パイプラインが空になってから1命令ずつ読み出す(理由はこの概要の最後の段落)
 // - 取り込み段: 取得した命令(ROMからは最大2命令)を命令キューの末尾へ取り込む
 // - 確認段: 命令キューの先頭の命令(以下，先頭と書く)が実行できるかを確認し，レジスタから値を読み出して実行段へ渡す．
 //   命令キューで先頭の次にある命令(以下，2番目と書く)が同時実行の条件を満たせば，先頭と同じサイクルに渡す
@@ -81,8 +81,9 @@
 // - それ以外のジャンプ系の命令と，成立した分岐: 実行段で完了した時点
 // - 成立しなかった分岐: 行き先が順番どおりのため取得し直さず，取得していた命令をそのまま実行する
 //
-// 命令はプログラムカウンタに応じてROMかメインメモリの後半から読み出す．メインメモリは，読み出しポートを実行段と
-// 共用し，応答を待つ必要があり，読み出しも1回32ビットである．このため，メモリの後半の命令はパイプラインが
+// 命令は，カーネルモードではプログラムカウンタに応じてROMかメインメモリの後半から，ユーザーモードでは常にメインメモリの領域から読み出す
+// (領域の扱いは「ユーザーモードでの番地の変換」を参照)．メインメモリは，読み出しポートを実行段と
+// 共用し，応答を待つ必要があり，読み出しも1回32ビットである．このため，メインメモリの命令はパイプラインが
 // 空になってから，64ビットの命令をイミディエイトデータ・命令語の順に2回に分けて読み，1命令ずつ実行する．
 module alu_sv (
     input logic clk,
@@ -198,7 +199,7 @@ module alu_sv (
     logic is_halted = 1'b0;
 
     // 動作状態がカーネルモードか(0ならユーザーモード)．リセット直後と停止中はカーネルモードにする．
-    // 確認段は，命令の実行可否をこの値で判定する．
+    // 確認段は，命令の実行可否をこの値で判定する．取得段と実行段は，メインメモリの番地を変換するかをこの値で決める．
     // 動作状態を変えるのは，システムコールの命令(SYSCALL)と，カーネルモードからの復帰の命令(SYSRET)の2つだけである．
     // どちらも実行段で完了したときに，後の命令(それより後に取得していた命令)を捨て，飛び先の命令から取得し直す．
     // このため，動作状態を変える前に確認段で判定された後の命令は，実行されない．
@@ -206,10 +207,52 @@ module alu_sv (
     // このため，同時実行する2命令の動作状態は常に同じになる
     logic kernel_mode = 1'b1;
 
+    // ===== ユーザーモードでの番地の変換(組み合わせ回路) =====
+    // ユーザーモードでは，命令の取得とメモリの読み書きの番地を，OSが割り振ったメインメモリの領域の先頭を0とする
+    // バイト単位の番地(以下，領域の中の番地と書く)として扱う．プログラムカウンタpの命令は，領域の中の番地p × 8に置く．
+    // 領域の中の番地に領域の先頭の番地(UBASE)を足したメインメモリの番地(以下，物理番地と書く)を読み書きする．
+    // 領域の中の番地が領域の大きさ(USIZE)以上の場合と，物理番地がメモリの容量を超える場合は，範囲外とする．
+    // カーネルモードでは番地を変換せず，命令が指定した番地をそのままメインメモリの番地とする．
+    //
+    // 領域の先頭の番地と大きさは，2本目の結果を含めず，レジスタの値を直接読む．
+    // ユーザーモードではこれらのレジスタを書き換えられず，カーネルモードでは番地を変換しない．
+    // このため，書き換えた値を読めるかが問題になるのは，カーネルモードで書き換えた直後にSYSRETでユーザーモードへ移る場合だけである．
+    // SYSRETは前の命令がすべて完了してから実行段へ入り，前の命令の結果は，2本目の結果も含めてSYSRETが完了するサイクルまでにレジスタへ書き込まれる．
+    // ユーザーモードで番地を変換するのはその次のサイクルからのため，書き換えた値を読める
+
+    // 範囲を判定するために，領域の先頭の番地と領域の中の番地を足すビット幅．
+    // 領域の大きさのレジスタは，メモリの容量を表せる幅のビットを使う．領域の大きさ未満の番地もこの幅に収まる．
+    // 領域の先頭の番地はそれより狭いため，この幅に桁上がりの1ビットを加えれば足した結果があふれない
+    localparam int USER_SUM_WIDTH = $clog2(RAM_SIZE) + 2;
+
+    // 指定した領域の中の番地が，範囲内か．
+    // assignの式から呼ばず，always_combの中で呼ぶ(引数以外に読むレジスタの値の変化でも求め直させるため)
+    function automatic util_p::bool_t user_address_in_range(
+        register_t address  // 領域の中の番地
+    );
+        user_address_in_range =
+            // 領域の大きさ未満である(32ビット全体で比べ，負の値を足して折り返した番地も範囲外にする)
+            address < register[USIZE_ADDR]
+            // かつ，物理番地がメモリの容量を超えない
+            // (領域の大きさ未満の番地は足すビット幅に収まるため，その幅へ切り詰めて足す)
+            && util_p::is_within_bit_width(
+                   USER_SUM_WIDTH'(register[UBASE_ADDR]) + USER_SUM_WIDTH'(address),
+                   $bits(ram_p::address_bus_t));
+    endfunction
+
+    // 指定した領域の中の番地の物理番地．範囲内の番地についてだけ意味を持つ．
+    // assignの式から呼ばず，always_combの中で呼ぶ(引数以外に読むレジスタの値の変化でも求め直させるため)
+    function automatic ram_p::address_bus_t user_physical_address(
+        register_t address  // 領域の中の番地
+    );
+        // 範囲内なら物理番地はアドレスバス幅に収まるため，その幅で足す
+        user_physical_address = ram_p::address_bus_t'(register[UBASE_ADDR]) + ram_p::address_bus_t'(address);
+    endfunction
+
     // ===== 取得段: ROMからの命令の取得 =====
 
     // 順番どおりに取得していく場合に，次にROMへ出す番地．
-    // プログラムカウンタはROMの外(メモリの後半など)も指すため，ROMへ渡せる幅(pc_bus_t)ではなく，
+    // プログラムカウンタはROMの外(メインメモリなど)も指すため，ROMへ渡せる幅(pc_bus_t)ではなく，
     // 命令から読み出せるプログラムカウンタと同じ32ビットのregister_tで持つ(以下の番地も同様)．
     // 分岐・ジャンプの飛び先はこの番地へ書き込まず，実行段・先行取得それぞれの飛び先を控えるレジスタに置く．
     // ROMへ出す番地(fetch_pc)を選ぶときに，控えた飛び先をこの番地と置き換える．
@@ -255,10 +298,14 @@ module alu_sv (
         // 偶数番地をROMへ出していれば，組の2命令とも使う
         : 2'd2;
 
-    // fetch_pcが，ROMへ渡せる幅(pc_bus_t)に収まっているか．収まらない番地(メモリの後半など)はROMへ出さない．
+    // fetch_pcが，ROMへ渡せる幅(pc_bus_t)に収まっているか．
     // 組の偶数番地が収まれば，最下位ビットだけを1にした奇数番地も同じビット幅に収まる
     util_p::bool_t fetch_pc_fits;
     assign fetch_pc_fits = util_p::is_within_bit_width(fetch_pc, $bits(rom_p::pc_bus_t));
+    // fetch_pcが指す命令をROMから取得するか．ROMから取得するのは，カーネルモードでfetch_pcがROMへ渡せる幅に収まる場合だけである．
+    // それ以外(カーネルモードのメモリの後半などと，ユーザーモードのすべての番地)はROMへ出さない
+    util_p::bool_t fetch_from_rom;
+    assign fetch_from_rom = kernel_mode && fetch_pc_fits;
 
     // ===== 命令キュー(取り込み段から確認段への受け渡し) =====
     // ROMは番地を出した次のサイクルに，その番地の命令を出力する．出力を止める手段がないため，
@@ -280,7 +327,7 @@ module alu_sv (
     machine_p::machine_t queue_instruction[QUEUE_DEPTH] = '{default: nop()};
     // 命令キューの命令のプログラムカウンタ
     register_t queue_pc[QUEUE_DEPTH] = '{default: '0};
-    // 命令キューの命令を，命令を置ける番地(ROMの実容量範囲内またはメモリの後半)から取得できたか
+    // 命令キューの命令を，命令を置ける番地(ROMの実容量範囲内か，メインメモリから取得できる番地)から取得できたか
     logic queue_pc_valid[QUEUE_DEPTH] = '{default: 1'b1};
     // 命令キューの命令が，先行取得した即値のジャンプか．
     // 即値のジャンプでも，メインメモリから届いたものは先行取得しないため，命令の内容だけでは決まらない
@@ -294,8 +341,8 @@ module alu_sv (
     // 含めない(ROMの番地を出すまでの経路を伸ばさないため)
     logic fetch_request;
     assign fetch_request =
-        // 取得用のプログラムカウンタがROMへ渡せる幅に収まっている
-        fetch_pc_fits
+        // 取得用のプログラムカウンタが指す命令をROMから取得する
+        fetch_from_rom
         // かつ，次のサイクルに届く組(最大2命令)を取り込む場所が命令キューに残る
         // (入っている命令と，このサイクルに届いた命令を除いても2命令ぶんの空きがある)
         && (queue_count + rom_arrived_num + 2 <= QUEUE_DEPTH);
@@ -437,7 +484,7 @@ module alu_sv (
     logic check_skip;
     assign check_skip = check_occupied && queue_skip[0];
 
-    // ===== 取得段: メモリの後半からの命令の取得 =====
+    // ===== 取得段: メインメモリからの命令の取得 =====
 
     // メインメモリから命令を読み出している最中か
     logic fetching_from_ram = 1'b0;
@@ -563,6 +610,10 @@ module alu_sv (
     util_p::state_enum mul_state = IDLE;       // 掛け算(MUL)の実行状態
     util_p::state_enum div_state = IDLE;       // 割り算(DIV/DIVU)の実行状態
 
+    // メモリへ書き込みを要求した，命令から見た番地．ユーザーモードでは領域の中の番地になり，メインメモリへ出した番地とは異なる．
+    // 範囲内の番地しか要求しないため，アドレスバス幅に収まる(ユーザーモードでも，領域の中の番地は物理番地以下である)
+    ram_p::address_bus_t ram_write_requested_address = '0;
+
     // 掛け算の結果．確定まで1サイクル待つため，サイクルをまたいで値を保持できない
     // 組み合わせ回路(write_value)ではなく，この専用レジスタへ格納する
     register_t mul_result_r = '0;
@@ -579,8 +630,8 @@ module alu_sv (
                              : (func_r == DIVU) ? divu_dout_tdata
                              : '0;
 
-    // ===== 取得段: メモリの後半からの命令の取得(組み合わせ回路) =====
-    // プログラムカウンタのうち，メモリの後半の先頭の命令のプログラムカウンタ(CODE_AREA_PC_BASE)から，メモリの後半に置ける
+    // ===== 取得段: メインメモリからの命令の取得(組み合わせ回路) =====
+    // カーネルモードでは，プログラムカウンタのうち，メモリの後半の先頭の命令のプログラムカウンタ(CODE_AREA_PC_BASE)から，メモリの後半に置ける
     // 命令数(CODE_AREA_PC_NUM)ぶんの範囲がメモリの後半に対応する．命令数は2のべき乗で，先頭のプログラムカウンタは
     // 命令数の倍数とするため，この範囲のプログラムカウンタは次の2つに分けられる
     // - 下位ビット: その命令がメモリの後半の先頭から何番目か(0〜命令数-1)
@@ -607,26 +658,48 @@ module alu_sv (
     logic pc_in_code_area;
     assign pc_in_code_area = (fetch_pc[31:CODE_AREA_PC_WIDTH] == CODE_AREA_PC_UPPER);
 
+    // ユーザーモードで，取得用のプログラムカウンタが指す命令の領域の中の番地(プログラムカウンタ × 8)
+    register_t fetch_user_address;
+    assign fetch_user_address = fetch_pc << 3;
+
+    // 取得用のプログラムカウンタが指す命令を，メインメモリから取得できるか
+    util_p::bool_t fetch_pc_in_ram;
     // 取得用のプログラムカウンタが指す命令の，下位ワード(イミディエイトデータ)・上位ワード(命令語)のメインメモリ上の番地
     ram_p::address_bus_t fetch_lower_address;
     ram_p::address_bus_t fetch_upper_address;
-    // 下位ワードの番地は，メモリの後半の先頭番地 + 先頭から何番目の命令か × 8(1命令のバイト数)
-    // メモリの後半の先頭番地は，最上位ビットだけが立っている
-    // 何番目か × 8はそれより下のビットに収まるため，立っているビットが重ならず，加算とORの結果が同じになる
-    // このため，加算器を使わずORで組み立てる
-    assign fetch_lower_address = ram_p::address_bus_t'(CODE_AREA_BASE)                                // 最上位ビット: メモリの後半の先頭番地
-                               | (ram_p::address_bus_t'(fetch_pc[CODE_AREA_PC_WIDTH-1:0]) << 3);      // その下のビット: 何番目の命令か × 8(下位3ビットは0)
-    // 上位ワードの番地は下位ワードの4バイト後．下位ワードの番地は8の倍数(下位3ビットが0)のため，4を表すビットを立てるだけでよい
-    assign fetch_upper_address = fetch_lower_address | ram_p::address_bus_t'(4);
+    // assignではなくalways_combで求めるのは，user_address_in_range()・user_physical_address()が引数以外に読む値の変化でも求め直させるため
+    always_comb begin
+        // 取得できるかを，動作状態に応じて判定する
+        fetch_pc_in_ram =
+            // カーネルモードなら，メモリの後半を指しているか
+            kernel_mode ? pc_in_code_area
+            // ユーザーモードなら，8を掛けてもあふれないプログラムカウンタで，その命令の領域の中の番地が範囲内か．
+            // あふれるプログラムカウンタを除くのは，あふれた番地を範囲内の番地と取り違えないため．
+            // 領域の大きさは8の倍数のため，命令の先頭が範囲内なら8バイト全体が範囲内に収まる
+            : (fetch_pc[31:29] == '0 && user_address_in_range(fetch_user_address));
+        // 下位ワードの番地を，動作状態に応じて求める
+        fetch_lower_address =
+            // カーネルモードなら，メモリの後半の先頭番地 + 先頭から何番目の命令か × 8(1命令のバイト数)．
+            // メモリの後半の先頭番地は，最上位ビットだけが立っている．
+            // 何番目か × 8はそれより下のビットに収まるため，立っているビットが重ならず，加算とORの結果が同じになる．
+            // このため，加算器を使わずORで組み立てる
+            kernel_mode ? (ram_p::address_bus_t'(CODE_AREA_BASE)                                 // 最上位ビット: メモリの後半の先頭番地
+                           | (ram_p::address_bus_t'(fetch_pc[CODE_AREA_PC_WIDTH-1:0]) << 3))     // その下のビット: 何番目の命令か × 8(下位3ビットは0)
+            // ユーザーモードなら，命令の領域の中の番地の物理番地
+            : user_physical_address(fetch_user_address);
+        // 上位ワードの番地は下位ワードの4バイト後．下位ワードの番地は8の倍数(下位3ビットが0)のため，4を表すビットを立てるだけでよい．
+        // ユーザーモードでも，領域の先頭の番地が8の倍数のため，下位ワードの番地は8の倍数になる
+        fetch_upper_address = fetch_lower_address | ram_p::address_bus_t'(4);
+    end
 
     // メインメモリから読み出した命令の下位ワード(イミディエイトデータ)．上位ワードが届くまで控えておく
     register_t ram_fetch_lower_r = '0;
 
-    // 取得用のプログラムカウンタがROMへ渡せる幅を外れ，パイプラインが空になったか
+    // 取得用のプログラムカウンタが指す命令をROMから取得せず，パイプラインが空になったか
     logic pipeline_drained;
     assign pipeline_drained =
-        // 取得用のプログラムカウンタがROMへ渡せる幅を外れている(ROMへ番地を出せない)
-        !fetch_pc_fits
+        // 取得用のプログラムカウンタが指す命令をROMから取得しない(ROMへ番地を出さない)
+        !fetch_from_rom
         // ROMから結果を待っている命令がない
         && !rom_arrived
         // 命令キュー(確認段を含む)に命令がない
@@ -681,7 +754,7 @@ module alu_sv (
     // ROMから届いた組の偶数番地・奇数番地の命令が，先行取得する即値のジャンプか．
     // 先行取得するなら，次のサイクルから飛び先を取得する．
     // メインメモリから届いた即値のジャンプは先行取得せず，実行段で取得し直す．
-    // メモリの後半の命令は，パイプラインが空になるのを待ち，読み出しも2回に分けるため，1命令に多くのサイクルがかかる．
+    // メインメモリの命令は，パイプラインが空になるのを待ち，読み出しも2回に分けるため，1命令に多くのサイクルがかかる．
     // このため先行取得で数サイクル減らしても効果が小さく，1命令ずつ取得する処理を変える手間に見合わない
     logic early_jump_even;
     logic early_jump_odd;
@@ -733,7 +806,7 @@ module alu_sv (
     // 命令を置ける番地から取得できたか(どちらからも取得できない番地は，pipeline_drainedを使う取得段の処理で停止させる)
     assign push_pc_valid1 =
         // メインメモリから届いた命令なら，常に取得できたものとする
-        // (メモリの後半を指す番地でしか取得しないため)
+        // (メインメモリから取得できる番地でしか取得しないため)
         !rom_arrived        ? 1'b1
         // ROMから届いた命令は，読み出しポートが命令とともに返すvalid(番地がROMに格納された命令数の範囲内か)を使う．
         // ROMへ渡せる幅に収まるかは確かめない(収まる番地しかROMへ出さないため)．
@@ -905,7 +978,8 @@ module alu_sv (
         stack_pointer = register_value(SP_ADDR);
     end
 
-    // メモリ系の命令と，戻り先を積み下ろすCALL・RETがアクセスする番地(アドレスバス幅へ切り詰める前の値)．
+    // メモリ系の命令と，戻り先を積み下ろすCALL・RETがアクセスする，命令から見た番地(アドレスバス幅へ切り詰める前の値)．
+    // ユーザーモードでは領域の中の番地，カーネルモードではメインメモリの番地そのものになる．
     // funcの値は命令タイプごとに割り当てられ，異なる命令タイプで同じ値が現れるため，命令タイプとあわせて判定する
     register_t mem_address;
     assign mem_address = (command.m_type == J_TYPE && func_r == CALL)                   ? stack_pointer - 4         // 戻り先を積むスタックポインタの1ワード下
@@ -914,16 +988,33 @@ module alu_sv (
                        : imm_r[32]                                                      ? imm_r[31:0]               // イミディエイトデータで指定された番地
                        : rs1_val;                                                                                   // rs1で指定された番地
 
-    // mem_addressが読み書きしてよい範囲に収まっているか
-    // J系の命令のうちメモリを読み書きするのはCALL・RETだけで，読み書きするのは戻り先を積み下ろしするスタックである
-    // スタックはメモリの前半に置くため，J系では前半に収まる番地だけを範囲内とする
-    // 空のスタックでのRETを停止させ，CALLがメモリの後半を書き換えないようにするためである
-    // それ以外の命令はメモリ全体を読み書きできる
-    // 前半の大きさ(メモリの後半の先頭番地)は2のべき乗のため，前半に収まるかはビット幅で判定できる
-    util_p::bool_t mem_address_in_range;
-    assign mem_address_in_range = (command.m_type == J_TYPE)
-        ? util_p::is_within_bit_width(mem_address, $clog2(CODE_AREA_BASE))
-        : util_p::is_within_bit_width(mem_address, $bits(ram_p::address_bus_t));
+    // mem_addressが読み書きしてよい範囲に収まっているかと，mem_addressのメインメモリ上の番地．
+    // ユーザーモードでは，命令の種類によらず，領域の中の番地が範囲内であれば読み書きできる(スタックも領域の中に置く)．
+    // カーネルモードでは，命令の種類に応じて次の範囲とする
+    // - J系の命令のうちメモリを読み書きするのはCALL・RETだけで，読み書きするのは戻り先を積み下ろしするスタックである．
+    //   スタックはメモリの前半に置くため，J系では前半に収まる番地だけを範囲内とする．
+    //   空のスタックでのRETを停止させ，CALLがメモリの後半を書き換えないようにするためである．
+    //   前半の大きさ(メモリの後半の先頭番地)は2のべき乗のため，前半に収まるかはビット幅で判定できる
+    // - それ以外の命令はメモリ全体を読み書きできる
+    util_p::bool_t       mem_address_in_range;
+    ram_p::address_bus_t mem_physical_address;
+    // assignではなくalways_combで求めるのは，user_address_in_range()・user_physical_address()が引数以外に読む値の変化でも求め直させるため
+    always_comb begin
+        // 範囲内かを，動作状態と命令の種類に応じて判定する
+        mem_address_in_range =
+            // ユーザーモードなら，領域の中の番地が範囲内か
+            !kernel_mode              ? user_address_in_range(mem_address)
+            // カーネルモードのJ系なら，メモリの前半に収まるか
+            : (command.m_type == J_TYPE) ? util_p::is_within_bit_width(mem_address, $clog2(CODE_AREA_BASE))
+            // それ以外は，メモリ全体に収まるか
+            : util_p::is_within_bit_width(mem_address, $bits(ram_p::address_bus_t));
+        // メインメモリ上の番地を，動作状態に応じて求める
+        mem_physical_address =
+            // ユーザーモードなら，領域の中の番地の物理番地
+            !kernel_mode ? user_physical_address(mem_address)
+            // カーネルモードなら，命令から見た番地そのもの
+            : ram_p::address_bus_t'(mem_address);
+    end
 
     // 分岐・ジャンプを行わない命令の次の番地(現在の番地の直後)．オペランドの値に依存せず
     // プログラムカウンタだけから求まる
@@ -1103,9 +1194,9 @@ module alu_sv (
                             // 先行取得したCALLは後の命令を捨てないため，飛び先の先頭の命令が確認段でスタックポインタを読むことがある
                             late_write_valid = (ram_write_state == EXECUTE) && ram_write.ready;
                             late_write_addr  = SP_ADDR;
-                            // 下げた値には，戻り先を書き込んだ番地(書き込みの要求時に控えた番地)を使う．
+                            // 下げた値には，戻り先を書き込んだ命令から見た番地(書き込みの要求時に控えた番地)を使う．
                             // スタックポインタから4を引き直さないのは，減算器を経ず経路が短くなるため
-                            late_write_value = register_t'(ram_write.address);
+                            late_write_value = register_t'(ram_write_requested_address);
                         end
                         // 関数リターンは，戻り先をスタックから読み出し終えたら戻り先へ進む
                         RET:  ex_completes = (ram_read_state == EXECUTE) && ram_read.ready;
@@ -1269,7 +1360,7 @@ module alu_sv (
             : register_value(addr);
     endfunction
 
-    // メモリを読み書きする命令が，メモリへ要求を出す際に呼ぶタスク．番地はmem_addressを使い，
+    // メモリを読み書きする命令が，メモリへ要求を出す際に呼ぶタスク．番地はmem_addressのメインメモリ上の番地(mem_physical_address)を使い，
     // 読み書きしてよい範囲(mem_address_in_range)を外れる場合は，折り返した番地へアクセスせず要求を出さずに停止する
     // (停止した命令はメモリ・レジスタをいずれも書き換えない)
     task automatic request_ram_read(
@@ -1286,7 +1377,7 @@ module alu_sv (
             // マスク情報を送る
             ram_read.mask    <= mask;
             // アドレス情報を送る
-            ram_read.address <= mem_address;
+            ram_read.address <= mem_physical_address;
         end
     endtask
     task automatic request_ram_write(
@@ -1304,7 +1395,9 @@ module alu_sv (
             // マスク情報を送る
             ram_write.mask    <= mask;
             // アドレス情報を送る
-            ram_write.address <= mem_address;
+            ram_write.address <= mem_physical_address;
+            // 命令から見た番地を控える(CALLが下げたスタックポインタの値に使う)
+            ram_write_requested_address <= ram_p::address_bus_t'(mem_address);
             // データを送る
             ram_write.data    <= data;
         end
@@ -1451,6 +1544,7 @@ module alu_sv (
             ram_read.mask <= 0;
             ram_read.valid <= 0;
             ram_write.address <= 0;
+            ram_write_requested_address <= '0;
             ram_write.data <= 0;
             ram_write.mask <= 0;
             ram_write.valid <= 0;
@@ -1499,21 +1593,22 @@ module alu_sv (
             early_jump_pending <= push_early_jump;
             early_jump_pc <= early_jump_target;
 
-            // ===== 取得段: メモリの後半からの命令の取得 =====
+            // ===== 取得段: メインメモリからの命令の取得 =====
 
-            // 取得用のプログラムカウンタがROMへ渡せる幅を外れ，パイプラインが空になったら，メモリの後半から取得するか停止する．
+            // 取得用のプログラムカウンタが指す命令をROMから取得せず，パイプラインが空になったら，メインメモリから取得するか停止する．
             // パイプラインが空になるのを待つのは，実行中の命令とメインメモリの読み出しポートを取り合わないためと，
-            // 前の命令が分岐・ジャンプで飛び先を変える可能性や，メモリの後半へ命令を書き込み終えていない可能性があるため
+            // 前の命令が分岐・ジャンプで飛び先を変える可能性や，メインメモリへ命令を書き込み終えていない可能性があるため
             if (pipeline_drained) begin
-                // メモリの後半を指していれば，メインメモリへ命令の下位ワードの読み出しを要求する
-                if (pc_in_code_area) begin
+                // メインメモリから取得できる番地を指していれば，命令の下位ワードの読み出しを要求する
+                if (fetch_pc_in_ram) begin
                     ram_read.valid   <= 1'b1;
                     ram_read.mask    <= 4'hf;
                     ram_read.address <= fetch_lower_address;
                     fetching_from_ram <= 1'b1;
                     fetching_upper_word <= 1'b0;
                 end
-                // ROMにもメモリの後半にも命令を置けない番地へ進んだため，その番地で停止する
+                // 命令を置けない番地へ進んだため，その番地で停止する
+                // (カーネルモードではROMにもメモリの後半にも対応しない番地，ユーザーモードでは範囲外の番地)
                 else begin
                     is_halted <= 1'b1;
                 end
