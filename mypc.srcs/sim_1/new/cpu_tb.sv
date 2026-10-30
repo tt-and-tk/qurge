@@ -1696,6 +1696,57 @@ module cpu_tb;
         expect_end();
         expect_reg(2, 32'd2);
 
+        // ユーザーモードで，r1が5になるまで1つ前のPCへ戻るループを回し，その後r4に入れたPCへのJMPでr5への代入を飛び越える
+        `BEGIN_TEST("ユーザーモードでF系の分岐とレジスタで指定したJMPが働く");
+        user_code = '{movi(3, 32'd1), movi(2, 32'd5), add(1, 3, 1), ne(1, 2, im(-32'sd1)),
+                      movi(4, 32'd7), jmp(4, NO_IMM), movi(5, 32'd1)};
+        run(enter_user_mode());
+        // ループを抜けた時点でr1が5になり，r5は0のまま残る
+        expect_end();
+        expect_reg(1, 32'd5);
+        expect_reg(5, 32'd0);
+
+        // ユーザーモードの命令で，PC 4(初めはNOP)の命令をr1への代入に書き換えてから実行する
+        `BEGIN_TEST("ユーザーモードの命令が領域へ書き込んだ命令を実行できる");
+        user_code = '{movi(15, 32'(movi(1, 32'h55))),       wm(4'hf, 6'h00, 15, im(32'd32)),
+                      movi(15, 32'(movi(1, 32'h55) >> 32)), wm(4'hf, 6'h00, 15, im(32'd36)), nop()};
+        run(enter_user_mode());
+        // 書き換えた後の代入が実行される
+        expect_end();
+        expect_reg(1, 32'h55);
+
+        // メモリの全体を領域にし，メモリの末尾の4バイトへ書き込んでから読み出す
+        `BEGIN_TEST("メモリの全体を領域にすると，メモリの末尾まで読み書きできる");
+        user_base = 0;
+        user_size = ram_p::RAM_SIZE;
+        user_code = '{movi(1, 32'h1234), wm(4'hf, 6'h00, 1, im(ram_p::RAM_SIZE - 4)), rm(4'hf, 6'h00, 2, im(ram_p::RAM_SIZE - 4))};
+        run(enter_user_mode());
+        // 書いた値が読め，大きさは使うビットで切り捨てられない
+        expect_end();
+        expect_mem32(ram_p::RAM_SIZE - 4, 32'h1234);
+        expect_reg(2, 32'h1234);
+        expect_reg(USIZE_ADDR, ram_p::RAM_SIZE);
+
+        // 領域の先頭を設定できる最大の番地(メモリの末尾の8バイト)にし，大きさを1命令ぶんにする
+        `BEGIN_TEST("領域の先頭をメモリの末尾の8バイトにすると，その1命令を実行できる");
+        user_base = ram_p::RAM_SIZE - 8;
+        user_size = 8;
+        user_code = '{movi(1, 32'd1)};
+        run(enter_user_mode());
+        // PC 0の命令は実行され，その次のPCで停止する
+        expect_halt(1);
+        expect_reg(1, 32'd1);
+
+        // SYSCALLの入口をメモリの後半の先頭にし，そこで戻り先を読んでからROMの正常終了を表す命令へ飛ぶ
+        `BEGIN_TEST("ユーザーモードのSYSCALLで，メモリの後半に置いた入口へカーネルモードで飛ぶ");
+        code_area = '{movr(2, KRET_ADDR), jmp(6'h00, im(5))};
+        user_code = '{nop(), syscall()};
+        run({movi(KENTRY_ADDR, CODE_AREA_PC), enter_user_mode()});
+        // 入口の命令をカーネルモードで実行し，戻り先にはSYSCALLの次のPCが入る
+        expect_end();
+        expect_reg(2, 32'd2);
+        expect_kernel_mode(1'b1);
+
         // ユーザーモードからSYSCALLで入ったカーネルモードで，即値の番地へ読み書きする
         `BEGIN_TEST("ユーザーモードからSYSCALLで入ったカーネルモードでは，番地を変換しない");
         user_code = '{syscall()};
