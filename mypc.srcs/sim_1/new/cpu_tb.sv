@@ -243,8 +243,8 @@ module cpu_tb;
     int             code_area_index = 0;              // code_areaを置き始める，メモリの後半の先頭からの命令の順番
     machine_queue_t rom_tail;                         // 実行前にROMの末尾(最後の命令をROMの命令数の上限の直前の番地に揃える位置)へ置く命令列
     machine_queue_t user_code;                        // 実行前に領域の先頭へ直接置く，ユーザーモードの命令列(空なら置かない)
-    int             user_base;                        // 領域の先頭の番地(set_user_region()がUBASEへ書き込む値)
-    int             user_size;                        // 領域の大きさ(set_user_region()がUSIZEへ書き込む値)
+    int             user_base;                        // 領域の先頭の番地(領域を設定する命令列がUBASEへ書き込む値)
+    int             user_size;                        // 領域の大きさ(領域を設定する命令列がUSIZEへ書き込む値)
 
     localparam int USER_BASE_DEFAULT = 32'h9000;      // テストケースの始めのuser_base(番地を変換しない場合と区別できるよう，メモリの後半の先頭と異なる番地にする)
     localparam int USER_SIZE_DEFAULT = 32'h1000;      // テストケースの始めのuser_size
