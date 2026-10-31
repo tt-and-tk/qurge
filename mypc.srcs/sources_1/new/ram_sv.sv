@@ -38,7 +38,7 @@ module ram_sv import ram_p::*, util_p::*; (
     // この単位でメモリを分割できる．詳細はspecification/memory.md参照)
     localparam int WORDS = RAM_SIZE / 4;
 
-    // メモリに保存されるデータ．RAM全体を，物理番地 mod 4 == laneであるバイトだけを集めた4本の配列(レーン0〜3)に
+    // メモリに保存されるデータ．RAM全体を，番地 mod 4 == laneであるバイトだけを集めた4本の配列(レーン0〜3)に
     // 分割し，各レーンをBlock RAMへ推論させる．レーンの選択そのものを実行時の可変値で行うとBRAM推論の妨げになる
     // ため，4本を別名の配列として持ち，各レーンへのアクセスは常に静的な名前(memory_lane_0〜3)で行う
     (* ram_style = "block" *) logic [7:0] memory_lane_0 [0:WORDS - 1] = '{default: 8'h00};

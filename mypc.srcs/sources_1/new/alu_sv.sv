@@ -34,7 +34,7 @@
 //   ROMからは，番地入力へ読み出す命令の番地を与えると(以下，ROMへ番地を出すと書く)，次のサイクルに命令が確定する
 //   (クロックに同期した読み出しのため)．ROMは読み出しポートを2つ持ち，偶数番地とその次の奇数番地の2命令を
 //   1組として同時に読み出す(以下，この2命令を組と書く)．fetch_pcが奇数番地のときは，組のうち奇数番地の命令だけを使う．
-//   メインメモリからは，パイプラインが空になってから1命令ずつ読み出す(理由はこの概要の最後の段落)
+//   メインメモリからは，パイプラインが空になってから1命令ずつ読み出す(理由はこの概要のうち，命令を読み出す先とその読み出し方を説明する段落)
 // - 取り込み段: 取得した命令(ROMからは最大2命令)を命令キューの末尾へ取り込む
 // - 確認段: 命令キューの先頭の命令(以下，先頭と書く)が実行できるかを確認し，レジスタから値を読み出して実行段へ渡す．
 //   命令キューで先頭の次にある命令(以下，2番目と書く)が同時実行の条件を満たせば，先頭と同じサイクルに渡す
@@ -1010,10 +1010,12 @@ module alu_sv (
     //   前のサイクルにmem_addressから判定して控えた結果を使う(控える処理は，ユーザーモードで変換結果を控えるタスクを参照)
     util_p::bool_t mem_address_in_range;
     assign mem_address_in_range =
-        // カーネルモードのJ系なら，メモリの前半に収まるか
-        (kernel_mode && command.m_type == J_TYPE) ? util_p::is_within_bit_width(mem_address, $clog2(CODE_AREA_BASE))
-        // カーネルモードのM系なら，メモリ全体に収まるか
-        : kernel_mode                             ? util_p::is_within_bit_width(mem_address, $bits(ram_p::address_bus_t))
+        // カーネルモードなら，命令の種類に応じた範囲に収まるか
+        kernel_mode ? (
+            // J系なら，メモリの前半に収まるか
+            (command.m_type == J_TYPE) ? util_p::is_within_bit_width(mem_address, $clog2(CODE_AREA_BASE))
+            // M系なら，メモリ全体に収まるか
+            : util_p::is_within_bit_width(mem_address, $bits(ram_p::address_bus_t)))
         // ユーザーモードなら，控えた判定の結果
         : user_mem_in_range_r;
 
