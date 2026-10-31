@@ -34,7 +34,7 @@
 //   ROMからは，番地入力へ読み出す命令の番地を与えると(以下，ROMへ番地を出すと書く)，次のサイクルに命令が確定する
 //   (クロックに同期した読み出しのため)．ROMは読み出しポートを2つ持ち，偶数番地とその次の奇数番地の2命令を
 //   1組として同時に読み出す(以下，この2命令を組と書く)．fetch_pcが奇数番地のときは，組のうち奇数番地の命令だけを使う．
-//   メインメモリからは，パイプラインが空になってから1命令ずつ読み出す(理由はこの概要のうち，命令を読み出す先を説明する段落)
+//   メインメモリからは，パイプラインが空になってから1命令ずつ読み出す(理由はこの概要の最後の段落)
 // - 取り込み段: 取得した命令(ROMからは最大2命令)を命令キューの末尾へ取り込む
 // - 確認段: 命令キューの先頭の命令(以下，先頭と書く)が実行できるかを確認し，レジスタから値を読み出して実行段へ渡す．
 //   命令キューで先頭の次にある命令(以下，2番目と書く)が同時実行の条件を満たせば，先頭と同じサイクルに渡す
@@ -199,7 +199,9 @@ module alu_sv (
     logic is_halted = 1'b0;
 
     // 動作状態がカーネルモードか(0ならユーザーモード)．リセット直後と停止中はカーネルモードにする．
-    // 確認段は，命令の実行可否をこの値で判定する．取得段と実行段は，メインメモリへ出す番地を変換するかをこの値で決める．
+    // 確認段は，命令の実行可否をこの値で判定する．
+    // 取得段と実行段は，ユーザーモードのときだけ，命令の取得とメモリの読み書きの番地をメインメモリ上の番地へ変換する
+    // (「ユーザーモードでの番地の変換」を参照)．
     // 動作状態を変えるのは，システムコールの命令(SYSCALL)と，カーネルモードからの復帰の命令(SYSRET)の2つだけである．
     // どちらも実行段で完了したときに，後の命令(それより後に取得していた命令)を捨て，飛び先の命令から取得し直す．
     // このため，動作状態を変える前に確認段で判定された後の命令は，実行されない．
@@ -210,44 +212,43 @@ module alu_sv (
     // ===== ユーザーモードでの番地の変換(組み合わせ回路) =====
     // ユーザーモードでは，命令の取得とメモリの読み書きの番地を，OSが割り振ったメインメモリの領域の先頭を0とする
     // バイト単位の番地(以下，領域の中の番地と書く)として扱う．プログラムカウンタpの命令は，領域の中の番地p × 8に置く．
-    // メインメモリへ出す番地を，以下，物理番地と書く．ユーザーモードでは，領域の中の番地に領域の先頭の番地(UBASE)を足して物理番地を求める．
-    // 領域の中の番地が領域の大きさ(USIZE)以上の場合と，物理番地がメモリの容量を超える場合は，範囲外とする．
-    // カーネルモードでは番地を変換せず，命令が指定した番地をそのまま物理番地とする．
+    // 領域の中の番地に領域の先頭の番地(UBASE)を足して，メインメモリ上の番地を求める．
+    // 領域の中の番地は0から領域の大きさ(USIZE) - 1までのため，次の場合を範囲外とする
+    // - 領域の中の番地が，領域の大きさ以上である
+    // - メインメモリ上の番地が，メモリの容量を超える
+    // カーネルモードでは番地を変換せず，命令が指定した番地をそのままメインメモリ上の番地とする．
     //
-    // 領域の先頭の番地と大きさは，2本目の結果を含めず，レジスタの値を直接読む．
-    // ユーザーモードでは，これらのレジスタを書き換える命令を実行できない．
-    // カーネルモードでは，これらのレジスタを番地の変換に使わない．
-    // このため，書き換えた値を読めるかが問題になるのは，カーネルモードで書き換えた直後にSYSRETでユーザーモードへ移る場合だけである．
-    // SYSRETは前の命令がすべて完了してから実行段へ入り，前の命令の結果は，2本目の結果も含めてSYSRETが完了するサイクルまでにレジスタへ書き込まれる．
-    // ユーザーモードで番地を変換するのはその次のサイクルからのため，書き換えた値を読める
+    // 領域の先頭の番地と大きさは，レジスタの値を直接読み，まだ書き込まれていない前の命令の結果は使わない．
+    // それでも書き換えた後の値を読める理由は次のとおり
+    // - ユーザーモードでは，領域の先頭の番地と大きさのレジスタを書き換える命令を実行できない
+    // - カーネルモードで書き換えてからユーザーモードへ移るSYSRETは，前の命令の結果がすべてレジスタへ書き込まれてから完了する．
+    //   番地を変換するのは，SYSRETが完了した次のサイクルからである
 
-    // 範囲を判定するために，領域の先頭の番地と領域の中の番地を足すビット幅．
+    // 範囲の判定で，領域の先頭の番地と領域の中の番地を足す加算のビット幅．
     // 領域の大きさのレジスタは，メモリの容量を表せる幅のビットを使う．領域の大きさ未満の番地もこの幅に収まる．
     // 領域の先頭の番地はそれより狭いため，この幅に桁上がりの1ビットを加えれば足した結果があふれない
     localparam int USER_SUM_WIDTH = $clog2(RAM_SIZE) + 2;
 
-    // 指定した領域の中の番地が，範囲内か．
-    // assignの式から呼ばず，always_combの中で呼ぶ(引数以外に読むレジスタの値の変化でも求め直させるため)
+    // 指定した領域の中の番地が，範囲内か
     function automatic util_p::bool_t user_address_in_range(
         register_t address  // 領域の中の番地
     );
         user_address_in_range =
             // 領域の大きさ未満である(32ビット全体で比べ，負の値を足して折り返した番地も範囲外にする)
             address < register[USIZE_ADDR]
-            // かつ，物理番地がメモリの容量を超えない
+            // かつ，メインメモリ上の番地がメモリの容量を超えない
             // (領域の大きさ未満の番地は足すビット幅に収まるため，その幅へ切り詰めて足す)
             && util_p::is_within_bit_width(
                    USER_SUM_WIDTH'(register[UBASE_ADDR]) + USER_SUM_WIDTH'(address),
                    $bits(ram_p::address_bus_t));
     endfunction
 
-    // 指定した領域の中の番地の物理番地．範囲内の番地についてだけ意味を持つ．
-    // assignの式から呼ばず，always_combの中で呼ぶ(引数以外に読むレジスタの値の変化でも求め直させるため)
-    function automatic ram_p::address_bus_t user_physical_address(
+    // 指定した領域の中の番地に対応する，メインメモリ上の番地．範囲内の番地についてだけ意味を持つ
+    function automatic ram_p::address_bus_t user_ram_address(
         register_t address  // 領域の中の番地
     );
-        // 範囲内なら物理番地はアドレスバス幅に収まるため，その幅で足す
-        user_physical_address = ram_p::address_bus_t'(register[UBASE_ADDR]) + ram_p::address_bus_t'(address);
+        // 範囲内ならメインメモリ上の番地はアドレスバス幅に収まるため，その幅で足す
+        user_ram_address = ram_p::address_bus_t'(register[UBASE_ADDR]) + ram_p::address_bus_t'(address);
     endfunction
 
     // ===== 取得段: ROMからの命令の取得 =====
@@ -304,7 +305,7 @@ module alu_sv (
     util_p::bool_t fetch_pc_fits;
     assign fetch_pc_fits = util_p::is_within_bit_width(fetch_pc, $bits(rom_p::pc_bus_t));
     // fetch_pcが指す命令をROMから取得するか．ROMから取得するのは，カーネルモードでfetch_pcがROMへ渡せる幅に収まる場合だけである．
-    // それ以外(カーネルモードのメモリの後半などと，ユーザーモードのすべての番地)はROMへ出さない
+    // それ以外(カーネルモードでROMへ渡せる幅に収まらない番地と，ユーザーモードのすべての番地)はROMへ出さない
     util_p::bool_t fetch_from_rom;
     assign fetch_from_rom = kernel_mode && fetch_pc_fits;
 
@@ -611,16 +612,16 @@ module alu_sv (
     util_p::state_enum mul_state = IDLE;       // 掛け算(MUL)の実行状態
     util_p::state_enum div_state = IDLE;       // 割り算(DIV/DIVU)の実行状態
 
-    // ユーザーモードでメモリを読み書きする命令について，番地の変換結果を控えたか．
+    // ユーザーモードでメモリを読み書きする命令の，番地の変換結果を控えるレジスタ．
     // 領域の大きさとの比較を経てメモリへの要求を出す経路は1クロックに収まらないため，ユーザーモードでは
-    // 要求を出す前のサイクルに範囲内かと物理番地を控え，次のサイクルに控えた値で要求を出す．
+    // 要求を出す前のサイクルに範囲内かとメインメモリ上の番地を控え，次のサイクルに控えた値で要求を出す．
     // カーネルモードは番地を変換しないため，控えずに同じサイクルに要求を出す
-    logic                user_mem_translated = 1'b0;
-    util_p::bool_t       user_mem_in_range_r = 1'b0;         // 控えた，領域の中の番地が範囲内か
-    ram_p::address_bus_t user_mem_physical_address_r = '0;   // 控えた物理番地
+    util_p::bool_t       user_mem_translated = 1'b0;   // 実行中の命令の変換結果を控えたか
+    util_p::bool_t       user_mem_in_range_r = 1'b0;   // 控えた，領域の中の番地が範囲内か
+    ram_p::address_bus_t user_mem_ram_address_r = '0;  // 控えた，メインメモリ上の番地
 
-    // メモリへ書き込みを要求した，命令から見た番地．ユーザーモードでは領域の中の番地になり，物理番地とは異なる．
-    // 範囲内の番地しか要求しないため，アドレスバス幅に収まる(ユーザーモードでも，領域の中の番地は物理番地以下である)
+    // メモリへ書き込みを要求した，命令から見た番地．ユーザーモードでは領域の中の番地になり，メインメモリ上の番地とは異なる．
+    // 範囲内の番地しか要求しないため，アドレスバス幅に収まる(ユーザーモードでも，領域の中の番地はメインメモリ上の番地以下である)
     ram_p::address_bus_t ram_write_requested_address = '0;
 
     // 掛け算の結果．確定まで1サイクル待つため，サイクルをまたいで値を保持できない
@@ -676,7 +677,7 @@ module alu_sv (
     // 取得用のプログラムカウンタが指す命令の，下位ワード(イミディエイトデータ)・上位ワード(命令語)のメインメモリ上の番地
     ram_p::address_bus_t fetch_lower_address;
     ram_p::address_bus_t fetch_upper_address;
-    // assignではなくalways_combで求めるのは，user_address_in_range()・user_physical_address()が引数以外に読む値の変化でも求め直させるため
+    // assignではなくalways_combで求めるのは，user_address_in_range()・user_ram_address()が引数以外に読む値の変化でも求め直させるため
     always_comb begin
         // 取得できるかを，動作状態に応じて判定する
         fetch_pc_in_ram =
@@ -694,10 +695,12 @@ module alu_sv (
             // このため，加算器を使わずORで組み立てる
             kernel_mode ? (ram_p::address_bus_t'(CODE_AREA_BASE)                                 // 最上位ビット: メモリの後半の先頭番地
                            | (ram_p::address_bus_t'(fetch_pc[CODE_AREA_PC_WIDTH-1:0]) << 3))     // その下のビット: 何番目の命令か × 8(下位3ビットは0)
-            // ユーザーモードなら，命令の領域の中の番地の物理番地
-            : user_physical_address(fetch_user_address);
+            // ユーザーモードなら，命令の領域の中の番地に対応するメインメモリ上の番地
+            : user_ram_address(fetch_user_address);
         // 上位ワードの番地は下位ワードの4バイト後．下位ワードの番地は8の倍数(下位3ビットが0)のため，4を表すビットを立てるだけでよい．
-        // ユーザーモードでも，領域の先頭の番地が8の倍数のため，下位ワードの番地は8の倍数になる
+        // 下位ワードの番地が8の倍数になる理由は，動作状態ごとに次のとおり
+        // - カーネルモード: メモリの後半の先頭番地と，何番目の命令か × 8がどちらも8の倍数のため
+        // - ユーザーモード: 領域の先頭の番地と，領域の中の番地(プログラムカウンタ × 8)がどちらも8の倍数のため
         fetch_upper_address = fetch_lower_address | ram_p::address_bus_t'(4);
     end
 
@@ -997,37 +1000,30 @@ module alu_sv (
                        : imm_r[32]                                                      ? imm_r[31:0]               // イミディエイトデータで指定された番地
                        : rs1_val;                                                                                   // rs1で指定された番地
 
-    // カーネルモードで，mem_addressが読み書きしてよい範囲に収まっているか．命令の種類に応じて次の範囲とする
-    // - J系の命令のうちメモリを読み書きするのはCALL・RETだけで，読み書きするのは戻り先を積み下ろしするスタックである．
-    //   スタックはメモリの前半に置くため，J系では前半に収まる番地だけを範囲内とする．
-    //   空のスタックでのRETを停止させ，CALLがメモリの後半を書き換えないようにするためである．
+    // mem_addressが読み書きしてよい範囲に収まっているか．動作状態と命令の種類に応じて，次の範囲とする
+    // - カーネルモードのJ系(CALL・RET): メモリの前半．
+    //   CALL・RETが読み書きするのは戻り先を積み下ろしするスタックで，スタックはメモリの前半に置く．
+    //   空のスタックでのRETを停止させ，CALLがメモリの後半を書き換えないようにするため，前半に限る．
     //   前半の大きさ(メモリの後半の先頭番地)は2のべき乗のため，前半に収まるかはビット幅で判定できる
-    // - それ以外の命令はメモリ全体を読み書きできる
-    util_p::bool_t mem_address_in_kernel_range;
-    assign mem_address_in_kernel_range =
-        // J系なら，メモリの前半に収まるか
-        (command.m_type == J_TYPE) ? util_p::is_within_bit_width(mem_address, $clog2(CODE_AREA_BASE))
-        // それ以外は，メモリ全体に収まるか
-        : util_p::is_within_bit_width(mem_address, $bits(ram_p::address_bus_t));
-
-    // mem_addressが読み書きしてよい範囲に収まっているかと，mem_addressの物理番地．
-    // カーネルモードでは，このサイクルのmem_addressから求めた値を使う．
-    // ユーザーモードでは，命令の種類によらず，領域の中の番地が範囲内であれば読み書きできる(スタックも領域の中に置く)．
-    // その判定と物理番地は，前のサイクルにmem_addressから求めて控えた値を使う(控える処理は，ユーザーモードで範囲内かと物理番地を控えるタスクを参照)
-    util_p::bool_t       mem_address_in_range;
-    ram_p::address_bus_t mem_physical_address;
-    // 範囲に収まっているかを，動作状態に応じて選ぶ
+    // - カーネルモードのM系: メモリ全体
+    // - ユーザーモード: 命令の種類によらず，領域(スタックも領域の中に置く)．
+    //   前のサイクルにmem_addressから判定して控えた結果を使う(控える処理は，ユーザーモードで変換結果を控えるタスクを参照)
+    util_p::bool_t mem_address_in_range;
     assign mem_address_in_range =
-        // カーネルモードなら，このサイクルに判定した結果
-        kernel_mode ? mem_address_in_kernel_range
+        // カーネルモードのJ系なら，メモリの前半に収まるか
+        (kernel_mode && command.m_type == J_TYPE) ? util_p::is_within_bit_width(mem_address, $clog2(CODE_AREA_BASE))
+        // カーネルモードのM系なら，メモリ全体に収まるか
+        : kernel_mode                             ? util_p::is_within_bit_width(mem_address, $bits(ram_p::address_bus_t))
         // ユーザーモードなら，控えた判定の結果
         : user_mem_in_range_r;
-    // 物理番地を，動作状態に応じて選ぶ
-    assign mem_physical_address =
+
+    // mem_addressに対応する，メインメモリ上の番地
+    ram_p::address_bus_t mem_ram_address;
+    assign mem_ram_address =
         // カーネルモードなら，命令から見た番地そのもの
         kernel_mode ? ram_p::address_bus_t'(mem_address)
-        // ユーザーモードなら，控えた物理番地
-        : user_mem_physical_address_r;
+        // ユーザーモードなら，前のサイクルに控えた番地
+        : user_mem_ram_address_r;
 
     // 分岐・ジャンプを行わない命令の次の番地(現在の番地の直後)．オペランドの値に依存せず
     // プログラムカウンタだけから求まる
@@ -1373,19 +1369,19 @@ module alu_sv (
             : register_value(addr);
     endfunction
 
-    // ユーザーモードで，mem_addressが範囲内かと物理番地を控える
+    // ユーザーモードで変換結果を控えるタスク．mem_addressが範囲内かと，対応するメインメモリ上の番地を控える
     task automatic translate_user_mem_address();
         // 控えたことを記録する(次のサイクルに，控えた値で要求を出すため)
         user_mem_translated         <= 1'b1;
         // 領域の中の番地が範囲内かを控える
         user_mem_in_range_r         <= user_address_in_range(mem_address);
-        // 物理番地を控える
-        user_mem_physical_address_r <= user_physical_address(mem_address);
+        // メインメモリ上の番地を控える
+        user_mem_ram_address_r      <= user_ram_address(mem_address);
     endtask
 
     // メモリを読み書きする命令が，メモリへ要求を出す際に呼ぶタスク．要求を出すまで，命令の実行を始めたサイクルから毎サイクル呼ぶ．
     // ユーザーモードで番地の変換結果をまだ控えていなければ，控えるだけにし，要求は次のサイクルに出す．
-    // メモリへ出す番地には，命令から見た番地の物理番地を使う．
+    // メモリへ出す番地には，命令から見た番地に対応するメインメモリ上の番地を使う．
     // 命令から見た番地が読み書きしてよい範囲を外れる場合は，メモリへ要求を出す代わりに停止する．
     // このため，停止した命令は，折り返した番地を含めてメモリ・レジスタをいずれも書き換えない
     task automatic request_ram_read(
@@ -1398,7 +1394,7 @@ module alu_sv (
             // かつ，番地の変換結果をまだ控えていない
             && !user_mem_translated
         ) begin
-            // 範囲内かと物理番地を控える(要求は次のサイクルに出す)
+            // 範囲内かとメインメモリ上の番地を控える(要求は次のサイクルに出す)
             translate_user_mem_address();
         end
         // 読み書きしてよい範囲を外れていれば，停止する
@@ -1416,7 +1412,7 @@ module alu_sv (
             // マスク情報を送る
             ram_read.mask    <= mask;
             // アドレス情報を送る
-            ram_read.address <= mem_physical_address;
+            ram_read.address <= mem_ram_address;
         end
     endtask
     task automatic request_ram_write(
@@ -1430,7 +1426,7 @@ module alu_sv (
             // かつ，番地の変換結果をまだ控えていない
             && !user_mem_translated
         ) begin
-            // 範囲内かと物理番地を控える(要求は次のサイクルに出す)
+            // 範囲内かとメインメモリ上の番地を控える(要求は次のサイクルに出す)
             translate_user_mem_address();
         end
         // 読み書きしてよい範囲を外れていれば，停止する
@@ -1448,7 +1444,7 @@ module alu_sv (
             // マスク情報を送る
             ram_write.mask    <= mask;
             // アドレス情報を送る
-            ram_write.address <= mem_physical_address;
+            ram_write.address <= mem_ram_address;
             // 命令から見た番地を控える(CALLが下げたスタックポインタの値に使う)
             ram_write_requested_address <= ram_p::address_bus_t'(mem_address);
             // データを送る
@@ -1600,7 +1596,7 @@ module alu_sv (
             ram_write_requested_address <= '0;
             user_mem_translated <= 1'b0;
             user_mem_in_range_r <= 1'b0;
-            user_mem_physical_address_r <= '0;
+            user_mem_ram_address_r <= '0;
             ram_write.data <= 0;
             ram_write.mask <= 0;
             ram_write.valid <= 0;
