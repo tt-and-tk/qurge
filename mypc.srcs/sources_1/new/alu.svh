@@ -7,6 +7,7 @@
 
 `include "util.svh"
 `include "decoder.svh"
+`include "ram.svh"
 
 package alu_p;
     import machine_p::*;
@@ -44,8 +45,14 @@ package alu_p;
         // カーネルモードからの戻り先
         else if (addr == 6'h12)
             is_readable = util_p::TRUE;
+        // ユーザーモードの領域の先頭の番地
+        else if (addr == 6'h13)
+            is_readable = util_p::TRUE;
+        // ユーザーモードの領域の大きさ
+        else if (addr == 6'h14)
+            is_readable = util_p::TRUE;
         // 空き
-        else if (6'h13 <= addr && addr <= 6'h1b)
+        else if (6'h15 <= addr && addr <= 6'h1b)
             is_readable = util_p::FALSE;
         // フラグ
         else if (addr == 6'h1c)
@@ -126,8 +133,14 @@ package alu_p;
         // カーネルモードからの戻り先
         else if (addr == 6'h12)
             is_writable = util_p::TRUE;
+        // ユーザーモードの領域の先頭の番地
+        else if (addr == 6'h13)
+            is_writable = util_p::TRUE;
+        // ユーザーモードの領域の大きさ
+        else if (addr == 6'h14)
+            is_writable = util_p::TRUE;
         // 空き
-        else if (6'h13 <= addr && addr <= 6'h1b)
+        else if (6'h15 <= addr && addr <= 6'h1b)
             is_writable = util_p::FALSE;
         // フラグ
         else if (addr == 6'h1c)
@@ -208,8 +221,16 @@ package alu_p;
         // カーネルモードからの戻り先
         else if (addr == 6'h12)
             used_bits = '1;
+        // ユーザーモードの領域の先頭の番地．メモリの番地を表せるビットのうち，下位3ビットを除いたもの．
+        // 8の倍数に揃えるのは，領域の先頭から8の倍数だけ離れた位置に置く命令(8バイト)を，メインメモリでも8の倍数の番地に置くため
+        else if (addr == 6'h13)
+            used_bits = register_t'(ram_p::RAM_SIZE - 1) & ~register_t'(7);
+        // ユーザーモードの領域の大きさ．メモリの容量(メモリ全体を領域にする場合の大きさ)までを表せるビットのうち，下位3ビットを除いたもの．
+        // 8の倍数に揃えるのは，領域の末尾に命令の一部だけが入る形にしないため
+        else if (addr == 6'h14)
+            used_bits = register_t'(ram_p::RAM_SIZE * 2 - 1) & ~register_t'(7);
         // 空き
-        else if (6'h13 <= addr && addr <= 6'h1b)
+        else if (6'h15 <= addr && addr <= 6'h1b)
             used_bits = '0;
         // フラグ．値を格納する命令がない
         else if (addr == 6'h1c)
@@ -302,7 +323,9 @@ package alu_p;
     );
         is_kernel_only =
             // カーネルモードの入口と戻り先
-            (addr == 6'h11 || addr == 6'h12)
+            addr == 6'h11 || addr == 6'h12
+            // または，ユーザーモードの領域の先頭の番地と大きさ(ユーザーモードのプログラムに，領域を変えさせない)
+            || addr == 6'h13 || addr == 6'h14
             // または，周辺機器のレジスタ(OSが状態を持つため，実行ファイルに書き換えさせない)
             || addr >= 6'h20;
     endfunction
@@ -331,7 +354,7 @@ package alu_p;
     // 判定する．
     function util_p::bool_t is_instruction_executable(
         logic             kernel_mode,  // 命令を実行する動作状態がカーネルモードか(0ならユーザーモード)
-        logic             pc_valid,     // 命令を，命令を置ける番地(ROMの範囲内またはメモリの後半)から取得できたか
+        logic             pc_valid,     // 命令を，命令を置ける番地から取得できたか
         machine_p::type_t m_type,
         machine_p::func_t func,
         machine_p::addr_t rs1,
