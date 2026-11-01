@@ -26,6 +26,16 @@ package alu_p;
     // 変数型
     typedef logic [31:0] register_t;   // レジスタサイズ
 
+    // 例外の原因の番号．例外を起こすと，例外の原因のレジスタへ書き込む
+    typedef enum logic [2:0] {
+        EXCEPTION_NONE        = 3'd0,  // リセットしてからまだ例外を起こしていない
+        EXCEPTION_FETCH       = 3'd1,  // 命令を取り出す番地が範囲外である
+        EXCEPTION_ILLEGAL     = 3'd2,  // 動作状態によらず実行できない命令である
+        EXCEPTION_PRIVILEGED  = 3'd3,  // カーネルモードでだけ実行できる命令である
+        EXCEPTION_DIVIDE_ZERO = 3'd4,  // 割り算の除数が0である
+        EXCEPTION_MEMORY      = 3'd5   // メモリを読み書きする番地が範囲外である
+    } exception_cause_enum;
+
     // 定数
     localparam machine_p::addr_t REGISTER_MAX_ADDR = 6'h34;   // レジスタ配列の最大有効番地(0x00〜この値が有効)
 
@@ -39,7 +49,7 @@ package alu_p;
         // スタックポインタ
         else if (addr == 6'h10)
             is_readable = util_p::TRUE;
-        // カーネルモードの入口
+        // システムコールの入口
         else if (addr == 6'h11)
             is_readable = util_p::TRUE;
         // カーネルモードからの戻り先
@@ -51,8 +61,14 @@ package alu_p;
         // ユーザーモードの領域の大きさ
         else if (addr == 6'h14)
             is_readable = util_p::TRUE;
+        // 例外の入口
+        else if (addr == 6'h15)
+            is_readable = util_p::TRUE;
+        // 例外の原因
+        else if (addr == 6'h16)
+            is_readable = util_p::TRUE;
         // 空き
-        else if (6'h15 <= addr && addr <= 6'h1b)
+        else if (6'h17 <= addr && addr <= 6'h1b)
             is_readable = util_p::FALSE;
         // フラグ
         else if (addr == 6'h1c)
@@ -127,7 +143,7 @@ package alu_p;
         // スタックポインタ
         else if (addr == 6'h10)
             is_writable = util_p::TRUE;
-        // カーネルモードの入口
+        // システムコールの入口
         else if (addr == 6'h11)
             is_writable = util_p::TRUE;
         // カーネルモードからの戻り先
@@ -139,8 +155,14 @@ package alu_p;
         // ユーザーモードの領域の大きさ
         else if (addr == 6'h14)
             is_writable = util_p::TRUE;
+        // 例外の入口
+        else if (addr == 6'h15)
+            is_writable = util_p::TRUE;
+        // 例外の原因．例外を起こしたときにだけ書き換わる
+        else if (addr == 6'h16)
+            is_writable = util_p::FALSE;
         // 空き
-        else if (6'h15 <= addr && addr <= 6'h1b)
+        else if (6'h17 <= addr && addr <= 6'h1b)
             is_writable = util_p::FALSE;
         // フラグ
         else if (addr == 6'h1c)
@@ -215,7 +237,7 @@ package alu_p;
         // スタックポインタ
         else if (addr == 6'h10)
             used_bits = '1;
-        // カーネルモードの入口
+        // システムコールの入口
         else if (addr == 6'h11)
             used_bits = '1;
         // カーネルモードからの戻り先
@@ -229,8 +251,14 @@ package alu_p;
         // 8の倍数に揃えるのは，領域の末尾に命令の一部だけが入る形にしないため
         else if (addr == 6'h14)
             used_bits = register_t'(ram_p::RAM_SIZE * 2 - 1) & ~register_t'(7);
+        // 例外の入口
+        else if (addr == 6'h15)
+            used_bits = '1;
+        // 例外の原因．原因の番号を表せるビット
+        else if (addr == 6'h16)
+            used_bits = register_t'(2 ** $bits(exception_cause_enum) - 1);
         // 空き
-        else if (6'h15 <= addr && addr <= 6'h1b)
+        else if (6'h17 <= addr && addr <= 6'h1b)
             used_bits = '0;
         // フラグ．値を格納する命令がない
         else if (addr == 6'h1c)
@@ -322,10 +350,12 @@ package alu_p;
         machine_p::addr_t addr
     );
         is_kernel_only =
-            // カーネルモードの入口と戻り先
+            // システムコールの入口と，カーネルモードからの戻り先
             addr == 6'h11 || addr == 6'h12
             // または，ユーザーモードの領域の先頭の番地と大きさ(ユーザーモードのプログラムに，領域を変えさせない)
             || addr == 6'h13 || addr == 6'h14
+            // または，例外の入口と原因(例外はOSが扱うため．ユーザーモードのプログラムに例外の飛び先を変えさせない)
+            || addr == 6'h15 || addr == 6'h16
             // または，周辺機器のレジスタ(OSが状態を持つため，実行ファイルに書き換えさせない)
             || addr >= 6'h20;
     endfunction
