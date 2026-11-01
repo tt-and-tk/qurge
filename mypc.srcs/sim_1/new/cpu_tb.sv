@@ -3,14 +3,14 @@
 // CPUの命令の動作を検証するテストベンチ．
 // CPU本体(cpu_sv)とメインメモリ(ram_sv)は実物を使い，ROMと除算IPをテストベンチ用のモデルに差し替える．
 // テストケースごとにmachine.svhの関数で組んだ命令列をROMへ書き込んで実行し，実行後のレジスタ・メモリ・
-// 停止・例外の有無と番地を期待値と比較する．最後に合否の件数を表示し，失敗があれば$fatalで終了する．
+// 停止・例外の入口へ飛んだことの有無と番地を期待値と比較する．最後に合否の件数を表示し，失敗があれば$fatalで終了する．
 //
 // このファイルで使う用語
 // - テストケース: 1つの命令列を実行し，その結果を期待値と比較する単位．合否はテストケースごとに数える
 // - 正常終了: 命令列の末尾に置いた，自分自身へジャンプし続ける命令の実行に入ること(仕様上のプログラムの終わり方)
-// - 異常: 実行できない命令や範囲外の番地など，CPUが検出して実行を続けない事象(仕様はhalt.md)
-// - 停止: カーネルモードで異常を検出したCPUが実行を止めること(仕様はhalt.md)
-// - 例外: ユーザーモードで異常を検出したCPUが，異常を起こした命令のPCと原因を書き込み，カーネルモードで例外の入口へ飛ぶこと(仕様はmode.md)
+// - 例外: 実行できない命令や範囲外の番地など，CPUが検出して命令をそのまま実行しない事象(仕様はhalt.md)
+// - 停止: カーネルモードで例外を検出したCPUが実行を止めること(仕様はhalt.md)
+// - 例外の入口へ飛ぶ: ユーザーモードで例外を検出したCPUが，例外を起こした命令のPCと原因を書き込み，カーネルモードで例外の入口へ飛ぶこと(仕様はmode.md)
 // - 先読み: CPUが命令を実行している間に，次の命令をROMから取得しておくこと
 // - メインメモリの後半: カーネルモードのPCのうちROMの命令数の上限に続く範囲が，ここに置いた命令に対応する(仕様はrom.md)．命令列を置いた部分をコード領域と呼ぶ
 // - 領域: ユーザーモードのプログラムが使うメインメモリの範囲．先頭の番地と大きさをカーネルモードでUBASE・USIZEへ書き込んで決める．
@@ -19,7 +19,7 @@
 // - フォワーディング: 直前の命令がレジスタへ書き込む値を，次の命令がレジスタを経由せずに受け取ること
 // - 同時実行: 連続した2命令の実行を，同じサイクルに始めること．2命令のうち先に実行する命令を先頭，後の命令を2番目と呼ぶ．
 //   2番目にできるのは単純な演算(1サイクルで完了し，レジスタへ書き込む以外の動作を持たない命令)だけである
-// - 所要サイクル数: リセットを解除してから，正常終了・停止・例外のいずれかに至るまでのサイクル数
+// - 所要サイクル数: リセットを解除してから，正常終了・停止・例外の入口へ飛ぶことのいずれかに至るまでのサイクル数
 //////////////////////////////////////////////////////////////////////////////////
 
 
@@ -233,14 +233,14 @@ module cpu_tb;
 
     // ===== 実行と結果の採取 =====
 
-    typedef enum {ENDED, HALTED, EXCEPTED, TIMED_OUT} outcome_enum;  // 実行の終わり方(正常終了・停止・例外・打ち切り)
+    typedef enum {ENDED, HALTED, EXCEPTED, TIMED_OUT} outcome_enum;  // 実行の終わり方(正常終了・停止・例外の入口へ飛ぶ・打ち切り)
 
     outcome_enum    outcome;                          // 直前の実行の終わり方
     int             cycles;                           // 直前の実行の所要サイクル数
     bit             redirect_met_early_jump;          // 直前の実行で，実行段が分岐・ジャンプで取得し直すサイクルに，先行取得する即値のジャンプがROMから届いたことがあるか
     register_t      regs[0:REGISTER_MAX_ADDR];        // 直前の実行を終えた時点のレジスタの値
     bit             kernel_mode;                      // 直前の実行を終えた時点で，動作状態がカーネルモードか(0ならユーザーモード)
-    int             exception_pc;                     // 直前の実行で例外を起こした命令のPC(例外で終わった場合だけ意味を持つ)
+    int             exception_pc;                     // 直前の実行で例外を起こした命令のPC(例外の入口へ飛んで終わった場合だけ意味を持つ)
     register_t      exception_entry;                  // 直前の実行で例外を起こしたときの，例外の入口のレジスタの値(同上)
     bit             exception_redirected;             // 直前の実行で例外を起こした次のサイクルに，例外の入口の番地から取得し直すと決まっていたか(同上)
     int             end_pc;                           // 正常終了を表す命令の番地
@@ -294,18 +294,18 @@ module cpu_tb;
     endfunction
 
     // 命令列をROMの先頭へ，code_area・rom_tail・user_codeの命令列をそれぞれメモリの後半・ROMの末尾・領域の先頭へ書き込み，
-    // リセットしてから，正常終了・停止・例外・打ち切りのいずれかに至るまで実行する．
+    // リセットしてから，正常終了・停止・例外の入口へ飛ぶ・打ち切りのいずれかに至るまで実行する．
     // user_codeの末尾には，領域の中で自分自身へジャンプし続ける，ユーザーモードの正常終了を表す命令を付ける．
     // 実行の終わり方と，終えた時点のレジスタの値を残す．停止した場合のレジスタの値は，停止を検出した
-    // 時点のもの(初期値へ戻る前)になる．例外で終わった場合のレジスタの値は，例外を起こした直後(例外の入口の命令を実行する前)のものになる．
+    // 時点のもの(初期値へ戻る前)になる．例外の入口へ飛んで終わった場合のレジスタの値は，例外の入口へ飛んだ直後(例外の入口の命令を実行する前)のものになる．
     // 末尾に正常終了を表す命令を付けない場合(ROMの範囲外へ進む場合の検証)は2番目の引数を0に，
     // 前の実行でメモリへ書いた値を残す場合は3番目の引数を1に，
-    // 例外で終わらせずに例外の入口から実行を続ける場合は4番目の引数を0にする
+    // 例外の入口へ飛んだところで終わらせずに，例外の入口から実行を続ける場合は4番目の引数を0にする
     task automatic run(input machine_t body[$], input bit append_end = 1'b1, input bit keep_ram = 1'b0, input bit stop_at_exception = 1'b1);
         machine_t  instructions[$] = body;  // ROMへ書き込む命令列
         bit        unreachable_halt;        // このサイクルに，命令を置けない番地へ進んだことで停止するか
         int        unreachable_pc;          // その停止で停止する番地
-        bit        exception_raised;        // このサイクルに，例外を起こすか
+        bit        exception_entered;       // このサイクルに，例外を起こして例外の入口へ飛ぶか
 
         // 命令列の直後の番地を正常終了を表す命令の番地とし，そこに自分自身へジャンプする命令を置く
         end_pc = body.size();
@@ -343,11 +343,11 @@ module cpu_tb;
             // 停止する前のこのサイクルのうちに，停止するかとその番地(取得用のプログラムカウンタ)を控える
             unreachable_halt = dut.alu_sv_0.pipeline_drained && !dut.alu_sv_0.fetch_pc_in_ram;
             unreachable_pc   = dut.alu_sv_0.fetch_pc;
-            // 例外を起こす場合は，例外を起こした命令のPCと，そのときの例外の入口の値を控える
-            // (例外を起こした後は，例外の入口の命令がPCや例外の入口を書き換えうるため)
-            exception_raised = dut.alu_sv_0.fault_detected && !dut.alu_sv_0.kernel_mode;
-            if (exception_raised) begin
-                exception_pc    = dut.alu_sv_0.fault_pc;
+            // 例外の入口へ飛ぶ場合は，例外を起こした命令のPCと，そのときの例外の入口の値を控える
+            // (例外の入口へ飛んだ後は，例外の入口の命令がPCや例外の入口を書き換えうるため)
+            exception_entered = dut.alu_sv_0.exception_detected && !dut.alu_sv_0.kernel_mode;
+            if (exception_entered) begin
+                exception_pc    = dut.alu_sv_0.exception_pc;
                 exception_entry = dut.alu_sv_0.register[EENTRY_ADDR];
             end
             // 実行段が取得し直すと決まったサイクルに，先行取得する即値のジャンプが届いたかを控える
@@ -365,8 +365,8 @@ module cpu_tb;
                 outcome = HALTED;
                 break;
             end
-            // 例外を起こした．例外の入口から実行を続けない場合は，ここで終わる
-            if (exception_raised && stop_at_exception) begin
+            // 例外の入口へ飛んだ．例外の入口から実行を続けない場合は，ここで終わる
+            if (exception_entered && stop_at_exception) begin
                 // 例外の入口の番地から取得し直すと決まったかを控える
                 exception_redirected = dut.alu_sv_0.redirect_pending && dut.alu_sv_0.redirect_pc == exception_entry;
                 outcome = EXCEPTED;
@@ -403,7 +403,7 @@ module cpu_tb;
         // 命令を置けない番地へ進んで停止した場合は，控えておいたその番地を停止した番地とする
         if (outcome == HALTED && unreachable_halt)
             regs[PC_ADDR] = unreachable_pc;
-        // 例外で終わった場合は，控えておいた例外を起こした命令のPCとする
+        // 例外の入口へ飛んで終わった場合は，控えておいた例外を起こした命令のPCとする
         if (outcome == EXCEPTED)
             regs[PC_ADDR] = exception_pc;
     endtask
@@ -493,12 +493,12 @@ module cpu_tb;
         end
     endfunction
 
-    // 直前の実行が，指定したPCの命令で，指定した原因の例外を起こして終わったことを確かめる．
+    // 直前の実行が，指定したPCの命令で指定した原因の例外を起こし，例外の入口へ飛んで終わったことを確かめる．
     // 戻り先・原因のレジスタ，カーネルモードへの切り替え，例外の入口の番地からの取得し直しを確かめる
     function automatic void expect_exception(input int pc, input exception_cause_enum cause);
-        // 例外で終わっていない
+        // 例外の入口へ飛んで終わっていない
         if (outcome != EXCEPTED) begin
-            fail($sformatf("例外を起こしていない(%s，PC=%0d)", outcome.name(), regs[PC_ADDR]));
+            fail($sformatf("例外の入口へ飛んでいない(%s，PC=%0d)", outcome.name(), regs[PC_ADDR]));
             return;
         end
         // 例外を起こした命令のPCが違う
@@ -1285,11 +1285,11 @@ module cpu_tb;
         end
     endtask
 
-    // 1つの命令が異常を起こすかどうかを確かめるテストケース
+    // 1つの命令が例外を起こすかどうかを確かめるテストケース
     typedef struct {
         string    name;         // テストケースの名前
         machine_t instruction;  // 確かめる命令
-        bit       faults;       // 異常を起こすか(カーネルモードでは停止し，ユーザーモードでは例外を起こす)
+        bit       faults;       // 例外を起こすか(カーネルモードでは停止し，ユーザーモードでは例外の入口へ飛ぶ)
     } operand_case_t;
 
     // 命令の種類ごとに，実際に使うオペランドだけが読み書き可否の判定対象になるか
@@ -1322,7 +1322,7 @@ module cpu_tb;
             begin_test(cases[i].name);
             // 割り算の除数に使うr2へ1を入れてから，確かめる命令を実行する
             run('{movi(2, 32'd1), cases[i].instruction});
-            // 異常を起こすなら確かめる命令の番地で停止し，起こさないなら正常終了する
+            // 例外を起こすなら確かめる命令の番地で停止し，起こさないなら正常終了する
             if (cases[i].faults)
                 expect_halt(1);
             else
@@ -1492,7 +1492,7 @@ module cpu_tb;
             // ユーザーモードへ移り，r2へ1を入れてから，確かめる命令を実行する
             user_code = '{movi(2, 32'd1), cases[i].instruction};
             run(enter_user_mode());
-            // 異常を起こすなら確かめる命令のPCで，カーネルモードでだけ実行できる命令として例外を起こし，起こさないなら正常終了する
+            // 例外を起こすなら確かめる命令のPCで，カーネルモードでだけ実行できる命令の例外を起こし，起こさないなら正常終了する
             if (cases[i].faults) begin
                 expect_exception(1, EXCEPTION_PRIVILEGED);
             end
@@ -1818,7 +1818,7 @@ module cpu_tb;
         expect_reg(2, cause);
     endfunction
 
-    // ユーザーモードの異常で起こす例外と，例外の入口・原因のレジスタ
+    // ユーザーモードの例外で例外の入口へ飛ぶ処理と，例外の入口・原因のレジスタ
     task automatic test_exception();
         // r1・r2へ0以外を入れてから，書き込む前の例外の入口と原因を読み出す
         `BEGIN_TEST("リセット直後の例外の入口と原因は0である");
@@ -1835,28 +1835,28 @@ module cpu_tb;
         expect_end();
         expect_reg(1, 32'h8765_4321);
 
-        // 取得段で検出する異常として，領域の外の番地へジャンプする
+        // 取得段で検出する例外として，領域の外の番地へジャンプする
         `BEGIN_TEST("命令を取り出す番地が範囲外の例外から，例外の入口へ飛んで戻り先と原因を読める");
         user_code = '{jmp(6'h00, im(USER_SIZE_DEFAULT / 8))};
         run_to_exception_entry();
         // ジャンプ先のPCと，命令の取得の原因が読める
         expect_exception_entry(USER_SIZE_DEFAULT / 8, EXCEPTION_FETCH);
 
-        // 確認段で検出する異常として，どの命令タイプにも割り当てていない命令コードの命令を実行する
-        `BEGIN_TEST("動作状態によらず実行できない命令の例外から，例外の入口へ飛んで戻り先と原因を読める");
+        // 確認段で検出する例外として，どの命令タイプにも割り当てていない命令コードの命令を実行する
+        `BEGIN_TEST("不正な命令の例外から，例外の入口へ飛んで戻り先と原因を読める");
         user_code = '{nop(), raw(3'h7, 6'h00, 0, 0, 0, NO_IMM)};
         run_to_exception_entry();
-        // その命令のPCと，実行できない命令の原因が読める
+        // その命令のPCと，不正な命令の原因が読める
         expect_exception_entry(1, EXCEPTION_ILLEGAL);
 
-        // 確認段で検出する異常として，ユーザーモードでは読めないタクトスイッチを読む
+        // 確認段で検出する例外として，ユーザーモードでは読めないタクトスイッチを読む
         `BEGIN_TEST("カーネルモードでだけ実行できる命令の例外から，例外の入口へ飛んで戻り先と原因を読める");
         user_code = '{nop(), movr(3, BTN_ADDR)};
         run_to_exception_entry();
         // その命令のPCと，カーネルモードでだけ実行できる命令の原因が読める
         expect_exception_entry(1, EXCEPTION_PRIVILEGED);
 
-        // 実行段で検出する異常として，商と余りの格納先へ値を入れてから，r0(0)で割る
+        // 実行段で検出する例外として，商と余りの格納先へ値を入れてから，r0(0)で割る
         `BEGIN_TEST("除数が0の例外から，例外の入口へ飛んで戻り先と原因を読め，商と余りは書き込まれない");
         user_code = '{movi(4, 32'h77), movi(6, 32'h88), div(5, 0, 4, im(6))};
         run_to_exception_entry();
@@ -1865,7 +1865,7 @@ module cpu_tb;
         expect_reg(4, 32'h77);
         expect_reg(6, 32'h88);
 
-        // 実行段で検出する異常として，r0(0)を除数にしたDIVUを，余りの格納先を指定せずに実行する
+        // 実行段で検出する例外として，r0(0)を除数にしたDIVUを，余りの格納先を指定せずに実行する
         `BEGIN_TEST("除数が0のDIVUも，除数が0の例外を起こす");
         user_code = '{movi(4, 32'h77), divu(5, 0, 4, NO_IMM)};
         run_to_exception_entry();
@@ -1873,7 +1873,7 @@ module cpu_tb;
         expect_exception_entry(1, EXCEPTION_DIVIDE_ZERO);
         expect_reg(4, 32'h77);
 
-        // 実行段で検出する異常として，領域の大きさと同じ番地へ書き込む
+        // 実行段で検出する例外として，領域の大きさと同じ番地へ書き込む
         `BEGIN_TEST("メモリの番地が範囲外の例外から，例外の入口へ飛んで戻り先と原因を読め，メモリは書き込まれない");
         user_code = '{movi(3, 32'h55), wm(4'hf, 6'h00, 3, im(USER_SIZE_DEFAULT))};
         run_to_exception_entry();
@@ -1882,21 +1882,21 @@ module cpu_tb;
         expect_mem32(USER_BASE_DEFAULT + USER_SIZE_DEFAULT, 32'h0);
 
         // ユーザーモードで読めないタクトスイッチを読み，書き込み先をレジスタ番地の上限より大きくする
-        `BEGIN_TEST("ユーザーモードで読めないレジスタを使い，ほかの条件にも当たる命令は，実行できない命令の例外を起こす");
+        `BEGIN_TEST("ユーザーモードで読めないレジスタを使い，ほかの条件にも当たる命令は，不正な命令の例外を起こす");
         user_code = '{nop(), movr(REGISTER_MAX_ADDR + 1, BTN_ADDR)};
         run(enter_user_mode());
         // 書き込み先がレジスタ番地の上限を超えるため，カーネルモードでも実行できない命令として扱う
         expect_exception(1, EXCEPTION_ILLEGAL);
 
         // 命令タイプに定義されていないfuncの命令を実行する
-        `BEGIN_TEST("ユーザーモードで定義されていないfuncの命令は，実行できない命令の例外を起こす");
+        `BEGIN_TEST("ユーザーモードで定義されていないfuncの命令は，不正な命令の例外を起こす");
         user_code = '{nop(), raw(3'h1, 6'h3f, 1, 2, 3, NO_IMM)};
         run(enter_user_mode());
         // その命令のPCで例外を起こす
         expect_exception(1, EXCEPTION_ILLEGAL);
 
         // immの使用が必須の分岐を，imm[32]を0にして実行する
-        `BEGIN_TEST("ユーザーモードでimmの使用が必須の命令にimmを使わないと，実行できない命令の例外を起こす");
+        `BEGIN_TEST("ユーザーモードでimmの使用が必須の命令にimmを使わないと，不正な命令の例外を起こす");
         user_code = '{nop(), eq(1, 2, NO_IMM)};
         run(enter_user_mode());
         // その命令のPCで例外を起こす
@@ -1921,7 +1921,7 @@ module cpu_tb;
         expect_reg(6, 32'd4);
         expect_reg(7, 32'd1);
 
-        // 実行できない命令で例外を起こし，例外の入口(ROMのPC 6)で戻り先をPC 1にしてSYSRETで戻る．
+        // 不正な命令で例外を起こし，例外の入口(ROMのPC 6)で戻り先をPC 1にしてSYSRETで戻る．
         // PC 1のSYSCALLでシステムコールの入口(ROMのPC 8)へ入り，原因を読む
         `BEGIN_TEST("例外の原因は，SYSRETとSYSCALLで書き換わらない");
         user_code = '{raw(3'h7, 6'h00, 0, 0, 0, NO_IMM), syscall()};
@@ -1931,7 +1931,7 @@ module cpu_tb;
         expect_end();
         expect_reg(2, EXCEPTION_ILLEGAL);
 
-        // 実行できない命令で例外を起こし，1回目の例外の入口(ROMのPC 5)で，例外の入口をPC 9に変え，戻り先をPC 1にしてSYSRETで戻る．
+        // 不正な命令で例外を起こし，1回目の例外の入口(ROMのPC 5)で，例外の入口をPC 9に変え，戻り先をPC 1にしてSYSRETで戻る．
         // PC 1で除数が0の割り算を実行し，2回目の例外の入口(ROMのPC 9)で戻り先と原因を読む
         `BEGIN_TEST("2回目の例外は，戻り先と原因を書き換える");
         user_code = '{raw(3'h7, 6'h00, 0, 0, 0, NO_IMM), div(1, 0, 2, NO_IMM)};
@@ -1940,7 +1940,7 @@ module cpu_tb;
         // 2回目の例外の入口から正常終了し，戻り先と原因は2回目のものになる
         expect_exception_entry(1, EXCEPTION_DIVIDE_ZERO);
 
-        // システムコールの入口をROMのPC 8に，例外の入口をPC 9に置き，ユーザーモードで実行できない命令を実行する
+        // システムコールの入口をROMのPC 8に，例外の入口をPC 9に置き，ユーザーモードで不正な命令を実行する
         `BEGIN_TEST("例外は，システムコールの入口ではなく例外の入口へ飛ぶ");
         user_code = '{raw(3'h7, 6'h00, 0, 0, 0, NO_IMM)};
         run({movi(KENTRY_ADDR, 32'd8), movi(EENTRY_ADDR, 32'd9), enter_user_mode(), nop(), nop(), movi(3, 32'd3), movi(4, 32'd4)},
@@ -1980,7 +1980,7 @@ module cpu_tb;
         expect_reg(ECAUSE_ADDR, EXCEPTION_ILLEGAL);
 
         // 例外の入口を設定してから，カーネルモードでr0(0)で割る
-        `BEGIN_TEST("カーネルモードで起きた異常は，例外の入口を設定しても例外を起こさず停止する");
+        `BEGIN_TEST("カーネルモードで起きた例外は，例外の入口を設定しても例外の入口へ飛ばず停止する");
         run('{movi(EENTRY_ADDR, 32'd3), div(1, 0, 2, NO_IMM), nop(), nop()});
         // 割り算の番地で停止し，戻り先と原因は書き換わらない
         expect_halt(1);
