@@ -1830,10 +1830,10 @@ module cpu_tb;
 
         // 例外の入口へ値を書き込んでから読み出す
         `BEGIN_TEST("カーネルモードで例外の入口を読み書きできる");
-        run('{movi(EENTRY_ADDR, 32'h1234), movr(1, EENTRY_ADDR)});
-        // 書き込んだ値が読める
+        run('{movi(EENTRY_ADDR, 32'h8765_4321), movr(1, EENTRY_ADDR)});
+        // 書き込んだ32ビットの値がそのまま読める
         expect_end();
-        expect_reg(1, 32'h1234);
+        expect_reg(1, 32'h8765_4321);
 
         // 取得段で検出する異常として，領域の外の番地へジャンプする
         `BEGIN_TEST("命令を取り出す番地が範囲外の例外から，例外の入口へ飛んで戻り先と原因を読める");
@@ -1865,6 +1865,14 @@ module cpu_tb;
         expect_reg(4, 32'h77);
         expect_reg(6, 32'h88);
 
+        // 実行段で検出する異常として，r0(0)を除数にしたDIVUを，余りの格納先を指定せずに実行する
+        `BEGIN_TEST("除数が0のDIVUも，除数が0の例外を起こす");
+        user_code = '{movi(4, 32'h77), divu(5, 0, 4, NO_IMM)};
+        run_to_exception_entry();
+        // DIVUのPCと，除数が0の原因が読め，商の格納先は書き換わらない
+        expect_exception_entry(1, EXCEPTION_DIVIDE_ZERO);
+        expect_reg(4, 32'h77);
+
         // 実行段で検出する異常として，領域の大きさと同じ番地へ書き込む
         `BEGIN_TEST("メモリの番地が範囲外の例外から，例外の入口へ飛んで戻り先と原因を読め，メモリは書き込まれない");
         user_code = '{movi(3, 32'h55), wm(4'hf, 6'h00, 3, im(USER_SIZE_DEFAULT))};
@@ -1872,6 +1880,65 @@ module cpu_tb;
         // WMのPCと，メモリの番地が範囲外の原因が読め，その番地は書き換わらない
         expect_exception_entry(1, EXCEPTION_MEMORY);
         expect_mem32(USER_BASE_DEFAULT + USER_SIZE_DEFAULT, 32'h0);
+
+        // ユーザーモードで読めないタクトスイッチを読み，書き込み先をレジスタ番地の上限より大きくする
+        `BEGIN_TEST("ユーザーモードで読めないレジスタを使い，ほかの条件にも当たる命令は，実行できない命令の例外を起こす");
+        user_code = '{nop(), movr(REGISTER_MAX_ADDR + 1, BTN_ADDR)};
+        run(enter_user_mode());
+        // カーネルモードでも実行できない命令として扱う
+        expect_exception(1, EXCEPTION_ILLEGAL);
+
+        // 命令タイプに定義されていないfuncの命令を実行する
+        `BEGIN_TEST("ユーザーモードで定義されていないfuncの命令は，実行できない命令の例外を起こす");
+        user_code = '{nop(), raw(3'h1, 6'h3f, 1, 2, 3, NO_IMM)};
+        run(enter_user_mode());
+        // その命令のPCで例外を起こす
+        expect_exception(1, EXCEPTION_ILLEGAL);
+
+        // immの使用が必須の分岐を，imm[32]を0にして実行する
+        `BEGIN_TEST("ユーザーモードでimmの使用が必須の命令にimmを使わないと，実行できない命令の例外を起こす");
+        user_code = '{nop(), eq(1, 2, NO_IMM)};
+        run(enter_user_mode());
+        // その命令のPCで例外を起こす
+        expect_exception(1, EXCEPTION_ILLEGAL);
+
+        // 領域の大きさと同じ番地へ，レジスタ相対で書き込む
+        `BEGIN_TEST("ユーザーモードでWMRの番地が範囲外なら，メモリの番地が範囲外の例外を起こす");
+        user_code = '{movi(3, USER_SIZE_DEFAULT - 4), movi(1, 32'h55), wmr(4'hf, 3, 1, im(32'd4))};
+        run(enter_user_mode());
+        // WMRのPCで例外を起こし，その番地は書き換わらない
+        expect_exception(2, EXCEPTION_MEMORY);
+        expect_mem32(USER_BASE_DEFAULT + USER_SIZE_DEFAULT, 32'h0);
+
+        // メモリから読み込み，割り算を終えた直後に，ユーザーモードで読めないレジスタを読む
+        `BEGIN_TEST("例外を起こした命令より前の，複数サイクルかかる命令の結果は残る");
+        user_code = '{movi(1, 32'h66), wm(4'hf, 6'h00, 1, im(32'h100)), rm(4'hf, 6'h00, 2, im(32'h100)),
+                      movi(4, 32'd9), movi(5, 32'd2), div(4, 5, 6, im(7)), movr(8, BTN_ADDR)};
+        run(enter_user_mode());
+        // 例外を起こした命令のPCで終わり，読み込んだ値と商・余りが残る
+        expect_exception(6, EXCEPTION_PRIVILEGED);
+        expect_reg(2, 32'h66);
+        expect_reg(6, 32'd4);
+        expect_reg(7, 32'd1);
+
+        // 実行できない命令で例外を起こし，例外の入口(ROMのPC 6)で戻り先をPC 1にしてSYSRETで戻る．
+        // PC 1のSYSCALLでシステムコールの入口(ROMのPC 8)へ入り，原因を読む
+        `BEGIN_TEST("例外の原因は，SYSRETとSYSCALLで書き換わらない");
+        user_code = '{raw(3'h7, 6'h00, 0, 0, 0, NO_IMM), syscall()};
+        run({movi(KENTRY_ADDR, 32'd8), movi(EENTRY_ADDR, 32'd6), enter_user_mode(), movi(KRET_ADDR, 32'd1), sysret(), movr(2, ECAUSE_ADDR)},
+            1'b1, 1'b0, 1'b0);
+        // システムコールの入口で，最初の例外の原因が読める
+        expect_end();
+        expect_reg(2, EXCEPTION_ILLEGAL);
+
+        // 実行できない命令で例外を起こし，1回目の例外の入口(ROMのPC 5)で，例外の入口をPC 9に変え，戻り先をPC 1にしてSYSRETで戻る．
+        // PC 1で除数が0の割り算を実行し，2回目の例外の入口(ROMのPC 9)で戻り先と原因を読む
+        `BEGIN_TEST("2回目の例外は，戻り先と原因を書き換える");
+        user_code = '{raw(3'h7, 6'h00, 0, 0, 0, NO_IMM), div(1, 0, 2, NO_IMM)};
+        run({movi(EENTRY_ADDR, 32'd5), enter_user_mode(), movi(EENTRY_ADDR, 32'd9), movi(KRET_ADDR, 32'd1), sysret(), nop(),
+             movr(1, KRET_ADDR), movr(2, ECAUSE_ADDR)}, 1'b1, 1'b0, 1'b0);
+        // 2回目の例外の入口から正常終了し，戻り先と原因は2回目のものになる
+        expect_exception_entry(1, EXCEPTION_DIVIDE_ZERO);
 
         // システムコールの入口をROMのPC 8に，例外の入口をPC 9に置き，ユーザーモードで実行できない命令を実行する
         `BEGIN_TEST("例外は，システムコールの入口ではなく例外の入口へ飛ぶ");
