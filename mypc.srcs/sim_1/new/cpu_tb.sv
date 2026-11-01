@@ -1885,7 +1885,7 @@ module cpu_tb;
         `BEGIN_TEST("ユーザーモードで読めないレジスタを使い，ほかの条件にも当たる命令は，実行できない命令の例外を起こす");
         user_code = '{nop(), movr(REGISTER_MAX_ADDR + 1, BTN_ADDR)};
         run(enter_user_mode());
-        // カーネルモードでも実行できない命令として扱う
+        // 書き込み先がレジスタ番地の上限を超えるため，カーネルモードでも実行できない命令として扱う
         expect_exception(1, EXCEPTION_ILLEGAL);
 
         // 命令タイプに定義されていないfuncの命令を実行する
