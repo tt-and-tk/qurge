@@ -26,9 +26,9 @@ package alu_p;
     // 変数型
     typedef logic [31:0] register_t;   // レジスタサイズ
 
-    // 例外の原因の番号．ユーザーモードで例外の入口へ飛ぶときに，例外の原因のレジスタへ書き込む
+    // 例外の原因の番号．ユーザーモードで例外ハンドラへ飛ぶときに，例外の原因のレジスタへ書き込む
     typedef enum logic [2:0] {
-        EXCEPTION_NONE        = 3'd0,  // リセットしてから，まだ例外の入口へ飛んでいない
+        EXCEPTION_NONE        = 3'd0,  // リセットしてから，まだ例外ハンドラへ飛んでいない
         EXCEPTION_FETCH       = 3'd1,  // 命令を取り出す番地が範囲外である
         EXCEPTION_ILLEGAL     = 3'd2,  // 不正な命令(カーネルモードでも実行できない命令)である
         EXCEPTION_PRIVILEGED  = 3'd3,  // カーネルモードでだけ実行できる命令である
@@ -49,7 +49,7 @@ package alu_p;
         // スタックポインタ
         else if (addr == 6'h10)
             is_readable = util_p::TRUE;
-        // システムコールの入口
+        // システムコールハンドラの番地
         else if (addr == 6'h11)
             is_readable = util_p::TRUE;
         // カーネルモードからの戻り先
@@ -61,7 +61,7 @@ package alu_p;
         // ユーザーモードの領域の大きさ
         else if (addr == 6'h14)
             is_readable = util_p::TRUE;
-        // 例外の入口
+        // 例外ハンドラの番地
         else if (addr == 6'h15)
             is_readable = util_p::TRUE;
         // 例外の原因
@@ -143,7 +143,7 @@ package alu_p;
         // スタックポインタ
         else if (addr == 6'h10)
             is_writable = util_p::TRUE;
-        // システムコールの入口
+        // システムコールハンドラの番地
         else if (addr == 6'h11)
             is_writable = util_p::TRUE;
         // カーネルモードからの戻り先
@@ -155,10 +155,10 @@ package alu_p;
         // ユーザーモードの領域の大きさ
         else if (addr == 6'h14)
             is_writable = util_p::TRUE;
-        // 例外の入口
+        // 例外ハンドラの番地
         else if (addr == 6'h15)
             is_writable = util_p::TRUE;
-        // 例外の原因．例外の入口へ飛ぶときにだけ書き換わる
+        // 例外の原因．例外ハンドラへ飛ぶときにだけ書き換わる
         else if (addr == 6'h16)
             is_writable = util_p::FALSE;
         // 空き
@@ -237,7 +237,7 @@ package alu_p;
         // スタックポインタ
         else if (addr == 6'h10)
             used_bits = '1;
-        // システムコールの入口
+        // システムコールハンドラの番地
         else if (addr == 6'h11)
             used_bits = '1;
         // カーネルモードからの戻り先
@@ -251,7 +251,7 @@ package alu_p;
         // 8の倍数に揃えるのは，領域の末尾に命令の一部だけが入る形にしないため
         else if (addr == 6'h14)
             used_bits = register_t'(ram_p::RAM_SIZE * 2 - 1) & ~register_t'(7);
-        // 例外の入口
+        // 例外ハンドラの番地
         else if (addr == 6'h15)
             used_bits = '1;
         // 例外の原因．原因の番号を表せるビット
@@ -350,11 +350,11 @@ package alu_p;
         machine_p::addr_t addr
     );
         is_kernel_only =
-            // システムコールの入口と，カーネルモードからの戻り先
+            // システムコールハンドラの番地と，カーネルモードからの戻り先
             addr == 6'h11 || addr == 6'h12
             // または，ユーザーモードの領域の先頭の番地と大きさ(ユーザーモードのプログラムに，領域を変えさせない)
             || addr == 6'h13 || addr == 6'h14
-            // または，例外の入口と原因(ユーザーモードの例外はOSが扱うため．ユーザーモードのプログラムに例外の飛び先を変えさせない)
+            // または，例外ハンドラの番地と例外の原因(ユーザーモードの例外はOSが扱うため．ユーザーモードのプログラムに例外の飛び先を変えさせない)
             || addr == 6'h15 || addr == 6'h16
             // または，周辺機器のレジスタ(OSが状態を持つため，実行ファイルに書き換えさせない)
             || addr >= 6'h20;
