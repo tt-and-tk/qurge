@@ -241,7 +241,7 @@ module cpu_tb;
     register_t      regs[0:REGISTER_MAX_ADDR];        // 直前の実行を終えた時点のレジスタの値
     bit             kernel_mode;                      // 直前の実行を終えた時点で，動作状態がカーネルモードか(0ならユーザーモード)
     int             exception_pc;                     // 直前の実行で例外を起こした命令のPC(例外ハンドラへ飛んで終わった場合だけ意味を持つ)
-    register_t      exception_handler_address;                  // 直前の実行で例外を起こしたときの，例外ハンドラの番地のレジスタの値(同上)
+    register_t      exception_handler_pc;             // 直前の実行で例外を起こしたときの，例外ハンドラの番地のレジスタの値(同上)
     bit             exception_redirected;             // 直前の実行で例外を起こした次のサイクルに，例外ハンドラの番地から取得し直すと決まっていたか(同上)
     int             end_pc;                           // 正常終了を表す命令の番地
     machine_queue_t code_area;                        // 実行前にコード領域へ直接置く命令列
@@ -305,7 +305,7 @@ module cpu_tb;
         machine_t  instructions[$] = body;  // ROMへ書き込む命令列
         bit        unreachable_halt;        // このサイクルに，命令を置けない番地へ進んだことで停止するか
         int        unreachable_pc;          // その停止で停止する番地
-        bit        exception_jumped;       // このサイクルに，例外を起こして例外ハンドラへ飛ぶか
+        bit        exception_jumped;        // このサイクルに，例外を起こして例外ハンドラへ飛ぶか
 
         // 命令列の直後の番地を正常終了を表す命令の番地とし，そこに自分自身へジャンプする命令を置く
         end_pc = body.size();
@@ -348,7 +348,7 @@ module cpu_tb;
             exception_jumped = dut.alu_sv_0.exception_detected && !dut.alu_sv_0.kernel_mode;
             if (exception_jumped) begin
                 exception_pc    = dut.alu_sv_0.exception_pc;
-                exception_handler_address = dut.alu_sv_0.register[EENTRY_ADDR];
+                exception_handler_pc = dut.alu_sv_0.register[EENTRY_ADDR];
             end
             // 実行段が取得し直すと決まったサイクルに，先行取得する即値のジャンプが届いたかを控える
             if (dut.alu_sv_0.ex_redirects && dut.alu_sv_0.push_early_jump)
@@ -368,7 +368,7 @@ module cpu_tb;
             // 例外ハンドラへ飛んだ．例外ハンドラから実行を続けない場合は，ここで終わる
             if (exception_jumped && stop_at_exception_jump) begin
                 // 例外ハンドラの番地から取得し直すと決まったかを控える
-                exception_redirected = dut.alu_sv_0.redirect_pending && dut.alu_sv_0.redirect_pc == exception_handler_address;
+                exception_redirected = dut.alu_sv_0.redirect_pending && dut.alu_sv_0.redirect_pc == exception_handler_pc;
                 outcome = JUMPED_TO_HANDLER;
                 break;
             end
@@ -512,7 +512,7 @@ module cpu_tb;
         expect_kernel_mode(1'b1);
         // 例外ハンドラの番地から取得し直す
         if (!exception_redirected)
-            fail($sformatf("例外ハンドラの番地(%0d)から取得し直していない", exception_handler_address));
+            fail($sformatf("例外ハンドラの番地(%0d)から取得し直していない", exception_handler_pc));
     endfunction
 
     // メインメモリの指定した番地の1バイトを返す
