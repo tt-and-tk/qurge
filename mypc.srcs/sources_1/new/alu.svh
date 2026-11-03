@@ -31,7 +31,7 @@ package alu_p;
         EXCEPTION_NONE        = 3'd0,  // リセットしてから，まだ例外ハンドラへ飛んでいない
         EXCEPTION_FETCH       = 3'd1,  // 命令を取り出す番地が範囲外である
         EXCEPTION_ILLEGAL     = 3'd2,  // 不正な命令である
-        EXCEPTION_PRIVILEGED  = 3'd3,  // カーネルモードでだけ実行できる命令を，ユーザーモードで実行しようとした
+        EXCEPTION_PRIVILEGED  = 3'd3,  // カーネルモードでだけ許される操作(ユーザーモードで読み書きできないレジスタの読み書き・SYSRET)を，ユーザーモードで行おうとした命令である
         EXCEPTION_DIVIDE_ZERO = 3'd4,  // 割り算の除数が0である
         EXCEPTION_MEMORY      = 3'd5   // メモリを読み書きする番地が範囲外である
     } exception_cause_enum;
