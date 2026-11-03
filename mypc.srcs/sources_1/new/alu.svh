@@ -30,8 +30,8 @@ package alu_p;
     typedef enum logic [2:0] {
         EXCEPTION_NONE        = 3'd0,  // リセットしてから，まだ例外ハンドラへ飛んでいない
         EXCEPTION_FETCH       = 3'd1,  // 命令を取り出す番地が範囲外である
-        EXCEPTION_ILLEGAL     = 3'd2,  // 不正な命令(カーネルモードでも実行できない命令)である
-        EXCEPTION_PRIVILEGED  = 3'd3,  // カーネルモードでだけ実行できる命令である
+        EXCEPTION_ILLEGAL     = 3'd2,  // 不正な命令である
+        EXCEPTION_PRIVILEGED  = 3'd3,  // カーネルモードでだけ実行できる命令を，ユーザーモードで実行しようとした
         EXCEPTION_DIVIDE_ZERO = 3'd4,  // 割り算の除数が0である
         EXCEPTION_MEMORY      = 3'd5   // メモリを読み書きする番地が範囲外である
     } exception_cause_enum;
