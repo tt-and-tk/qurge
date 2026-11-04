@@ -1,9 +1,17 @@
-// Qosmosのシステムコールの取り決め(入口の番地・各機能の番号・戻り値)．シェルの受付関数と，実行ファイル向けのライブラリの両方が取り込む
-// シェルは入口へ受付関数の番地(関数の先頭の命令を指すPC)を書き込む
-// システムコールは，その受付関数を，機能の番号と引数4つを渡して呼び出す．戻り値は0以上が成功，負の値がエラーを表す
+// Qosmosのシステムコールの取り決め(引数の並び・各機能の番号・戻り値)．シェルのシステムコールハンドラと，実行ファイル向けのライブラリの両方が取り込む
+// 実行ファイルはシステムコールの命令でカーネルモードへ入り，OSのシステムコールハンドラを呼び出す
+// 命令を実行する時点で，SPが指す番地から順に，戻り値の置き場・機能の番号・引数4つを4バイトずつ並べておく．OSは戻り値を置き場へ書き込んでから実行ファイルへ戻る
+// 戻り値は0以上が成功，負の値がエラーを表す
 #pragma once
 
-const int SYSCALL_ENTRY_ADDRESS = 0xFFFC;  // 入口の番地(メモリの後半の末尾のワード)
+// SPが指す番地から並べる値の位置(SPからの4バイト単位の順番)
+const int SYSCALL_ARG_RESULT = 0;  // 戻り値の置き場(OSが書き込む)
+const int SYSCALL_ARG_NUMBER = 1;  // 機能の番号
+const int SYSCALL_ARG_A = 2;       // 1つ目の引数
+const int SYSCALL_ARG_B = 3;       // 2つ目の引数
+const int SYSCALL_ARG_C = 4;       // 3つ目の引数
+const int SYSCALL_ARG_D = 5;       // 4つ目の引数
+const int SYSCALL_ARGS_SIZE = 24;  // 並べる値全体のバイト数
 
 // 各機能の番号
 const int SYS_FILE_SIZE = 0;      // ファイルの大きさ(バイト数)を返す(a: 名前)
@@ -11,10 +19,11 @@ const int SYS_FILE_READ = 1;      // ファイルの内容を丸ごと読み込�
 const int SYS_FILE_WRITE = 2;     // ファイルの内容を丸ごと置き換え，0を返す．ファイルが無ければ作成する(a: 名前，b: 書き込む内容，c: そのバイト数)
 const int SYS_CONSOLE_READ = 3;   // コンソールから1行を受け取ってヌル終端付きで格納し，格納した文字数を返す(a: 格納先，b: 格納先のバイト数)
 const int SYS_CONSOLE_WRITE = 4;  // バイト列をコンソールへ出力し，0を返す(a: 出力するバイト列，b: そのバイト数)
+const int SYS_EXIT = 5;           // 実行ファイルを終え，シェルへ戻る．戻り値の置き場には何も書き込まない(a: 終了状態)．Pynesisのコンパイラはmainの終了をこの番号で伝える
 
 // エラーを表す戻り値
 const int SYSCALL_ERR_UNKNOWN = -1;       // 未定義の番号を渡した
-const int SYSCALL_ERR_INVALID = -2;       // 引数の値が不正(番地にnullptrを渡したか，バイト数に機能が受け付けない値を渡した)
+const int SYSCALL_ERR_INVALID = -2;       // 引数の値が不正(番地が領域の外を指すか，バイト数に機能が受け付けない値を渡した)
 const int SYSCALL_ERR_TOO_LARGE = -3;     // ファイルが読み込み先に収まらないか，大きさがintで表せない
 const int SYSCALL_ERR_NOT_FOUND = -4;     // 指定した名前のファイルが無い
 const int SYSCALL_ERR_IS_DIR = -5;        // 指定した名前がディレクトリを指す
