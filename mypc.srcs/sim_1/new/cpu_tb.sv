@@ -232,7 +232,7 @@ module cpu_tb;
     register_t      exception_handler_pc;             // 直前の実行で例外を起こしたときの，例外ハンドラの番地のレジスタの値(同上)
     bit             exception_redirected;             // 直前の実行で例外を起こした次のサイクルに，例外ハンドラの番地から取得し直すと決まっていたか(同上)
     int             end_pc;                           // 正常終了を表す命令の番地
-    machine_queue_t decoy_code;                       // 実行前にDECOY_CODE_BASE番地へ直接置く囮の命令列
+    machine_queue_t decoy_code;                       // 実行前にメモリの後半の先頭へ直接置く囮の命令列
     machine_queue_t rom_tail;                         // 実行前にROMの末尾(最後の命令をROMの命令数の上限の直前の番地に揃える位置)へ置く命令列
     machine_queue_t user_code;                        // 実行前に領域の先頭へ直接置く，ユーザーモードの命令列(空なら置かない)
     int             user_base;                        // 領域の先頭の番地(領域を設定する命令列がUBASEへ書き込む値)
@@ -280,7 +280,7 @@ module cpu_tb;
                 set_ram_byte(addr + i * 8 + b, instructions[i][b * 8 +: 8]);
     endfunction
 
-    // 命令列をROMの先頭へ，decoy_code・rom_tail・user_codeの命令列をそれぞれDECOY_CODE_BASE番地・ROMの末尾・領域の先頭へ書き込み，
+    // 命令列をROMの先頭へ，囮の命令列・ROMの末尾へ置く命令列・領域の先頭へ置く命令列をそれぞれメモリの後半の先頭・ROMの末尾・領域の先頭へ書き込み，
     // リセットしてから，正常終了・停止・例外ハンドラへ飛ぶ・打ち切りのいずれかに至るまで実行する．
     // user_codeの末尾には，領域の中で自分自身へジャンプし続ける，ユーザーモードの正常終了を表す命令を付ける．
     // 実行の終わり方と，終えた時点のレジスタの値を残す．停止した場合のレジスタの値は，停止を検出した
