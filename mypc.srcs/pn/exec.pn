@@ -22,8 +22,8 @@ int exec_exit_status;         // 実行ファイルが終了のシステムコ�
 // - その下(4バイト境界に揃える): argvの配列(各文字列の先頭の領域の中の番地と，末尾のnullptr)
 // - SP: 戻り先を積んだ位置にあたる4バイト(実行ファイルは戻り先へ戻らないため，値は使わない)
 // - SP-8・SP-4: argc・argv(argvの配列の先頭の領域の中の番地)
-// 置く大きさは，文字列が最大CONSOLE_LINE_SIZEバイト，揃えが最大3バイト，配列が最大EXEC_ARGV_SIZE×4バイト，SP-8からSPまでが12バイトの
-// 合計211バイトで，領域の末尾に取った置き場(EXEC_ARGS_AREA_SIZE)に収まる
+// 置く大きさは，文字列が最大で1行分の64バイト，揃えが最大3バイト，配列が最大33要素×4バイト，SP-8からSPまでが12バイトの
+// 合計211バイトで，領域の末尾に取った引数の置き場(256バイト)に収まる
 unsigned int exec_place_args(char *line) {
     char *argv[EXEC_ARGV_SIZE];  // 各文字列の先頭のメモリの番地
     int length = 0;              // lineの文字数
@@ -38,24 +38,29 @@ unsigned int exec_place_args(char *line) {
     while (line[length] != '\0') {
         length++;
     }
-    // 領域の末尾へ，ヌル終端まで書き写す
+    // 文字列を置く先頭を，ヌル終端まで領域の末尾に収まる位置にする
     text = EXEC_REGION_SIZE - (length + 1);
+    // その位置をメモリの番地へ変換する(カーネルモードでは番地が変換されないため)
     dst = (char *)(EXEC_REGION_BASE + text);
+    // ヌル終端まで書き写す
     for (int i = 0; i <= length; i++) {
         dst[i] = line[i];
     }
     // 書き写した文字列を半角空白で区切り，各文字列の先頭のメモリの番地を並べる
     argc = split_args(dst, argv, EXEC_ARGV_SIZE);
-    // 文字列の下を4バイト境界に揃え，argvの配列を置く
-    // 各要素は，実行ファイルが読めるよう領域の中の番地へ直す．末尾のnullptrは領域の外を指す値のまま置く
+    // argvの配列を置く先頭を，文字列の下を4バイト境界に揃えた位置から，末尾のnullptrを含む要素数ぶん下げた位置にする
     array = (text & ~3) - (argc + 1) * 4;
+    // その位置をメモリの番地へ変換する
     words = (unsigned int *)(EXEC_REGION_BASE + array);
+    // 各文字列の先頭を，実行ファイルが読めるよう領域の中の番地へ直して並べる
     for (int i = 0; i < argc; i++) {
         words[i] = (unsigned int)argv[i] - EXEC_REGION_BASE;
     }
+    // 末尾のnullptrは，領域の外を指す値のまま置く
     words[argc] = (unsigned int)argv[argc];
-    // 配列の下の4バイトを戻り先の位置としてSPにし，その下にargc・argvを置く
+    // 配列のすぐ下の4バイトを，戻り先を積んだ位置にあたるSPにする
     sp = array - 4;
+    // SPの8バイト下をメモリの番地へ変換し，そこからargc・argvを並べる
     words = (unsigned int *)(EXEC_REGION_BASE + sp - 8);
     words[0] = argc;
     words[1] = array;

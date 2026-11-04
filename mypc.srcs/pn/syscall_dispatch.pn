@@ -151,8 +151,8 @@ int syscall_dispatch(int number, int a, int b, int c, int d) {
     return SYSCALL_ERR_UNKNOWN;
 }
 
-// 実行ファイルがシステムコールの命令を実行した時点のSP(領域の中の番地user_sp)から並べた番号と引数を読み，番号に対応する機能を実行して，戻り値を置き場へ書き込む
-// 戻り値: 実行ファイルが終了を求めた場合は1(終了状態をexit_statusへ書き込む)，それ以外は0
+// 実行ファイルがシステムコールの命令を実行した時点のSP(領域の中の番地)を受け取り，そこから並べた番号と引数を読んで，番号に対応する機能を実行し，戻り値を置き場へ書き込む
+// 戻り値: 実行ファイルが終了を求めた場合は1(終了状態を2つ目の引数が指す先へ書き込む)，それ以外は0
 // SPが4の倍数でないか，並べた値が領域に収まらなければ，何もせず0を返す(値を読めず，戻り値も書き込めないため)
 int syscall_handle(unsigned int user_sp, int *exit_status) {
     int *args = (int *)exec_region_buffer((int)user_sp, SYSCALL_ARGS_SIZE);  // SPから並べた値
