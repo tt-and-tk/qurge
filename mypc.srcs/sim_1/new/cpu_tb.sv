@@ -12,7 +12,7 @@
 // - 停止: カーネルモードで例外を検出したCPUが実行を止めること(仕様はhalt.md)
 // - 例外ハンドラへ飛ぶ: ユーザーモードで例外を検出したCPUが，例外を起こした命令のPCと原因を書き込み，カーネルモードで例外ハンドラの番地へ飛ぶこと(仕様はmode.md)
 // - 先読み: CPUが命令を実行している間に，次の命令をROMから取得しておくこと
-// - メインメモリの後半: カーネルモードのPCのうちROMの命令数の上限に続く範囲が，ここに置いた命令に対応する(仕様はrom.md)．命令列を置いた部分をコード領域と呼ぶ
+// - 囮の命令列: 実行されないことを確かめるために，メインメモリのDECOY_CODE_BASE番地に置く命令列
 // - 領域: ユーザーモードのプログラムが使うメインメモリの範囲．先頭の番地と大きさをカーネルモードでUBASE・USIZEへ書き込んで決める．
 //   ユーザーモードの番地(領域の中の番地)は領域の先頭を0とするバイト単位の番地である．ユーザーモードのPCも領域の先頭の命令を0として数え，
 //   PCがpの命令は領域の中の番地p × 8に置く(仕様はmode.md)
@@ -217,19 +217,7 @@ module cpu_tb;
 
     typedef machine_t machine_queue_t[$];  // 命令列
 
-    localparam int CODE_AREA_PC = rom_p::CODE_AREA_PC_BASE;  // メモリの後半の先頭の命令に対応するPC
-
-    // メモリの後半の先頭からindex番目の命令を置くメインメモリの番地を返す
-    function automatic int code_area_address(input int index);
-        return ram_p::CODE_AREA_BASE + index * 8;
-    endfunction
-
-    // 命令をメモリの後半のindex番目へWMで書き込む命令列を作る．下位ワード(イミディエイトデータ)を小さい番地へ，
-    // 上位ワード(命令語)をその4バイト後へ書く．書き込む値の受け渡しにr15を使う
-    function automatic machine_queue_t store_code(input int index, input machine_t instruction);
-        return '{movi(15, instruction[31:0]),  wm(4'hf, 6'h00, 15, im(code_area_address(index))),
-                 movi(15, instruction[63:32]), wm(4'hf, 6'h00, 15, im(code_area_address(index) + 4))};
-    endfunction
+    localparam int DECOY_CODE_BASE = 32'h8000;  // 囮の命令列を置くメインメモリの番地(メモリの後半の先頭)
 
     // ===== 実行と結果の採取 =====
 
@@ -244,14 +232,13 @@ module cpu_tb;
     register_t      exception_handler_pc;             // 直前の実行で例外を起こしたときの，例外ハンドラの番地のレジスタの値(同上)
     bit             exception_redirected;             // 直前の実行で例外を起こした次のサイクルに，例外ハンドラの番地から取得し直すと決まっていたか(同上)
     int             end_pc;                           // 正常終了を表す命令の番地
-    machine_queue_t code_area;                        // 実行前にコード領域へ直接置く命令列
-    int             code_area_index = 0;              // code_areaを置き始める，メモリの後半の先頭からの命令の順番
+    machine_queue_t decoy_code;                       // 実行前にDECOY_CODE_BASE番地へ直接置く囮の命令列
     machine_queue_t rom_tail;                         // 実行前にROMの末尾(最後の命令をROMの命令数の上限の直前の番地に揃える位置)へ置く命令列
     machine_queue_t user_code;                        // 実行前に領域の先頭へ直接置く，ユーザーモードの命令列(空なら置かない)
     int             user_base;                        // 領域の先頭の番地(領域を設定する命令列がUBASEへ書き込む値)
     int             user_size;                        // 領域の大きさ(領域を設定する命令列がUSIZEへ書き込む値)
 
-    localparam int USER_BASE_DEFAULT = 32'h9000;      // テストケースの始めのuser_base(番地を変換しない場合と区別できるよう，メモリの後半の先頭と異なる番地にする)
+    localparam int USER_BASE_DEFAULT = 32'h9000;      // テストケースの始めのuser_base(囮の命令列と区別できるよう，囮の命令列の番地と異なる番地にする)
     localparam int USER_SIZE_DEFAULT = 32'h1000;      // テストケースの始めのuser_size
 
     // CPUの現在のレジスタの値と動作状態を，実行を終えた時点の値として写し取る
@@ -293,7 +280,7 @@ module cpu_tb;
                 set_ram_byte(addr + i * 8 + b, instructions[i][b * 8 +: 8]);
     endfunction
 
-    // 命令列をROMの先頭へ，code_area・rom_tail・user_codeの命令列をそれぞれメモリの後半・ROMの末尾・領域の先頭へ書き込み，
+    // 命令列をROMの先頭へ，decoy_code・rom_tail・user_codeの命令列をそれぞれDECOY_CODE_BASE番地・ROMの末尾・領域の先頭へ書き込み，
     // リセットしてから，正常終了・停止・例外ハンドラへ飛ぶ・打ち切りのいずれかに至るまで実行する．
     // user_codeの末尾には，領域の中で自分自身へジャンプし続ける，ユーザーモードの正常終了を表す命令を付ける．
     // 実行の終わり方と，終えた時点のレジスタの値を残す．停止した場合のレジスタの値は，停止を検出した
@@ -318,8 +305,8 @@ module cpu_tb;
         // リセット中に，メインメモリを消す(残す指定がなければ)
         if (!keep_ram)
             clear_ram();
-        // リセット中に，メモリの後半へ置く命令列を書き込む(メモリを消した後に書くため，消す処理より後に置く)
-        put_instructions(code_area_address(code_area_index), code_area);
+        // リセット中に，囮の命令列を書き込む(メモリを消した後に書くため，消す処理より後に置く)
+        put_instructions(DECOY_CODE_BASE, decoy_code);
         // リセット中に，領域の先頭へ置く命令列を，ユーザーモードの正常終了を表す命令を付けて書き込む(同じくメモリを消した後に書く)
         if (user_code.size() > 0)
             put_instructions(user_base, {user_code, jmp(6'h00, im(user_code.size()))});
@@ -338,10 +325,10 @@ module cpu_tb;
         redirect_met_early_jump = 1'b0;
         // 停止・正常終了・打ち切りのいずれかに至るまで1サイクルずつ進める
         for (int cycle = 0; ; cycle++) begin
-            // 命令を置けない番地(カーネルモードではROMにもメモリの後半にも対応しない番地，ユーザーモードでは範囲外の番地)へ進んで
+            // 命令を置けない番地(カーネルモードではROMへ渡せる幅に収まらない番地，ユーザーモードでは範囲外の番地)へ進んで
             // 停止する場合は，CPUがその番地をどこにも残さないため，
             // 停止する前のこのサイクルのうちに，停止するかとその番地(取得用のプログラムカウンタ)を控える
-            unreachable_halt = dut.alu_sv_0.pipeline_drained && !dut.alu_sv_0.fetch_pc_in_ram;
+            unreachable_halt = dut.alu_sv_0.pipeline_drained && !dut.alu_sv_0.fetch_pc_in_region;
             unreachable_pc   = dut.alu_sv_0.fetch_pc;
             // 例外ハンドラへ飛ぶ場合は，例外を起こした命令のPCと，そのときの例外ハンドラの番地を控える
             // (例外ハンドラへ飛んだ後は，例外ハンドラの命令がPCや例外ハンドラの番地を書き換えうるため)
@@ -430,7 +417,7 @@ module cpu_tb;
     endfunction
 
     // 前のテストケースを合否の件数へ数え，新しいテストケースを始める．
-    // UARTの受信バッファ，メモリの後半・ROMの末尾・領域の先頭へ置く命令列は空に戻し，領域の先頭の番地と大きさは始めの値に戻す
+    // UARTの受信バッファ，囮の命令列，ROMの末尾・領域の先頭へ置く命令列は空に戻し，領域の先頭の番地と大きさは始めの値に戻す
     function automatic void begin_test(input string name);
         // 前のテストケースを数える
         finish_test();
@@ -440,9 +427,8 @@ module cpu_tb;
         test_open    = 1'b1;
         // UARTの受信バッファを空にする
         uart_rx_queue.delete();
-        // メモリの後半・ROMの末尾・領域の先頭へ置く命令列を空にする
-        code_area.delete();
-        code_area_index = 0;
+        // 囮の命令列と，ROMの末尾・領域の先頭へ置く命令列を空にする
+        decoy_code.delete();
         rom_tail.delete();
         user_code.delete();
         // 領域の先頭の番地と大きさを始めの値に戻す
@@ -1530,9 +1516,9 @@ module cpu_tb;
         expect_reg(UBASE_ADDR, USER_BASE_DEFAULT);
         expect_kernel_mode(1'b0);
 
-        // メモリの後半の先頭にr1への代入を，領域の先頭にr2への代入を置く
+        // 囮の命令列としてr1への代入を，領域の先頭にr2への代入を置く
         `BEGIN_TEST("ユーザーモードの命令は，領域の先頭の番地を足した番地から取得する");
-        code_area = '{movi(1, 32'd1)};
+        decoy_code = '{movi(1, 32'd1)};
         user_code = '{movi(2, 32'd2)};
         run(enter_user_mode());
         // 領域の先頭の番地にある代入だけが実行される
@@ -1654,14 +1640,6 @@ module cpu_tb;
         // ジャンプ先のPCで例外を起こす
         expect_exception_jump(32'h1000 / 8, EXCEPTION_FETCH);
 
-        // メモリの後半に対応するカーネルモードのPCを，ユーザーモードの戻り先にしてSYSRETを実行する
-        `BEGIN_TEST("メモリの後半に対応するカーネルモードのPCも，ユーザーモードでは領域の先頭の命令から数えたPCとして扱う");
-        code_area = '{movi(1, 32'd1)};
-        run(enter_user_mode(CODE_AREA_PC));
-        // メモリの後半の命令を実行せず，領域の外の番地として例外を起こす
-        expect_exception_jump(CODE_AREA_PC, EXCEPTION_FETCH);
-        expect_reg(1, 32'd0);
-
         // ユーザーモードで，SPを設定してからPC 4の関数をCALLで呼び，その中でSPを読んでからRETで戻る
         `BEGIN_TEST("ユーザーモードのCALL・RETは領域の中のスタックを使う");
         user_code = '{movi(SP_ADDR, 32'h800), call(6'h00, im(4)), movi(2, 32'd2), jmp(6'h00, im(7)),
@@ -1702,22 +1680,22 @@ module cpu_tb;
         expect_reg(SP_ADDR, 32'd0);
 
         // 領域の大きさ・戻り先を設定した後，領域の先頭の番地を1本目のパイプラインで書き換えてすぐにSYSRETを実行する．
-        // 書き換える前の番地(メモリの後半の先頭)にはr1への代入を，書き換えた後の番地にはr2への代入を置く
+        // 書き換える前の番地(囮の命令列の番地)にはr1への代入を，書き換えた後の番地にはr2への代入を置く
         `BEGIN_TEST("直前に1本目で書き込んだ領域の先頭の番地でユーザーモードの命令を取得する");
-        code_area = '{movi(1, 32'd1)};
+        decoy_code = '{movi(1, 32'd1)};
         user_code = '{movi(2, 32'd2)};
-        run('{movi(USIZE_ADDR, USER_SIZE_DEFAULT), movi(KRET_ADDR, 32'd0), movi(UBASE_ADDR, ram_p::CODE_AREA_BASE),
+        run('{movi(USIZE_ADDR, USER_SIZE_DEFAULT), movi(KRET_ADDR, 32'd0), movi(UBASE_ADDR, DECOY_CODE_BASE),
               movi(UBASE_ADDR, USER_BASE_DEFAULT), sysret()});
         // 書き換えた後の番地の命令だけが実行される
         expect_end();
         expect_reg(1, 32'd0);
         expect_reg(2, 32'd2);
 
-        // 領域の先頭の番地をメモリの後半の先頭にした後，NOPを先頭とする同時実行の2番目で書き換えてすぐにSYSRETを実行する
+        // 領域の先頭の番地を囮の命令列の番地にした後，NOPを先頭とする同時実行の2番目で書き換えてすぐにSYSRETを実行する
         `BEGIN_TEST("直前に2本目で書き込んだ領域の先頭の番地でユーザーモードの命令を取得する");
-        code_area = '{movi(1, 32'd1)};
+        decoy_code = '{movi(1, 32'd1)};
         user_code = '{movi(2, 32'd2)};
-        run('{movi(USIZE_ADDR, USER_SIZE_DEFAULT), movi(KRET_ADDR, 32'd0), movi(UBASE_ADDR, ram_p::CODE_AREA_BASE),
+        run('{movi(USIZE_ADDR, USER_SIZE_DEFAULT), movi(KRET_ADDR, 32'd0), movi(UBASE_ADDR, DECOY_CODE_BASE),
               nop(), movi(UBASE_ADDR, USER_BASE_DEFAULT), sysret()});
         // 書き換えた後の番地の命令だけが実行される
         expect_end();
@@ -1784,15 +1762,14 @@ module cpu_tb;
         expect_exception_jump(1, EXCEPTION_FETCH);
         expect_reg(1, 32'd1);
 
-        // システムコールハンドラをメモリの後半の先頭にし，そこで戻り先を読んでからROMの正常終了を表す命令へ飛ぶ
-        `BEGIN_TEST("ユーザーモードのSYSCALLで，メモリの後半に置いたシステムコールハンドラへカーネルモードで飛ぶ");
-        code_area = '{movr(2, KRET_ADDR), jmp(6'h00, im(5))};
-        user_code = '{nop(), syscall()};
-        run({movi(KENTRY_ADDR, CODE_AREA_PC), enter_user_mode()});
-        // システムコールハンドラの命令をカーネルモードで実行し，戻り先にはSYSCALLの次のPCが入る
-        expect_end();
-        expect_reg(2, 32'd2);
-        expect_kernel_mode(1'b1);
+        // システムコールハンドラを，命令を置けない番地(ROMへ渡せる幅に収まらない番地)にして，ユーザーモードでSYSCALLを実行する
+        `BEGIN_TEST("システムコールハンドラの番地が命令を置けない番地なら，SYSCALLの後にカーネルモードで停止する");
+        decoy_code = '{movi(1, 32'd1)};
+        user_code = '{syscall()};
+        run({movi(KENTRY_ADDR, rom_p::MAX_LINE_NUM), enter_user_mode()});
+        // システムコールハンドラの番地で停止し，囮の命令列は実行されない
+        expect_halt(rom_p::MAX_LINE_NUM);
+        expect_reg(1, 32'd0);
 
         // ユーザーモードからSYSCALLで入ったカーネルモードで，即値の番地へ読み書きする
         `BEGIN_TEST("ユーザーモードからSYSCALLで入ったカーネルモードでは，番地を変換しない");
@@ -1961,23 +1938,22 @@ module cpu_tb;
         expect_mem32(USER_BASE_DEFAULT + 32'h100, 32'h55);
         expect_mem32(32'h100, 32'h0);
 
-        // 例外ハンドラをメモリの後半の先頭にし，そこで原因を読んでからROMの正常終了を表す命令へ飛ぶ
-        `BEGIN_TEST("メモリの後半に置いた例外ハンドラへカーネルモードで飛ぶ");
-        code_area = '{movr(2, ECAUSE_ADDR), jmp(6'h00, im(5))};
-        user_code = '{raw(3'h7, 6'h00, 0, 0, 0, NO_IMM)};
-        run({movi(EENTRY_ADDR, CODE_AREA_PC), enter_user_mode()}, 1'b1, 1'b0, 1'b0);
-        // 例外ハンドラの命令をカーネルモードで実行し，原因が読める
-        expect_end();
-        expect_reg(2, EXCEPTION_ILLEGAL);
-        expect_kernel_mode(1'b1);
-
         // 例外ハンドラをROMの命令がない番地にして，ユーザーモードで例外を起こす
-        `BEGIN_TEST("例外ハンドラの番地が命令を置けない番地なら，例外の後にカーネルモードで停止する");
+        `BEGIN_TEST("例外ハンドラの番地がROMの命令がない番地なら，例外の後にカーネルモードで停止する");
         user_code = '{raw(3'h7, 6'h00, 0, 0, 0, NO_IMM)};
         run({movi(EENTRY_ADDR, 32'd100), enter_user_mode()}, 1'b1, 1'b0, 1'b0);
         // 例外ハンドラの番地で停止し，例外の原因は書き込まれている
         expect_halt(100);
         expect_reg(ECAUSE_ADDR, EXCEPTION_ILLEGAL);
+
+        // 例外ハンドラを，命令を置けない番地(ROMへ渡せる幅に収まらない番地)にして，ユーザーモードで例外を起こす
+        `BEGIN_TEST("例外ハンドラの番地がROMへ渡せる幅に収まらない番地なら，例外の後にカーネルモードで停止する");
+        decoy_code = '{movi(1, 32'd1)};
+        user_code = '{raw(3'h7, 6'h00, 0, 0, 0, NO_IMM)};
+        run({movi(EENTRY_ADDR, rom_p::MAX_LINE_NUM), enter_user_mode()}, 1'b1, 1'b0, 1'b0);
+        // 例外ハンドラの番地で停止し，囮の命令列は実行されない
+        expect_halt(rom_p::MAX_LINE_NUM);
+        expect_reg(1, 32'd0);
 
         // 例外ハンドラの番地を設定してから，カーネルモードでr0(0)で割る
         `BEGIN_TEST("カーネルモードで起きた例外は，例外ハンドラの番地を設定しても例外ハンドラへ飛ばず停止する");
@@ -2228,141 +2204,52 @@ module cpu_tb;
         expect_mem32(32'h100, 32'd2);
     endtask
 
-    // メインメモリの後半に置いた命令の実行
-    task automatic test_code_area();
-        machine_queue_t body;  // ROMへ書き込む命令列
+    // カーネルモードでの，ROMの範囲の外への命令の取得
+    task automatic test_rom_boundary();
+        // 囮の命令列としてr1への代入を置き，ROMへ渡せる幅に収まらない最初のPCへジャンプする
+        `BEGIN_TEST("カーネルモードではメインメモリの命令を実行せず，ROMへ渡せる幅に収まらないPCで停止する");
+        decoy_code = '{movi(1, 32'd1)};
+        run('{jmp(6'h00, im(rom_p::MAX_LINE_NUM))});
+        // ジャンプ先のPCで停止し，囮の命令列は実行されない
+        expect_halt(rom_p::MAX_LINE_NUM);
+        expect_reg(1, 32'd0);
 
-        // メモリの後半の0番目にr1への代入を，1番目にRETを，ROM上の命令がWMで書き込んでからCALLで呼び，戻った後のSPを読む
-        `BEGIN_TEST("WMでメモリの後半へ書いた命令をCALLで実行し，RETで戻る");
-        body = {store_code(0, movi(1, 32'h1234)), store_code(1, ret())};
-        body.push_back(call(6'h00, im(CODE_AREA_PC)));
-        body.push_back(movr(5, SP_ADDR));
-        run(body);
-        // コード領域の命令が実行され，CALLの次の番地へ戻り，SPが元に戻る
-        expect_end();
-        expect_reg(1, 32'h1234);
-        expect_reg(5, 32'h8000);
-        expect_mem32(32'h7ffc, body.size() - 1);
-
-        // コード領域の命令で，メモリを即値の番地・レジスタ相対の番地で読み書きし，読んだ値どうしをレジスタで足す
-        `BEGIN_TEST("コード領域の命令はメモリを読み書きでき，即値を使う命令も使わない命令も実行できる");
-        code_area = '{movi(1, 32'h1122_3344), wm(4'hf, 6'h00, 1, im(32'h100)), rm(4'hf, 6'h00, 2, im(32'h100)),
-                      movi(3, 32'h200), wmr(4'hf, 3, 1, im(32'd4)), rmr(4'hf, 3, 4, im(32'd4)), add(2, 4, 5), ret()};
-        run('{call(6'h00, im(CODE_AREA_PC))});
-        // 書いた値が読め，複数サイクルかかる読み込みの直後の命令も読んだ値を使える
-        expect_end();
-        expect_mem32(32'h100, 32'h1122_3344);
-        expect_mem32(32'h204, 32'h1122_3344);
-        expect_reg(2, 32'h1122_3344);
-        expect_reg(4, 32'h1122_3344);
-        expect_reg(5, 32'h2244_6688);
-
-        // コード領域の中で，r1が5になるまで1つ前の番地へ戻るループを回し，その後r4への代入をJMPで飛び越える
-        `BEGIN_TEST("コード領域の中でF系の分岐とJMPが働く");
-        code_area = '{movi(3, 32'd1), movi(2, 32'd5), add(1, 3, 1), ne(1, 2, im(-32'sd1)),
-                      jmp(6'h00, im(CODE_AREA_PC + 6)), movi(4, 32'd1), ret()};
-        run('{call(6'h00, im(CODE_AREA_PC))});
-        // ループを抜けた時点でr1が5になり，r4は0のまま残る
-        expect_end();
-        expect_reg(1, 32'd5);
-        expect_reg(4, 32'd0);
-
-        // コード領域の1番目のMOVと，複数サイクルかかるRMの直後の3番目のMOVでPCを読む
-        `BEGIN_TEST("コード領域の命令がPCを読むとその命令のPCが読める");
-        code_area = '{nop(), movr(1, PC_ADDR), rm(4'hf, 6'h00, 2, im(32'h100)), movr(3, PC_ADDR), ret()};
-        run('{call(6'h00, im(CODE_AREA_PC))});
-        // それぞれのMOV自身のPCが入る
-        expect_end();
-        expect_reg(1, CODE_AREA_PC + 1);
-        expect_reg(3, CODE_AREA_PC + 3);
-
-        // コード領域の0番目から，コード領域の3番目の関数を呼び，その中でSPを読む
-        `BEGIN_TEST("コード領域の命令からコード領域の関数をCALLできる");
-        code_area = '{call(6'h00, im(CODE_AREA_PC + 3)), movi(2, 32'd2), ret(),
-                      movi(1, 32'd1), movr(3, SP_ADDR), ret()};
-        run('{call(6'h00, im(CODE_AREA_PC))});
-        // 2段の呼び出しからそれぞれの呼び出し元へ戻り，スタックには2つの戻り先が積まれている
-        expect_end();
-        expect_reg(1, 32'd1);
-        expect_reg(2, 32'd2);
-        expect_reg(3, 32'h7ff8);
-        expect_reg(SP_ADDR, 32'h8000);
-        expect_mem32(32'h7ffc, 32'd1);
-        expect_mem32(32'h7ff8, CODE_AREA_PC + 1);
-
-        // コード領域の関数から，ROMの2番目の関数を呼ぶ
-        `BEGIN_TEST("コード領域の命令からROMの関数をCALLし，RETでコード領域へ戻る");
-        code_area = '{call(6'h00, im(32'd2)), movi(2, 32'd2), ret()};
-        run('{call(6'h00, im(CODE_AREA_PC)), jmp(6'h00, im(32'd4)), movi(1, 32'd1), ret()});
-        // ROMの関数を実行してコード領域へ戻り，さらにROMへ戻る
-        expect_end();
-        expect_reg(1, 32'd1);
-        expect_reg(2, 32'd2);
-        expect_reg(SP_ADDR, 32'h8000);
-        expect_mem32(32'h7ff8, CODE_AREA_PC + 1);
+        // 囮の命令列としてr1への代入を置き，ROMへ渡せる幅に収まらない最初のPCをCALLで呼ぶ
+        `BEGIN_TEST("カーネルモードでROMへ渡せる幅に収まらないPCをCALLで呼ぶと停止する");
+        decoy_code = '{movi(1, 32'd1)};
+        run('{call(6'h00, im(rom_p::MAX_LINE_NUM))});
+        // 呼び出し先のPCで停止し，囮の命令列は実行されない
+        expect_halt(rom_p::MAX_LINE_NUM);
+        expect_reg(1, 32'd0);
 
         // ROMの最後の番地に1サイクルで終わる命令を置き，そこへジャンプする
-        `BEGIN_TEST("ROMの最後の番地の命令の次はメモリの後半の先頭へ進む");
+        `BEGIN_TEST("ROMの命令数の上限まで格納したROMの最後の命令の次へ進むと停止する");
+        decoy_code = '{movi(2, 32'd2)};
         rom_tail = '{movi(1, 32'd1)};
-        code_area = '{movi(2, 32'd2), jmp(6'h00, im(32'd1))};
-        run('{jmp(6'h00, im(CODE_AREA_PC - 1))});
-        // ROMの最後の命令とメモリの後半の先頭の命令が順に実行される
-        expect_end();
+        run('{jmp(6'h00, im(rom_p::MAX_LINE_NUM - 1))});
+        // ROMの最後の命令は実行され，その次のPCで停止する．囮の命令列は実行されない
+        expect_halt(rom_p::MAX_LINE_NUM);
         expect_reg(1, 32'd1);
-        expect_reg(2, 32'd2);
+        expect_reg(2, 32'd0);
 
         // ROMの最後の番地に複数サイクルかかるRMを置き，そこへジャンプする．RMの実行中に次の番地を先読みしない経路を通る
-        `BEGIN_TEST("複数サイクルかかるROMの最後の命令の次もメモリの後半の先頭へ進む");
+        `BEGIN_TEST("ROMの命令数の上限まで格納したROMの，複数サイクルかかる最後の命令の次へ進むと停止する");
         rom_tail = '{rm(4'hf, 6'h00, 1, im(32'h100))};
-        code_area = '{add(1, 1, 2), jmp(6'h00, im(32'd3))};
-        run('{movi(3, 32'h55), wm(4'hf, 6'h00, 3, im(32'h100)), jmp(6'h00, im(CODE_AREA_PC - 1))});
-        // RMで読んだ値をメモリの後半の先頭の命令が使える
-        expect_end();
-        expect_reg(2, 32'haa);
+        run('{movi(3, 32'h55), wm(4'hf, 6'h00, 3, im(32'h100)), jmp(6'h00, im(rom_p::MAX_LINE_NUM - 1))});
+        // 最後のRMは実行され，その次のPCで停止する
+        expect_halt(rom_p::MAX_LINE_NUM);
+        expect_reg(1, 32'h55);
 
         // ROMの最後の3番地にDIVと2つの代入を置き，そこへジャンプする．DIVの実行中に後の2命令を取得し終え，
         // 命令キューに命令を残したままROMの範囲を出る
-        `BEGIN_TEST("命令キューに命令を残したままROMの範囲を出てもメモリの後半の先頭へ進む");
+        `BEGIN_TEST("命令キューに命令を残したままROMの範囲を出ると，残りの命令を実行してから停止する");
         rom_tail = '{div(1, 2, 3, NO_IMM), movi(4, 32'd4), movi(5, 32'd5)};
-        code_area = '{add(4, 5, 6), jmp(6'h00, im(32'd3))};
-        run('{movi(1, 32'd9), movi(2, 32'd4), jmp(6'h00, im(CODE_AREA_PC - 3))});
-        // ROMの最後の3命令がすべて実行されてから，メモリの後半の先頭の命令が実行される
-        expect_end();
+        run('{movi(1, 32'd9), movi(2, 32'd4), jmp(6'h00, im(rom_p::MAX_LINE_NUM - 3))});
+        // ROMの最後の3命令がすべて実行されてから，その次のPCで停止する
+        expect_halt(rom_p::MAX_LINE_NUM);
         expect_reg(3, 32'd2);
-        expect_reg(6, 32'd9);
-
-        // メモリの後半の最後の位置に1サイクルで終わる命令を置き，そこへジャンプする
-        `BEGIN_TEST("メモリの後半の最後の命令の次へ進むと停止する");
-        code_area_index = rom_p::CODE_AREA_PC_NUM - 1;
-        code_area = '{movi(1, 32'd1)};
-        run('{jmp(6'h00, im(CODE_AREA_PC + rom_p::CODE_AREA_PC_NUM - 1))});
-        // 最後の命令は実行され，その次の番地で停止する
-        expect_halt(CODE_AREA_PC + rom_p::CODE_AREA_PC_NUM);
-        expect_reg(1, 32'd1);
-
-        // メモリの後半の最後の位置に複数サイクルかかるWMを置き，そこへジャンプする
-        `BEGIN_TEST("複数サイクルかかるメモリの後半の最後の命令の次へ進むと停止する");
-        code_area_index = rom_p::CODE_AREA_PC_NUM - 1;
-        code_area = '{wm(4'hf, 6'h00, 1, im(32'h100))};
-        run('{movi(1, 32'd7), jmp(6'h00, im(CODE_AREA_PC + rom_p::CODE_AREA_PC_NUM - 1))});
-        // 最後のWMは実行され，その次の番地で停止する
-        expect_halt(CODE_AREA_PC + rom_p::CODE_AREA_PC_NUM);
-        expect_mem32(32'h100, 32'd7);
-
-        // メモリの後半の1番目にN系で未定義のfuncを持つ命令を置き，メモリの後半の先頭へジャンプする
-        `BEGIN_TEST("コード領域の実行できない命令はそのPCで停止する");
-        code_area = '{nop(), raw(3'h0, 6'h01, 0, 0, 0, NO_IMM)};
-        run('{jmp(6'h00, im(CODE_AREA_PC))});
-        // その命令のPCで停止する
-        expect_halt(CODE_AREA_PC + 1);
-
-        // コード領域の0〜3番目の命令で，直後の4番目(初めはNOP)をr1への代入に書き換えてから実行する
-        `BEGIN_TEST("コード領域の命令が直後の命令を書き換えると書き換えた命令が実行される");
-        code_area = {store_code(4, movi(1, 32'h55)), nop(), ret()};
-        run('{call(6'h00, im(CODE_AREA_PC))});
-        // 書き換えた後の代入が実行される
-        expect_end();
-        expect_reg(1, 32'h55);
+        expect_reg(4, 32'd4);
+        expect_reg(5, 32'd5);
     endtask
 
     // 命令を重ねて実行するパイプラインの所要サイクル数と，直前の命令の結果の受け取り
@@ -3082,7 +2969,7 @@ module cpu_tb;
         test_pins();
         test_uart();
         test_common();
-        test_code_area();
+        test_rom_boundary();
         test_pipeline();
         test_simultaneous_execution();
         // 最後のテストケースを数える
