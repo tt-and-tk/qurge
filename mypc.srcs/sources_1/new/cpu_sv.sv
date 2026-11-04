@@ -21,6 +21,7 @@
 
 
 `include "machine.svh"
+`include "ram.svh"
 `include "rom.svh"
 `include "decoder.svh"
 
