@@ -1,4 +1,6 @@
-// 実行ファイルを，領域の中でユーザーモードとして動かす処理．実行ファイルへ入る処理と，実行ファイルからカーネルモードへ入るときの入口(システムコールハンドラ・例外ハンドラ)を置く
+// 実行ファイルを，領域の中でユーザーモードとして動かす処理．実行ファイルへ入る処理と，次の2つの場合にCPUがカーネルモードで飛ぶ先の関数を置く
+// - 実行ファイルがシステムコールの命令を実行した場合: システムコールハンドラ
+// - 実行ファイルが例外を起こした場合: 例外ハンドラ
 // 実行ファイルへ入る前と，システムコールハンドラでカーネルモードへ入った後は，SPをカーネルモードのスタック(メモリの前半)に置く．
 // SPを書き換える関数は，フレームの大きさが0になるよう，引数・ローカル変数を持たず，値はグローバル変数に置く
 // (フレームを持つ関数は，書き換えた後のSPを基準にフレームを読み書きしてしまうため，コンパイラがSPの書き換えを禁止している)
@@ -8,8 +10,9 @@
 #include "exec_region.pn"
 #include "syscall_dispatch.pn"
 
-const int EXEC_ARGV_SIZE = CONSOLE_LINE_SIZE / 2 + 1;  // 実行ファイルへ渡すargvの要素数(1行から取り出せる引数の最大数と，末尾のnullptrの分)
-const unsigned int KERNEL_STACK_EMPTY = 0x8000;       // カーネルモードの空のスタックを表すSP(メモリの前半の末尾の直後)
+// argvの配列に取る要素数．1行から取り出せる文字列の数が最も多い場合(1文字と空白が交互に並ぶ場合)の数に，末尾のnullptrの1つを足す
+const int EXEC_ARGV_SIZE = CONSOLE_LINE_SIZE / 2 + 1;
+const unsigned int KERNEL_STACK_EMPTY = 0x8000;  // カーネルモードの空のスタックを表すSP(メモリの前半の末尾の直後)
 
 unsigned int exec_start_sp;   // 実行ファイルへ入るときのSP(領域の中の番地)
 unsigned int exec_kernel_sp;  // 実行ファイルへ入る直前のカーネルモードのSP．実行ファイルへ入る関数の戻り先を指す
@@ -105,7 +108,7 @@ void exec_exception_entry(void) {
 
 // 領域に読み込んだ実行ファイルへ，コマンド名と引数(lineを半角空白で区切ったもの)を渡してユーザーモードで実行し，終了状態を返す
 int exec_run(char *line) {
-    // 領域と，実行ファイルからカーネルモードへ入るときの入口を設定する
+    // 領域と，システムコールの命令・例外でCPUが飛ぶ先を設定する
     UBASE = EXEC_REGION_BASE;
     USIZE = EXEC_REGION_SIZE;
     KENTRY = (unsigned int)exec_syscall_entry;

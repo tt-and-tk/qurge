@@ -1,4 +1,5 @@
-// 実行ファイルに割り振る領域．実行ファイルは，領域の先頭を0とするバイト単位の番地(以下，領域の中の番地)でユーザーモードとして動く
+// 実行ファイルに割り振る領域の位置・大きさと，OSが領域の中の番地を読み書きするための関数
+// 実行ファイルは，領域の先頭を0とするバイト単位の番地(以下，領域の中の番地)でユーザーモードとして動く
 // 領域の中の番地は，命令の取り出しとメモリの読み書きのたびにCPUがメモリの番地へ変換する．カーネルモードで動くOSは変換されないため，ここの関数で変換する
 #pragma once
 
@@ -9,26 +10,24 @@ const int EXEC_CODE_SIZE = EXEC_REGION_SIZE - EXEC_ARGS_AREA_SIZE;  // 読み込
 
 // 領域の中の番地addrからsizeバイトの範囲が領域に収まれば，その先頭に対応するメモリの番地を指すポインタを返す．収まらなければnullptrを返す
 // (実行ファイルから受け取った番地を，読み書きする前に確かめるために使う．領域の外をカーネルモードで読み書きすると，OSのデータを壊すか，CPUが停止するため)
-char *exec_region_buffer(int addr, int size) {
-    // 番地を符号なしの値として扱う(負の値とnullptrは領域の大きさを超える値になり，領域の外として扱われる)
-    unsigned int offset = (unsigned int)addr;  // 範囲の先頭の領域の中の番地
-
+// 実行ファイルがintで渡した負の番地とnullptrは，符号なしの値として領域の大きさを超えるため，領域の外として扱われる
+char *exec_region_buffer(unsigned int addr, int size) {
     // 範囲が領域に収まらなければ，nullptrを返す
     if (
         // 先頭が領域の外にある
-        offset >= EXEC_REGION_SIZE
+        addr >= EXEC_REGION_SIZE
         // または，大きさが負である
         || size < 0
         // または，末尾が領域の外にある(先頭が領域の中にあることを確かめた後に，残りの大きさと比べるため桁あふれしない)
-        || (unsigned int)size > EXEC_REGION_SIZE - offset) {
+        || (unsigned int)size > EXEC_REGION_SIZE - addr) {
         return nullptr;
     }
-    return (char *)(EXEC_REGION_BASE + offset);
+    return (char *)(EXEC_REGION_BASE + addr);
 }
 
 // 領域の中の番地addrから始まるヌル終端の文字列が，ヌル終端まで領域に収まれば，その先頭に対応するメモリの番地を指すポインタを返す．
 // 収まらなければnullptrを返す
-char *exec_region_string(int addr) {
+char *exec_region_string(unsigned int addr) {
     char *text = exec_region_buffer(addr, 1);  // 文字列の先頭
 
     // 先頭が領域の外にあれば，nullptrを返す
