@@ -1,7 +1,8 @@
-// システムコールの受付関数．実行ファイルから番号と引数を受け取り，番号に対応するOSの機能(各システムコールの処理)へ振り分ける
-// シェルは実行ファイルを呼び出す直前に，この関数の番地をシステムコールの入口へ書き込む
+// システムコールの処理．実行ファイルから番号と引数を受け取り，番号に対応するOSの機能(各システムコールの処理)へ振り分ける
+// 実行ファイルが渡す番地は領域の中の番地であるため，領域に収まるかを確かめてからメモリの番地へ変換して使う
 #pragma once
 #include "console.pn"
+#include "exec_region.pn"
 #include "fat.pn"
 #include "lib/syscall_number.pn"
 
@@ -25,13 +26,13 @@ int syscall_fat_error(int status) {
     return SYSCALL_ERR_IO;
 }
 
-// 名前aのファイルの大きさ(バイト数)を返す
+// 領域の中の番地aにある名前のファイルの大きさ(バイト数)を返す
 int syscall_file_size(int a) {
-    char *name = (char *)a;  // ファイル名
-    struct FatEntry entry;   // 見つかったファイルのエントリ
-    int status;              // 検索の結果
+    char *name = exec_region_string(a);  // ファイル名
+    struct FatEntry entry;               // 見つかったファイルのエントリ
+    int status;                          // 検索の結果
 
-    // 名前を読めなければ探せない
+    // 名前が領域の外にあれば探せない
     if (name == nullptr) {
         return SYSCALL_ERR_INVALID;
     }
@@ -47,15 +48,15 @@ int syscall_file_size(int a) {
     return entry.size;
 }
 
-// 名前aのファイルの内容を，番地bからcバイトの読み込み先へ丸ごと読み込み，そのバイト数を返す
+// 領域の中の番地aにある名前のファイルの内容を，領域の中の番地bからcバイトの読み込み先へ丸ごと読み込み，そのバイト数を返す
 int syscall_file_read(int a, int b, int c) {
-    char *name = (char *)a;  // ファイル名
-    char *buf = (char *)b;   // 読み込み先
-    int length;              // 読み込んだバイト数
-    int status;              // 読み込みの結果
+    char *name = exec_region_string(a);    // ファイル名
+    char *buf = exec_region_buffer(b, c);  // 読み込み先
+    int length;                            // 読み込んだバイト数
+    int status;                            // 読み込みの結果
 
-    // 名前・読み込み先を読み書きできないか，読み込み先の大きさが負であれば読み込めない
-    if (name == nullptr || buf == nullptr || c < 0) {
+    // 名前・読み込み先が領域の外にあれば(読み込み先の大きさが負の場合を含む)読み込めない
+    if (name == nullptr || buf == nullptr) {
         return SYSCALL_ERR_INVALID;
     }
     // 内容を丸ごと読み込む
@@ -66,14 +67,14 @@ int syscall_file_read(int a, int b, int c) {
     return length;
 }
 
-// 名前aのファイルの内容を，番地bからのcバイトで丸ごと置き換え(無ければ作成し)，0を返す
+// 領域の中の番地aにある名前のファイルの内容を，領域の中の番地bからのcバイトで丸ごと置き換え(無ければ作成し)，0を返す
 int syscall_file_write(int a, int b, int c) {
-    char *name = (char *)a;  // ファイル名
-    char *data = (char *)b;  // 書き込む内容
-    int status;              // 書き込みの結果
+    char *name = exec_region_string(a);     // ファイル名
+    char *data = exec_region_buffer(b, c);  // 書き込む内容
+    int status;                             // 書き込みの結果
 
-    // 名前・内容を読めないか，内容のバイト数が負であれば書き込めない
-    if (name == nullptr || data == nullptr || c < 0) {
+    // 名前・内容が領域の外にあれば(内容のバイト数が負の場合を含む)書き込めない
+    if (name == nullptr || data == nullptr) {
         return SYSCALL_ERR_INVALID;
     }
     // 内容を丸ごと置き換える
@@ -84,12 +85,12 @@ int syscall_file_write(int a, int b, int c) {
     return 0;
 }
 
-// コンソールから1行を受け取り，番地aからのbバイトの格納先へヌル終端付きで格納し，格納した文字数を返す
+// コンソールから1行を受け取り，領域の中の番地aからのbバイトの格納先へヌル終端付きで格納し，格納した文字数を返す
 int syscall_console_read(int a, int b) {
-    char *buf = (char *)a;  // 格納先
-    int length = 0;         // 格納した文字数
+    char *buf = exec_region_buffer(a, b);  // 格納先
+    int length = 0;                        // 格納した文字数
 
-    // 格納先を書き込めないか，ヌル終端の1バイトも格納できなければ受け取れない
+    // 格納先が領域の外にあるか，ヌル終端の1バイトも格納できなければ受け取れない
     if (buf == nullptr || b < 1) {
         return SYSCALL_ERR_INVALID;
     }
@@ -108,11 +109,11 @@ int syscall_console_read(int a, int b) {
     return length;
 }
 
-// 番地aからのbバイトをコンソールへ出力し，0を返す
+// 領域の中の番地aからのbバイトをコンソールへ出力し，0を返す
 int syscall_console_write(int a, int b) {
-    char *data = (char *)a;  // 出力するバイト列
+    char *data = exec_region_buffer(a, b);  // 出力するバイト列
 
-    // バイト列を読めないか，出力するバイトが1つも無ければ出力できない
+    // バイト列が領域の外にあるか，出力するバイトが1つも無ければ出力できない
     if (data == nullptr || b < 1) {
         return SYSCALL_ERR_INVALID;
     }
@@ -148,4 +149,31 @@ int syscall_dispatch(int number, int a, int b, int c, int d) {
     }
     // どの番号とも一致しなければ，未定義の番号としてエラーを返す
     return SYSCALL_ERR_UNKNOWN;
+}
+
+// 実行ファイルが求めたシステムコールを実行する．user_spには，実行ファイルがシステムコールの命令を実行した時点のSP(領域の中の番地)を渡す
+// SPが4の倍数でないか，並べた値が領域に収まらなければ，値を読めず戻り値も書き込めないため，何もせず0を返す
+// 値を読めた場合は，SPから並べた値のうち番号を見て，次のように処理する
+// - 実行ファイルを終える機能: 終了状態をexit_statusの指す先へ書き込み，1を返す
+// - それ以外の機能: その機能を実行して戻り値を置き場へ書き込み，0を返す
+int syscall_handle(unsigned int user_sp, int *exit_status) {
+    int *args = (int *)exec_region_buffer(user_sp, SYSCALL_ARGS_SIZE);  // SPから並べた値
+
+    // 並べた値を読めなければ，何もしない
+    if (
+        // 並べた値が領域に収まらない
+        args == nullptr
+        // または，SPが4の倍数でない(4バイトの値がワードをまたぎ，正しく読み書きできないため)
+        || (user_sp & 3) != 0) {
+        return 0;
+    }
+    // 終了を求めていれば，終了状態を控えて終了を伝える
+    if (args[SYSCALL_ARG_NUMBER] == SYS_EXIT) {
+        *exit_status = args[SYSCALL_ARG_A];
+        return 1;
+    }
+    // 番号に対応する機能を実行し，戻り値を置き場へ書き込む
+    args[SYSCALL_ARG_RESULT] = syscall_dispatch(args[SYSCALL_ARG_NUMBER], args[SYSCALL_ARG_A], args[SYSCALL_ARG_B],
+                                                args[SYSCALL_ARG_C], args[SYSCALL_ARG_D]);
+    return 0;
 }

@@ -1,23 +1,15 @@
 // Qosmosの実行ファイルからOSの機能(システムコール)を呼び出すライブラリ．実行ファイルのソースから取り込んで使う
+// システムコールは，Pynesisの組み込み関数syscall(番号, 引数4つ)で呼ぶ．使わない引数には0を渡し，ポインタはintへキャストして渡す
 // 各関数の戻り値は，0以上が成功，負の値がエラー(値の意味はsyscall_number.pnのSYSCALL_ERR_*)を表す
 // ファイルを扱う関数に渡す名前はいずれも，シェルの現在のディレクトリの直下にあるファイルの"NAME.EXT"形式の名前(パスは指定できない)
 // コンソールを扱う関数は，シェルと同じコンソール(telnetで接続した端末と，UARTで接続した端末の2つで共有する入出力)を使う
 #pragma once
 #include "syscall_number.pn"
 
-// システムコールを呼び出すための共通の関数．番号numberのシステムコールを引数a〜dを渡して呼び出し，その戻り値を返す
-// (使わない引数には0を渡し，ポインタはintへキャストして渡す)
-// 各システムコールは，このファイルにある名前付きの関数(file_sizeなど)からこの関数を通して呼ぶ．番号を直接指定したい場合はこの関数を使う
-int syscall_by_number(int number, int a, int b, int c, int d) {
-    // シェルが入口へ書き込んだ受付関数の番地を読み，その関数を通常の関数と同じ呼び出し規約で呼び出す
-    // (関数ポインタへのポインタは宣言できないため，番地をintとして読んでから関数ポインタへキャストする)
-    return ((int (*)(int, int, int, int, int))*(int *)SYSCALL_ENTRY_ADDRESS)(number, a, b, c, d);
-}
-
 // 現在のディレクトリにある名前nameのファイルの大きさ(バイト数)を返す
 int file_size(char *name) {
     // 番号SYS_FILE_SIZEのシステムコールを呼び出す
-    return syscall_by_number(SYS_FILE_SIZE, (int)name, 0, 0, 0);
+    return syscall(SYS_FILE_SIZE, (int)name, 0, 0, 0);
 }
 
 // 現在のディレクトリにある名前nameのファイルの内容を，sizeバイトの配列bufへ丸ごと読み込み，そのバイト数を返す(ヌル終端は付けない)
@@ -25,13 +17,13 @@ int file_size(char *name) {
 // 大きなbufは，スタックを使い切らないよう呼び出し側のグローバル変数として確保して渡すこと
 int file_read(char *name, char *buf, int size) {
     // 番号SYS_FILE_READのシステムコールを呼び出す
-    return syscall_by_number(SYS_FILE_READ, (int)name, (int)buf, size, 0);
+    return syscall(SYS_FILE_READ, (int)name, (int)buf, size, 0);
 }
 
 // 現在のディレクトリにある名前nameのファイルの内容を，dataの先頭lengthバイトで丸ごと置き換え，0を返す(ファイルが無ければ作成する)
 int file_write(char *name, char *data, int length) {
     // 番号SYS_FILE_WRITEのシステムコールを呼び出す
-    return syscall_by_number(SYS_FILE_WRITE, (int)name, (int)data, length, 0);
+    return syscall(SYS_FILE_WRITE, (int)name, (int)data, length, 0);
 }
 
 /// コンソールから改行までの1行を受け取り，sizeバイトの配列bufへヌル終端付きで格納し，格納した文字数を返す(改行は格納しない)
@@ -39,14 +31,14 @@ int file_write(char *name, char *data, int length) {
 // 打った文字の表示と1行の編集はQosmosが行う
 int console_read(char *buf, int size) {
     // 番号SYS_CONSOLE_READのシステムコールを呼び出す
-    return syscall_by_number(SYS_CONSOLE_READ, (int)buf, size, 0, 0);
+    return syscall(SYS_CONSOLE_READ, (int)buf, size, 0, 0);
 }
 
 // dataの先頭lengthバイトをコンソールへ出力し，0を返す
 // 出力する前に，Qosmosが端末に合わせて変換する(値0のバイトを省き，改行の前に復帰を補う)．呼び出し側で変換しておく必要はない
 int console_write(char *data, int length) {
     // 番号SYS_CONSOLE_WRITEのシステムコールを呼び出す
-    return syscall_by_number(SYS_CONSOLE_WRITE, (int)data, length, 0, 0);
+    return syscall(SYS_CONSOLE_WRITE, (int)data, length, 0, 0);
 }
 
 // ヌル終端の文字列textをコンソールへ出力し，0を返す(出力の仕方はバイト列を出力する場合と同じ)

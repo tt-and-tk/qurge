@@ -100,7 +100,7 @@
 // - 成立しなかった分岐: 行き先が順番どおりのため取得し直さず，取得していた命令をそのまま実行する
 //
 // ----- 命令の読み出し先 -----
-// 命令は，カーネルモードではプログラムカウンタに応じてROMかメインメモリの後半から，ユーザーモードでは常にメインメモリの領域から読み出す
+// 命令は，カーネルモードではROMから，ユーザーモードではメインメモリの領域から読み出す
 // (領域の扱いは「ユーザーモードでの番地の変換」を参照)．メインメモリは，読み出しポートを実行段と
 // 共用し，応答を待つ必要があり，読み出しも1回32ビットである．このため，メインメモリの命令はパイプラインが
 // 空になってから，64ビットの命令をイミディエイトデータ・命令語の順に2回に分けて読み，1命令ずつ実行する．
@@ -183,8 +183,8 @@ module alu_sv (
     // どちらの経路で初期化されても同じ状態から始まる
     localparam register_t REGISTER_INIT[REGISTER_MAX_ADDR:0] = '{
         // スタックはメモリの前半に置き，前半の末尾から番地の小さい方へ伸ばす．スタックポインタは最後に積んだ値の番地を指すため，
-        // 何も積んでいない初期状態では，前半の末尾のすぐ上の番地(メモリの後半の先頭番地)にしておく
-        SP_ADDR:  register_t'(CODE_AREA_BASE),
+        // 何も積んでいない初期状態では，前半の末尾のすぐ上の番地にしておく
+        SP_ADDR:  register_t'(KERNEL_STACK_END),
         // Arduino SPIのSSはアクティブLowのため，非選択を表すHighにする
         SPI_ADDR: 32'h1,
         // EthernetモジュールのRSTn・CSnはアクティブLowのため，非リセット・非選択を表すHighにする
@@ -673,66 +673,33 @@ module alu_sv (
                              : '0;
 
     // ===== 取得段: メインメモリからの命令の取得(組み合わせ回路) =====
-    // カーネルモードでは，プログラムカウンタのうち，メモリの後半の先頭の命令のプログラムカウンタ(CODE_AREA_PC_BASE)から，メモリの後半に置ける
-    // 命令数(CODE_AREA_PC_NUM)ぶんの範囲がメモリの後半に対応する．命令数は2のべき乗で，先頭のプログラムカウンタは
-    // 命令数の倍数とするため，この範囲のプログラムカウンタは次の2つに分けられる
-    // - 下位ビット: その命令がメモリの後半の先頭から何番目か(0〜命令数-1)
-    // - 上位ビット: 範囲内のどの命令でも同じ値(先頭のプログラムカウンタの上位ビット)
+    // メインメモリから命令を取得するのは，ユーザーモードだけである(カーネルモードではROMからだけ取得する)
 
-    // プログラムカウンタのうち，メモリの後半の先頭から何番目の命令かを表す下位ビットの幅
-    localparam int CODE_AREA_PC_WIDTH = $clog2(rom_p::CODE_AREA_PC_NUM);
-    // メモリの後半を指すプログラムカウンタに共通する上位ビットの値
-    localparam logic [31-CODE_AREA_PC_WIDTH:0] CODE_AREA_PC_UPPER = rom_p::CODE_AREA_PC_BASE >> CODE_AREA_PC_WIDTH;
-
-    // メモリの後半についての判定は，次の前提の上に成り立つ
-    // ROMの命令数の上限を変えるなどして前提が崩れた場合は，誤った判定のまま合成されないよう，組み立て時にエラーにする
-    // 前提1: 先頭のプログラムカウンタが命令数の倍数である
-    // 倍数でなければ，プログラムカウンタを上に書いた下位ビットと上位ビットに分けられない
-    if (rom_p::CODE_AREA_PC_BASE % rom_p::CODE_AREA_PC_NUM != 0)
-        $error("メモリの後半の先頭のプログラムカウンタがメモリの後半に置ける命令数の倍数になっていません");
-    // 前提2: 先頭のプログラムカウンタが，ROMへ渡せる幅(pc_bus_t)で表せる範囲のちょうど直後である
-    // ROMへ出せない番地(fetch_pc_fitsが偽)になったことを，ROMの外へ出たことの判定に使うため
-    if (rom_p::CODE_AREA_PC_BASE != 2 ** $bits(rom_p::pc_bus_t))
-        $error("メモリの後半の先頭のプログラムカウンタが，ROMへ渡せる幅で表せる範囲の直後になっていません");
-
-    // 取得用のプログラムカウンタがメモリの後半を指しているか．上位ビットがメモリの後半に共通する値と一致するかで判定する
-    // (一致比較1つで範囲の下端・上端の両方を判定できる．大小比較で書くと下端・上端の2つが要る)
-    logic pc_in_code_area;
-    assign pc_in_code_area = (fetch_pc[31:CODE_AREA_PC_WIDTH] == CODE_AREA_PC_UPPER);
-
-    // ユーザーモードで，取得用のプログラムカウンタが指す命令の領域の中の番地(プログラムカウンタ × 8)
+    // 取得用のプログラムカウンタが指す命令の領域の中の番地(プログラムカウンタ × 8)
     register_t fetch_user_address;
     assign fetch_user_address = fetch_pc << 3;
 
-    // 取得用のプログラムカウンタが指す命令を，メインメモリから取得できるか
-    util_p::bool_t fetch_pc_in_ram;
+    // ユーザーモードで，取得用のプログラムカウンタが指す命令を，メインメモリの領域から取得できるか
+    util_p::bool_t fetch_pc_in_region;
     // 取得用のプログラムカウンタが指す命令の，下位ワード(イミディエイトデータ)・上位ワード(命令語)のメインメモリ上の番地
     ram_p::address_bus_t fetch_lower_address;
     ram_p::address_bus_t fetch_upper_address;
     // assignではなくalways_combで求めるのは，user_address_in_range()・user_ram_address()が引数以外に読む値の変化でも求め直させるため
     always_comb begin
-        // 取得できるかを，動作状態に応じて判定する
-        fetch_pc_in_ram =
-            // カーネルモードなら，メモリの後半を指しているか
-            kernel_mode ? pc_in_code_area
-            // ユーザーモードなら，8を掛けてもあふれないプログラムカウンタで，その命令の領域の中の番地が範囲内か．
-            // あふれるプログラムカウンタを除くのは，あふれた番地を範囲内の番地と取り違えないため．
-            // 領域の大きさは8の倍数のため，命令の先頭が範囲内なら8バイト全体が範囲内に収まる
-            : (fetch_pc[31:29] == '0 && user_address_in_range(fetch_user_address));
-        // 下位ワードの番地を，動作状態に応じて求める
-        fetch_lower_address =
-            // カーネルモードなら，メモリの後半の先頭番地 + 先頭から何番目の命令か × 8(1命令のバイト数)．
-            // メモリの後半の先頭番地は，最上位ビットだけが立っている．
-            // 何番目か × 8はそれより下のビットに収まるため，立っているビットが重ならず，加算とORの結果が同じになる．
-            // このため，加算器を使わずORで組み立てる
-            kernel_mode ? (ram_p::address_bus_t'(CODE_AREA_BASE)                                 // 最上位ビット: メモリの後半の先頭番地
-                           | (ram_p::address_bus_t'(fetch_pc[CODE_AREA_PC_WIDTH-1:0]) << 3))     // その下のビット: 何番目の命令か × 8(下位3ビットは0)
-            // ユーザーモードなら，命令の領域の中の番地に対応するメインメモリ上の番地
-            : user_ram_address(fetch_user_address);
+        // 取得できるかを判定する
+        fetch_pc_in_region =
+            // ユーザーモードである
+            !kernel_mode
+            // かつ，8を掛けてもあふれないプログラムカウンタである
+            // (あふれた番地を範囲内の番地と取り違えないため)
+            && fetch_pc[31:29] == '0
+            // かつ，その命令の領域の中の番地が範囲内である
+            // (領域の大きさは8の倍数のため，命令の先頭が範囲内なら8バイト全体が範囲内に収まる)
+            && user_address_in_range(fetch_user_address);
+        // 下位ワードの番地は，命令の領域の中の番地に対応するメインメモリ上の番地
+        fetch_lower_address = user_ram_address(fetch_user_address);
         // 上位ワードの番地は下位ワードの4バイト後．下位ワードの番地は8の倍数(下位3ビットが0)のため，4を表すビットを立てるだけでよい．
-        // 下位ワードの番地が8の倍数になる理由は，動作状態ごとに次のとおり
-        // - カーネルモード: メモリの後半の先頭番地と，何番目の命令か × 8がどちらも8の倍数のため
-        // - ユーザーモード: 領域の先頭の番地と，領域の中の番地(プログラムカウンタ × 8)がどちらも8の倍数のため
+        // 下位ワードの番地が8の倍数になるのは，領域の先頭の番地と，領域の中の番地(プログラムカウンタ × 8)がどちらも8の倍数のため
         fetch_upper_address = fetch_lower_address | ram_p::address_bus_t'(4);
     end
 
@@ -1036,7 +1003,7 @@ module alu_sv (
     // - カーネルモードのJ系(CALL・RET): メモリの前半．
     //   CALL・RETが読み書きするのは戻り先を積み下ろしするスタックで，スタックはメモリの前半に置く．
     //   空のスタックでのRETを停止させ，CALLがメモリの後半を書き換えないようにするため，前半に限る．
-    //   前半の大きさ(メモリの後半の先頭番地)は2のべき乗のため，前半に収まるかはビット幅で判定できる
+    //   前半の大きさは2のべき乗のため，前半に収まるかはビット幅で判定できる
     // - カーネルモードのM系: メモリ全体
     // - ユーザーモード: 命令の種類によらず，領域(スタックも領域の中に置く)．
     //   前のサイクルにmem_addressから判定して控えた結果を使う(控える処理は，ユーザーモードで変換結果を控えるタスクを参照)
@@ -1045,7 +1012,7 @@ module alu_sv (
         // カーネルモードなら，命令の種類に応じた範囲に収まるか
         kernel_mode ? (
             // J系なら，メモリの前半に収まるか
-            (command.m_type == J_TYPE) ? util_p::is_within_bit_width(mem_address, $clog2(CODE_AREA_BASE))
+            (command.m_type == J_TYPE) ? util_p::is_within_bit_width(mem_address, $clog2(KERNEL_STACK_END))
             // M系なら，メモリ全体に収まるか
             : util_p::is_within_bit_width(mem_address, $bits(ram_p::address_bus_t)))
         // ユーザーモードなら，控えた判定の結果
@@ -1403,9 +1370,16 @@ module alu_sv (
     endfunction
 
     // ===== 例外の検出(組み合わせ回路) =====
-    // 取得段・確認段・実行段のいずれかで例外を検出したかと，例外を起こした命令のプログラムカウンタ・例外の原因を求める．
-    // 検出した例外は，メインの順序回路の「例外の受け付け」で，カーネルモードなら停止し，ユーザーモードなら例外ハンドラへ飛ぶ．
-    // 1サイクルに例外を検出する段は多くとも1つである．理由は段ごとに次のとおり
+    // 例外を次の2つに分け，それぞれを検出したかを求める．検出した例外は，メインの順序回路の「例外の受け付け」で扱う
+    // - カーネルモードのメモリの例外: カーネルモードで，実行段の命令がメモリを読み書きする番地が，読み書きしてよい範囲を外れる例外．
+    //   検出したら停止する
+    // - それ以外の例外: 取得段・確認段・実行段のいずれかで検出する例外．例外を起こした命令のプログラムカウンタ・例外の原因もあわせて求める．
+    //   カーネルモードなら停止し，ユーザーモードなら例外ハンドラへ飛ぶ
+    // カーネルモードのメモリの例外を分けるのは，その検出が番地を求める加算器を通るためである．
+    // その検出を例外ハンドラへ飛ぶかの判定に含めると，加算器から，例外ハンドラへ飛ぶときに書き込むレジスタまでの経路が長くなり，
+    // クロックの周期に収まらない．
+    // カーネルモードのメモリの例外は停止するだけで，戻り先と原因を書き込まないため，分けて求められる
+    // それ以外の例外を1サイクルに検出する段は多くとも1つである．理由は段ごとに次のとおり
     // - 取得段: パイプラインが空のときだけ検出する
     // - 確認段: 実行段が空いているか，このサイクルに完了するときだけ検出する
     // - 実行段: 例外を検出した命令は完了しない
@@ -1440,28 +1414,38 @@ module alu_sv (
         // かつ，除数が0である
         && rs2_val == '0;
 
-    // 例外を検出したかと，例外を起こした命令のプログラムカウンタ・例外の原因．プログラムカウンタと原因は，例外を検出したときだけ意味を持つ
-    util_p::bool_t       exception_detected;
-    register_t           exception_pc;
-    exception_cause_enum exception_cause;
+    // カーネルモードのメモリの例外を検出したか
+    util_p::bool_t kernel_mem_exception_detected;
+    assign kernel_mem_exception_detected =
+        // カーネルモードである
+        kernel_mode
+        // かつ，実行段の命令がメモリへの読み書きの要求を出す段階にある
+        && ex_mem_requesting
+        // かつ，読み書きする番地が，読み書きしてよい範囲を外れる
+        && !mem_address_in_range;
+
+    // それ以外の例外の検出結果
+    util_p::bool_t       other_exception_detected;  // それ以外の例外を検出したか
+    register_t           exception_pc;              // 例外を起こした命令のプログラムカウンタ(例外を検出したときだけ意味を持つ)
+    exception_cause_enum exception_cause;           // 例外の原因(例外を検出したときだけ意味を持つ)
     always_comb begin
         // 既定値として「検出しない」を与え，例外を検出した段があれば上書きする
-        exception_detected = 1'b0;
-        exception_pc       = ex_pc;
-        exception_cause    = EXCEPTION_NONE;
+        other_exception_detected = 1'b0;
+        exception_pc             = ex_pc;
+        exception_cause          = EXCEPTION_NONE;
         // 取得段: パイプラインが空になったのに，命令を置けない番地へ進んだ
-        // (カーネルモードではROMにもメモリの後半にも対応しない番地，ユーザーモードでは範囲外の番地)
-        if (pipeline_drained && !fetch_pc_in_ram) begin
-            exception_detected = 1'b1;
-            exception_pc       = fetch_pc;
-            exception_cause    = EXCEPTION_FETCH;
+        // (カーネルモードではROMへ渡せる幅に収まらない番地，ユーザーモードでは範囲外の番地)
+        if (pipeline_drained && !fetch_pc_in_region) begin
+            other_exception_detected = 1'b1;
+            exception_pc             = fetch_pc;
+            exception_cause          = EXCEPTION_FETCH;
         end
         // 確認段: 実行できない命令を実行段へ渡そうとした(実行段の命令が後の命令を捨てる場合は，実行されないため除く)
         else if (dispatch && !check_executable1 && !ex_redirects) begin
-            exception_detected = 1'b1;
-            exception_pc       = queue_pc[0];
+            other_exception_detected = 1'b1;
+            exception_pc             = queue_pc[0];
             // 原因を，カーネルモードなら実行できるかで分ける
-            exception_cause    =
+            exception_cause          =
                 // カーネルモードなら実行できる命令なら，カーネルモードでだけ実行できる命令である
                 check_executable1_in_kernel ? EXCEPTION_PRIVILEGED
                 // それ以外は，不正な命令(カーネルモードでも実行できない命令)である
@@ -1469,13 +1453,21 @@ module alu_sv (
         end
         // 実行段: 割り算の除数が0である
         else if (ex_divide_by_zero) begin
-            exception_detected = 1'b1;
-            exception_cause    = EXCEPTION_DIVIDE_ZERO;
+            other_exception_detected = 1'b1;
+            exception_cause          = EXCEPTION_DIVIDE_ZERO;
         end
-        // 実行段: メモリを読み書きする番地が，読み書きしてよい範囲を外れる
-        else if (ex_mem_requesting && !mem_address_in_range) begin
-            exception_detected = 1'b1;
-            exception_cause    = EXCEPTION_MEMORY;
+        // 実行段: ユーザーモードで，メモリを読み書きする番地が，読み書きしてよい範囲を外れる．
+        // 範囲内かは，番地の変換結果を控えるときに判定した結果を使う
+        else if (
+            // ユーザーモードである
+            !kernel_mode
+            // かつ，実行段の命令がメモリへの読み書きの要求を出す段階にある
+            && ex_mem_requesting
+            // かつ，控えた判定の結果が範囲外である
+            && !user_mem_in_range_r
+        ) begin
+            other_exception_detected = 1'b1;
+            exception_cause          = EXCEPTION_MEMORY;
         end
     end
 
@@ -1787,8 +1779,8 @@ module alu_sv (
             // パイプラインが空になるのを待つのは，実行中の命令とメインメモリの読み出しポートを取り合わないためと，
             // 前の命令が分岐・ジャンプで飛び先を変える可能性や，メインメモリへ命令を書き込み終えていない可能性があるため
             if (pipeline_drained) begin
-                // メインメモリから取得できる番地を指していれば，命令の下位ワードの読み出しを要求する
-                if (fetch_pc_in_ram) begin
+                // 領域の中の番地を指していれば，命令の下位ワードの読み出しを要求する
+                if (fetch_pc_in_region) begin
                     ram_read.valid   <= 1'b1;
                     ram_read.mask    <= 4'hf;
                     ram_read.address <= fetch_lower_address;
@@ -2195,15 +2187,22 @@ module alu_sv (
             // ===== 例外の受け付け =====
             // 検出した例外を，カーネルモードなら停止し，ユーザーモードなら例外ハンドラへ飛ぶ．
             // 例外ハンドラへ飛ぶ処理は，取得段の飛び先・命令キュー・実行段など，ここより前で代入した値を書き換えるため，それらの代入より後に置く
-            if (exception_detected) begin
-                // カーネルモードで起きた例外はOS自身の不具合のため，動作を保証できず停止する
-                if (kernel_mode) begin
+            // カーネルモードで起きた例外はOS自身の不具合のため，動作を保証できず停止する
+            if (kernel_mode) begin
+                // 2つに分けて検出した例外のどちらかを検出したら停止する
+                if (
+                    // カーネルモードのメモリの例外を検出した
+                    kernel_mem_exception_detected
+                    // または，それ以外の例外を検出した
+                    || other_exception_detected
+                ) begin
                     is_halted <= 1'b1;
                 end
-                // ユーザーモードで起きた例外は，例外ハンドラへ飛んでOSへ処理を移す
-                else begin
-                    jump_to_exception_handler();
-                end
+            end
+            // ユーザーモードで起きた例外は，例外ハンドラへ飛んでOSへ処理を移す
+            // (カーネルモードのメモリの例外はユーザーモードでは検出しないため，それ以外の例外だけで判定する)
+            else if (other_exception_detected) begin
+                jump_to_exception_handler();
             end
 
             // ===== 実行段: 実行段の命令の番地と分岐の飛び先 =====

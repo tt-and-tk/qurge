@@ -1,0 +1,122 @@
+// 実行ファイルを，領域の中でユーザーモードとして動かす処理．実行ファイルへ入る処理と，次の2つの場合にCPUがカーネルモードで飛ぶ先の関数を置く
+// - 実行ファイルがシステムコールの命令を実行した場合: システムコールハンドラ
+// - 実行ファイルが例外を起こした場合: 例外ハンドラ
+// 実行ファイルへ入る前と，システムコールハンドラでカーネルモードへ入った後は，SPをカーネルモードのスタック(メモリの前半)に置く．
+// SPを書き換える関数は，フレームの大きさが0になるよう，引数・ローカル変数を持たず，値はグローバル変数に置く
+// (フレームを持つ関数は，書き換えた後のSPを基準にフレームを読み書きしてしまうため，コンパイラがSPの書き換えを禁止している)
+#pragma once
+#include "args.pn"
+#include "console.pn"
+#include "exec_region.pn"
+#include "syscall_dispatch.pn"
+
+// argvの配列に取る要素数．1行から取り出せる文字列の数が最も多い場合(1文字と空白が交互に並ぶ場合)の数に，末尾のnullptrの1つを足す
+const int EXEC_ARGV_SIZE = CONSOLE_LINE_SIZE / 2 + 1;
+const unsigned int KERNEL_STACK_EMPTY = 0x8000;  // カーネルモードの空のスタックを表すSP(メモリの前半の末尾の直後)
+
+unsigned int exec_start_sp;   // 実行ファイルへ入るときのSP(領域の中の番地)
+unsigned int exec_kernel_sp;  // 実行ファイルへ入る直前のカーネルモードのSP．実行ファイルへ入る関数の戻り先を指す
+unsigned int exec_user_sp;    // システムコールの命令でカーネルモードへ入った時点のSP(領域の中の番地)
+int exec_exit_status;         // 実行ファイルが終了のシステムコールで伝えた終了状態
+
+// 実行ファイルへ渡すコマンド名と引数(lineを半角空白で区切ったもの)を領域の末尾に置き，実行ファイルへ入るときのSP(領域の中の番地)を返す
+// 渡す1行は，ヌル終端を含めてコンソールの1行の大きさ(64バイト)以内であること(置く大きさが，領域の末尾に取った引数の置き場に収まる前提のため)
+// 置く内容と，返すSPから見た位置は次のとおり．argc・argvは，CALLで呼んだ直後と同じ位置(引数の並びの先頭がSP-8)になる
+// - 領域の末尾: コマンド名と各引数の文字列(区切りの空白をヌル終端に置き換えたもの)
+// - その下(4バイト境界に揃える): argvの配列(各文字列の先頭の領域の中の番地と，末尾のnullptr)
+// - SP: 戻り先を積んだ位置にあたる4バイト(実行ファイルは戻り先へ戻らないため，値は使わない)
+// - SP-8・SP-4: argc・argv(argvの配列の先頭の領域の中の番地)
+// 置く大きさは，文字列が最大で1行分の64バイト，揃えが最大3バイト，配列が最大33要素×4バイト，SP-8からSPまでが12バイトの
+// 合計211バイトで，領域の末尾に取った引数の置き場(256バイト)に収まる
+unsigned int exec_place_args(char *line) {
+    char *argv[EXEC_ARGV_SIZE];  // 各文字列の先頭のメモリの番地
+    int length = 0;              // lineの文字数
+    unsigned int text;           // 文字列を置く先頭の領域の中の番地
+    unsigned int array;          // argvの配列を置く先頭の領域の中の番地
+    unsigned int sp;             // 実行ファイルへ入るときのSP
+    char *dst;                   // 文字列を置く先頭のメモリの番地
+    unsigned int *words;         // 4バイト単位で書き込むメモリの番地
+    int argc;                    // コマンド名と引数の数
+
+    // ヌル終端までの文字数を数える
+    while (line[length] != '\0') {
+        length++;
+    }
+    // 文字列を置く先頭を，ヌル終端まで領域の末尾に収まる位置にする
+    text = EXEC_REGION_SIZE - (length + 1);
+    // その位置をメモリの番地へ変換する(カーネルモードでは番地が変換されないため)
+    dst = (char *)(EXEC_REGION_BASE + text);
+    // ヌル終端まで書き写す
+    for (int i = 0; i <= length; i++) {
+        dst[i] = line[i];
+    }
+    // 書き写した文字列を半角空白で区切り，各文字列の先頭のメモリの番地を並べる
+    argc = split_args(dst, argv, EXEC_ARGV_SIZE);
+    // argvの配列を置く先頭を，文字列の下を4バイト境界に揃えた位置から，末尾のnullptrを含む要素数ぶん下げた位置にする
+    array = (text & ~3) - (argc + 1) * 4;
+    // その位置をメモリの番地へ変換する
+    words = (unsigned int *)(EXEC_REGION_BASE + array);
+    // 各文字列の先頭を，実行ファイルが読めるよう領域の中の番地へ直して並べる
+    for (int i = 0; i < argc; i++) {
+        words[i] = (unsigned int)argv[i] - EXEC_REGION_BASE;
+    }
+    // 末尾のnullptrは，領域の外を指す値のまま置く
+    words[argc] = (unsigned int)argv[argc];
+    // 配列のすぐ下の4バイトを，戻り先を積んだ位置にあたるSPにする
+    sp = array - 4;
+    // SPの8バイト下をメモリの番地へ変換し，そこからargc・argvを並べる
+    words = (unsigned int *)(EXEC_REGION_BASE + sp - 8);
+    words[0] = argc;
+    words[1] = array;
+    return sp;
+}
+
+// 実行ファイルの先頭の命令から，SPを実行ファイルへ入るときの値(コマンド名と引数を置いて決めた値)にしてユーザーモードで実行する(フレームの大きさは0)
+// この関数自身からは戻らない．実行ファイルが終了のシステムコールを実行すると，システムコールハンドラがSPを戻し，終了状態を返してこの関数の呼び出し元へ戻る
+int exec_enter(void) {
+    // システムコールハンドラが呼び出し元へ戻れるよう，戻り先を指すSPを控える
+    exec_kernel_sp = SP;
+    // 実行ファイルのスタックへ切り替え，戻り先(領域の先頭の命令)へユーザーモードで移る
+    SP = exec_start_sp;
+    sysret();
+}
+
+// システムコールハンドラ．実行ファイルがシステムコールの命令を実行するとカーネルモードでここへ飛ぶ(フレームの大きさは0)
+// 終了を求められれば，実行ファイルへ入る関数の呼び出し元へ，終了状態を返して戻る．それ以外は機能を実行して実行ファイルへ戻る
+int exec_syscall_entry(void) {
+    // 実行ファイルのSPを控え，カーネルモードのスタックへ切り替える
+    // (切り替えるまでは，SPが領域の中の番地のままで，カーネルモードではそのまま使えないため，関数を呼ばない)
+    exec_user_sp = SP;
+    SP = exec_kernel_sp;
+    // 機能を実行し，終了を求められていれば，SPを実行ファイルへ入る関数の戻り先へ戻した状態のまま，その呼び出し元へ戻る
+    if (syscall_handle(exec_user_sp, &exec_exit_status)) {
+        return exec_exit_status;
+    }
+    // 実行ファイルのスタックへ戻し，システムコールの命令の次の命令へユーザーモードで戻る
+    SP = exec_user_sp;
+    sysret();
+}
+
+// 例外ハンドラ．実行ファイルが例外を起こすとカーネルモードでここへ飛ぶ(フレームの大きさは0)
+// 空のスタックから戻ろうとして，カーネルモードの例外でCPUを停止させる(実行ファイルだけを終わらせてシェルへ戻る処理は，issue #341で置き換える)
+// 何もせずにいると，例外を起こした実行ファイルの状態のままOSを続けてしまうため
+void exec_exception_entry(void) {
+    // 空のスタックからの戻りは，戻り先をメモリの前半の外から読むため，カーネルモードの例外になる
+    SP = KERNEL_STACK_EMPTY;
+    return;
+}
+
+// 領域に読み込んだ実行ファイルへ，コマンド名と引数(lineを半角空白で区切ったもの)を渡してユーザーモードで実行し，終了状態を返す
+int exec_run(char *line) {
+    // 領域と，システムコールの命令・例外でCPUが飛ぶ先を設定する
+    UBASE = EXEC_REGION_BASE;
+    USIZE = EXEC_REGION_SIZE;
+    KENTRY = (unsigned int)exec_syscall_entry;
+    EENTRY = (unsigned int)exec_exception_entry;
+    // 実行ファイルへ入る先を，領域の先頭の命令(領域の中のPC 0)にする
+    KRET = 0;
+    // コマンド名と引数を領域の末尾に置き，実行ファイルへ入るときのSPを決める
+    exec_start_sp = exec_place_args(line);
+    // 実行ファイルへ入り，終了のシステムコールで戻ってきた終了状態を返す
+    return exec_enter();
+}

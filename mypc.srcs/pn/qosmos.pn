@@ -6,14 +6,10 @@
 #include "sd.pn"
 #include "network.pn"
 #include "fat.pn"
-#include "syscall_dispatch.pn"
+#include "exec.pn"
 
 const int INPUT_SIZE = CONSOLE_LINE_SIZE;  // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
-const int CODE_ADDRESS = 0x8000;    // メモリの後半の先頭番地(実行ファイルの読み込み先)
-const int CODE_SIZE = SYSCALL_ENTRY_ADDRESS - CODE_ADDRESS;  // 読み込める実行ファイルの大きさの上限(メモリの後半のうち，末尾のシステムコールの入口より手前のバイト数)
-const int CODE_PC = 0x4000;         // メモリの後半の先頭の命令を指すPC(実行ファイルを呼び出す先)
 const int INSTRUCTION_SIZE = 8;     // 1命令のバイト数(実行ファイルの大きさはこの倍数になる)
-const int ARGV_SIZE = INPUT_SIZE / 2 + 1;  // 実行ファイルへ渡すargvの要素数(1行から取り出せる引数の最大数と，末尾のnullptrの分)
 const int EXIT_SUCCESS = 0;         // 組み込みコマンドが成功した場合の終了状態
 const int EXIT_FAILURE = 1;         // 組み込みコマンドがエラーになった場合と，実行ファイルを実行できなかった場合の終了状態
 
@@ -543,13 +539,13 @@ void handle_unknown(void) {
     print_error("unknown command\n");
 }
 
-// 実行ファイルentryの内容を，メモリの後半の先頭から書き写す(大きさは検査済みのものを渡すこと)
+// 実行ファイルentryの内容を，実行ファイルに割り振る領域の先頭から書き写す(大きさは検査済みのものを渡すこと)
 int load_executable(struct FatEntry *entry) {
     struct FatFile file;                               // 読み出し中の実行ファイルの位置
     int length;                                        // 読み込んだセクタのうち内容にあたるバイト数
     int status;                                        // FAT32の各関数の結果
     unsigned int *src = (unsigned int *)fat_sector;    // 読み込んだセクタを4バイト単位で読む位置
-    unsigned int *dst = (unsigned int *)CODE_ADDRESS;  // 次に書き込むメモリの後半の位置
+    unsigned int *dst = (unsigned int *)EXEC_REGION_BASE;  // 次に書き込む領域の位置
 
     // 実行ファイルを先頭から読み出せるよう開く
     status = fat_open(entry, &file);
@@ -574,17 +570,14 @@ int load_executable(struct FatEntry *entry) {
     }
 }
 
-// 既定のディレクトリ/binから，コマンド名と同じ名前の実行ファイルを探し，メモリの後半へ読み込んで呼び出す(コマンド名は空でないこと)
+// 既定のディレクトリ/binから，コマンド名と同じ名前の実行ファイルを探し，実行ファイルに割り振る領域へ読み込んでユーザーモードで実行する(コマンド名は空でないこと)
 // 実行ファイルには，コマンド名とそれに続く引数を入力行から取り出し，argc・argvとして渡す
 // 実行ファイルが見つからなければ，組み込みコマンドとも一致しなかったコマンドとして未対応のエラーにする
-// 戻り値: 実行ファイルの戻り値 / EXIT_FAILURE(実行ファイルを実行できなかった)
+// 戻り値: 実行ファイルが終了のシステムコールで伝えた終了状態 / EXIT_FAILURE(実行ファイルを実行できなかった)
 int run_executable(void) {
     struct FatEntry dir;    // 既定のディレクトリのエントリ
     struct FatEntry entry;  // 見つかった実行ファイルのエントリ
     int status;             // FAT32の各関数の結果
-    char line[INPUT_SIZE];  // argvの各文字列の置き場とする入力行の写し
-    char *argv[ARGV_SIZE];  // 実行ファイルへ渡す，コマンド名と各引数の先頭
-    int argc;               // argvに記録したコマンド名と引数の数
 
     // ドットを含む名前は探さない(実行ファイルは拡張子の無いファイルに限り，データファイルを打ち間違いで命令として実行しないため)
     for (int i = 0; cmd[i] != '\0'; i++) {
@@ -617,27 +610,21 @@ int run_executable(void) {
         print_fat_error(FAT_ERR_IS_DIR);
         return EXIT_FAILURE;
     }
-    // 命令を1つ以上含み，メモリの後半のシステムコールの入口より手前に収まり，命令のバイト数で割り切れる大きさでなければ実行しない(命令のバイト数は2のべき乗のため，除算を避けて下位ビットで判定する)
-    if (entry.size == 0 || entry.size > CODE_SIZE || (entry.size & (INSTRUCTION_SIZE - 1)) != 0) {
+    // 命令を1つ以上含み，領域の末尾のコマンド名と引数の置き場より手前に収まり，命令のバイト数で割り切れる大きさでなければ実行しない(命令のバイト数は2のべき乗のため，除算を避けて下位ビットで判定する)
+    if (entry.size == 0 || entry.size > EXEC_CODE_SIZE || (entry.size & (INSTRUCTION_SIZE - 1)) != 0) {
         print_error("invalid executable\n");
         return EXIT_FAILURE;
     }
-    // メモリの後半へ読み込み，失敗すればその理由を出力する
+    // 領域へ読み込み，失敗すればその理由を出力する
     status = load_executable(&entry);
     if (status != FAT_OK) {
         print_fat_error(status);
         return EXIT_FAILURE;
     }
-    // 入力行を写してから空白で区切り，コマンド名と各引数をargvへ並べる
-    strcopy(line, input);
-    argc = split_args(line, argv, ARGV_SIZE);
-    // 実行ファイルがシステムコールを呼べるよう，受付関数の番地をシステムコールの入口へ書き込む
-    // (起動時に1回だけ書くのではなく呼び出すたびに書くのは，以前に実行した実行ファイルが入口を書き換えていても元に戻すため)
-    *(int *)SYSCALL_ENTRY_ADDRESS = (int)syscall_dispatch;
-    // TCPの出力バッファの中身は実行ファイルが戻るまで送られずに残るため，呼び出す前に送る
+    // TCPの出力バッファの中身は実行ファイルが終わるまで送られずに残るため，実行する前に送る
     console_tcp_flush();
-    // 実行ファイルの先頭の命令を，通常の関数と同じ呼び出し規約でargc・argvを渡して呼び出す．実行ファイルがRETで戻れば，RAXで返された値をそのまま返す
-    return ((int (*)(int, char **))CODE_PC)(argc, argv);
+    // 入力行を半角空白で区切ってコマンド名と引数を渡し，ユーザーモードで実行して，終了のシステムコールで伝えられた終了状態を返す
+    return exec_run(input);
 }
 
 // グローバル配列cmdの内容に応じた処理を呼び出し，その終了状態を返す(streqは配列変数のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
