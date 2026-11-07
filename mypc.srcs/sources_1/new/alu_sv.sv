@@ -1424,10 +1424,10 @@ module alu_sv (
         // かつ，読み書きする番地が，読み書きしてよい範囲を外れる
         && !mem_address_in_range;
 
-    // それ以外の例外を検出したかと，例外を起こした命令のプログラムカウンタ・例外の原因．プログラムカウンタと原因は，例外を検出したときだけ意味を持つ
-    util_p::bool_t       other_exception_detected;
-    register_t           exception_pc;
-    exception_cause_enum exception_cause;
+    // それ以外の例外の検出結果
+    util_p::bool_t       other_exception_detected;  // それ以外の例外を検出したか
+    register_t           exception_pc;              // 例外を起こした命令のプログラムカウンタ(例外を検出したときだけ意味を持つ)
+    exception_cause_enum exception_cause;           // 例外の原因(例外を検出したときだけ意味を持つ)
     always_comb begin
         // 既定値として「検出しない」を与え，例外を検出した段があれば上書きする
         other_exception_detected = 1'b0;
