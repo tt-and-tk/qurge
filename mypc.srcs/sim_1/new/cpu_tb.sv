@@ -333,7 +333,7 @@ module cpu_tb;
             unreachable_pc   = dut.alu_sv_0.fetch_pc;
             // 例外ハンドラへ飛ぶ場合は，例外を起こした命令のPCと，そのときの例外ハンドラの番地を控える
             // (例外ハンドラへ飛んだ後は，例外ハンドラの命令がPCや例外ハンドラの番地を書き換えうるため)
-            exception_jumped = dut.alu_sv_0.exception_detected && !dut.alu_sv_0.kernel_mode;
+            exception_jumped = dut.alu_sv_0.other_exception_detected && !dut.alu_sv_0.kernel_mode;
             if (exception_jumped) begin
                 exception_pc    = dut.alu_sv_0.exception_pc;
                 exception_handler_pc = dut.alu_sv_0.register[EENTRY_ADDR];

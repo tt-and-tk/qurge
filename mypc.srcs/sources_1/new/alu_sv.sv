@@ -1370,12 +1370,15 @@ module alu_sv (
     endfunction
 
     // ===== 例外の検出(組み合わせ回路) =====
-    // 取得段・確認段・実行段のいずれかで例外を検出したかと，例外を起こした命令のプログラムカウンタ・例外の原因を求める．
-    // 検出した例外は，メインの順序回路の「例外の受け付け」で，カーネルモードなら停止し，ユーザーモードなら例外ハンドラへ飛ぶ．
-    // ただし，カーネルモードで読み書きする番地が範囲を外れる例外は，例外ハンドラへ飛ぶかの判定とは別に求める
-    // (番地を求める加算器から，例外ハンドラへ飛ぶときの書き込み先までの経路が長くなり，クロックの周期に収まらないため．
-    //  停止するだけで，戻り先と原因を書き込まないため，別に求めてよい)
-    // 1サイクルに例外を検出する段は多くとも1つである．理由は段ごとに次のとおり
+    // 例外を次の2つに分け，それぞれを検出したかを求める．検出した例外は，メインの順序回路の「例外の受け付け」で扱う
+    // - カーネルモードのメモリの例外: カーネルモードで，実行段の命令がメモリを読み書きする番地が，読み書きしてよい範囲を外れる例外．
+    //   検出したら停止する
+    // - それ以外の例外: 取得段・確認段・実行段のいずれかで検出する例外．例外を起こした命令のプログラムカウンタ・例外の原因もあわせて求める．
+    //   カーネルモードなら停止し，ユーザーモードなら例外ハンドラへ飛ぶ
+    // カーネルモードのメモリの例外を分けるのは，その判定が番地を求める加算器を通るためである．
+    // 例外ハンドラへ飛ぶときの書き込み先までつなげると，経路が長くなりクロックの周期に収まらない．
+    // カーネルモードのメモリの例外は停止するだけで，戻り先と原因を書き込まないため，分けて求められる
+    // それ以外の例外を1サイクルに検出する段は多くとも1つである．理由は段ごとに次のとおり
     // - 取得段: パイプラインが空のときだけ検出する
     // - 確認段: 実行段が空いているか，このサイクルに完了するときだけ検出する
     // - 実行段: 例外を検出した命令は完了しない
@@ -1410,33 +1413,38 @@ module alu_sv (
         // かつ，除数が0である
         && rs2_val == '0;
 
-    // カーネルモードで，実行段の命令がメモリを読み書きする番地が，読み書きしてよい範囲を外れるか
-    util_p::bool_t kernel_mem_out_of_range;
-    assign kernel_mem_out_of_range = kernel_mode && ex_mem_requesting && !mem_address_in_range;
+    // カーネルモードのメモリの例外を検出したか
+    util_p::bool_t kernel_mem_exception_detected;
+    assign kernel_mem_exception_detected =
+        // カーネルモードである
+        kernel_mode
+        // かつ，実行段の命令がメモリへの読み書きの要求を出す段階にある
+        && ex_mem_requesting
+        // かつ，読み書きする番地が，読み書きしてよい範囲を外れる
+        && !mem_address_in_range;
 
-    // カーネルモードで番地が範囲を外れる例外を除き，例外を検出したかと，例外を起こした命令のプログラムカウンタ・例外の原因．
-    // プログラムカウンタと原因は，例外を検出したときだけ意味を持つ
-    util_p::bool_t       exception_detected;
+    // それ以外の例外を検出したかと，例外を起こした命令のプログラムカウンタ・例外の原因．プログラムカウンタと原因は，例外を検出したときだけ意味を持つ
+    util_p::bool_t       other_exception_detected;
     register_t           exception_pc;
     exception_cause_enum exception_cause;
     always_comb begin
         // 既定値として「検出しない」を与え，例外を検出した段があれば上書きする
-        exception_detected = 1'b0;
-        exception_pc       = ex_pc;
-        exception_cause    = EXCEPTION_NONE;
+        other_exception_detected = 1'b0;
+        exception_pc             = ex_pc;
+        exception_cause          = EXCEPTION_NONE;
         // 取得段: パイプラインが空になったのに，命令を置けない番地へ進んだ
         // (カーネルモードではROMへ渡せる幅に収まらない番地，ユーザーモードでは範囲外の番地)
         if (pipeline_drained && !fetch_pc_in_region) begin
-            exception_detected = 1'b1;
-            exception_pc       = fetch_pc;
-            exception_cause    = EXCEPTION_FETCH;
+            other_exception_detected = 1'b1;
+            exception_pc             = fetch_pc;
+            exception_cause          = EXCEPTION_FETCH;
         end
         // 確認段: 実行できない命令を実行段へ渡そうとした(実行段の命令が後の命令を捨てる場合は，実行されないため除く)
         else if (dispatch && !check_executable1 && !ex_redirects) begin
-            exception_detected = 1'b1;
-            exception_pc       = queue_pc[0];
+            other_exception_detected = 1'b1;
+            exception_pc             = queue_pc[0];
             // 原因を，カーネルモードなら実行できるかで分ける
-            exception_cause    =
+            exception_cause          =
                 // カーネルモードなら実行できる命令なら，カーネルモードでだけ実行できる命令である
                 check_executable1_in_kernel ? EXCEPTION_PRIVILEGED
                 // それ以外は，不正な命令(カーネルモードでも実行できない命令)である
@@ -1444,14 +1452,21 @@ module alu_sv (
         end
         // 実行段: 割り算の除数が0である
         else if (ex_divide_by_zero) begin
-            exception_detected = 1'b1;
-            exception_cause    = EXCEPTION_DIVIDE_ZERO;
+            other_exception_detected = 1'b1;
+            exception_cause          = EXCEPTION_DIVIDE_ZERO;
         end
-        // 実行段: ユーザーモードで，メモリを読み書きする番地が領域を外れる．
-        // 範囲内かは，番地を求めた次のサイクルに控えた結果で判定する
-        else if (!kernel_mode && ex_mem_requesting && !user_mem_in_range_r) begin
-            exception_detected = 1'b1;
-            exception_cause    = EXCEPTION_MEMORY;
+        // 実行段: ユーザーモードで，メモリを読み書きする番地が，読み書きしてよい範囲を外れる．
+        // 範囲内かは，番地の変換結果を控えるときに判定した結果を使う
+        else if (
+            // ユーザーモードである
+            !kernel_mode
+            // かつ，実行段の命令がメモリへの読み書きの要求を出す段階にある
+            && ex_mem_requesting
+            // かつ，控えた判定の結果が範囲外である
+            && !user_mem_in_range_r
+        ) begin
+            other_exception_detected = 1'b1;
+            exception_cause          = EXCEPTION_MEMORY;
         end
     end
 
@@ -2173,13 +2188,19 @@ module alu_sv (
             // 例外ハンドラへ飛ぶ処理は，取得段の飛び先・命令キュー・実行段など，ここより前で代入した値を書き換えるため，それらの代入より後に置く
             // カーネルモードで起きた例外はOS自身の不具合のため，動作を保証できず停止する
             if (kernel_mode) begin
-                // 番地が範囲を外れる例外と，それ以外の例外のどちらでも停止する
-                if (exception_detected || kernel_mem_out_of_range) begin
+                // 2つに分けて検出した例外のどちらかを検出したら停止する
+                if (
+                    // カーネルモードのメモリの例外を検出した
+                    kernel_mem_exception_detected
+                    // または，それ以外の例外を検出した
+                    || other_exception_detected
+                ) begin
                     is_halted <= 1'b1;
                 end
             end
             // ユーザーモードで起きた例外は，例外ハンドラへ飛んでOSへ処理を移す
-            else if (exception_detected) begin
+            // (カーネルモードのメモリの例外はユーザーモードでは検出しないため，それ以外の例外だけで判定する)
+            else if (other_exception_detected) begin
                 jump_to_exception_handler();
             end
 
