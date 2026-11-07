@@ -1372,6 +1372,9 @@ module alu_sv (
     // ===== 例外の検出(組み合わせ回路) =====
     // 取得段・確認段・実行段のいずれかで例外を検出したかと，例外を起こした命令のプログラムカウンタ・例外の原因を求める．
     // 検出した例外は，メインの順序回路の「例外の受け付け」で，カーネルモードなら停止し，ユーザーモードなら例外ハンドラへ飛ぶ．
+    // ただし，カーネルモードで読み書きする番地が範囲を外れる例外は，例外ハンドラへ飛ぶかの判定とは別に求める
+    // (番地を求める加算器から，例外ハンドラへ飛ぶときの書き込み先までの経路が長くなり，クロックの周期に収まらないため．
+    //  停止するだけで，戻り先と原因を書き込まないため，別に求めてよい)
     // 1サイクルに例外を検出する段は多くとも1つである．理由は段ごとに次のとおり
     // - 取得段: パイプラインが空のときだけ検出する
     // - 確認段: 実行段が空いているか，このサイクルに完了するときだけ検出する
@@ -1407,7 +1410,12 @@ module alu_sv (
         // かつ，除数が0である
         && rs2_val == '0;
 
-    // 例外を検出したかと，例外を起こした命令のプログラムカウンタ・例外の原因．プログラムカウンタと原因は，例外を検出したときだけ意味を持つ
+    // カーネルモードで，実行段の命令がメモリを読み書きする番地が，読み書きしてよい範囲を外れるか
+    util_p::bool_t kernel_mem_out_of_range;
+    assign kernel_mem_out_of_range = kernel_mode && ex_mem_requesting && !mem_address_in_range;
+
+    // カーネルモードで番地が範囲を外れる例外を除き，例外を検出したかと，例外を起こした命令のプログラムカウンタ・例外の原因．
+    // プログラムカウンタと原因は，例外を検出したときだけ意味を持つ
     util_p::bool_t       exception_detected;
     register_t           exception_pc;
     exception_cause_enum exception_cause;
@@ -1439,8 +1447,9 @@ module alu_sv (
             exception_detected = 1'b1;
             exception_cause    = EXCEPTION_DIVIDE_ZERO;
         end
-        // 実行段: メモリを読み書きする番地が，読み書きしてよい範囲を外れる
-        else if (ex_mem_requesting && !mem_address_in_range) begin
+        // 実行段: ユーザーモードで，メモリを読み書きする番地が領域を外れる．
+        // 範囲内かは，番地を求めた次のサイクルに控えた結果で判定する
+        else if (!kernel_mode && ex_mem_requesting && !user_mem_in_range_r) begin
             exception_detected = 1'b1;
             exception_cause    = EXCEPTION_MEMORY;
         end
@@ -2162,15 +2171,16 @@ module alu_sv (
             // ===== 例外の受け付け =====
             // 検出した例外を，カーネルモードなら停止し，ユーザーモードなら例外ハンドラへ飛ぶ．
             // 例外ハンドラへ飛ぶ処理は，取得段の飛び先・命令キュー・実行段など，ここより前で代入した値を書き換えるため，それらの代入より後に置く
-            if (exception_detected) begin
-                // カーネルモードで起きた例外はOS自身の不具合のため，動作を保証できず停止する
-                if (kernel_mode) begin
+            // カーネルモードで起きた例外はOS自身の不具合のため，動作を保証できず停止する
+            if (kernel_mode) begin
+                // 番地が範囲を外れる例外と，それ以外の例外のどちらでも停止する
+                if (exception_detected || kernel_mem_out_of_range) begin
                     is_halted <= 1'b1;
                 end
-                // ユーザーモードで起きた例外は，例外ハンドラへ飛んでOSへ処理を移す
-                else begin
-                    jump_to_exception_handler();
-                end
+            end
+            // ユーザーモードで起きた例外は，例外ハンドラへ飛んでOSへ処理を移す
+            else if (exception_detected) begin
+                jump_to_exception_handler();
             end
 
             // ===== 実行段: 実行段の命令の番地と分岐の飛び先 =====
