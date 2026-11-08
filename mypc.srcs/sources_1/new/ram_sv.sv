@@ -35,7 +35,7 @@ module ram_sv import ram_p::*, util_p::*; (
     );
 
     // ワード数(1ワード=4バイトとしてRAM_SIZEを割った値．仕様上RM/WM 1回のアクセスは4バイトワード境界をまたがないため，
-    // この単位でメモリを分割できる．詳細はspecification/memory.md参照)
+    // この単位でメモリを分割できる)
     localparam int WORDS = RAM_SIZE / 4;
 
     // メモリに保存されるデータ．RAM全体を，番地 mod 4 == laneであるバイトだけを集めた4本の配列(レーン0〜3)に
