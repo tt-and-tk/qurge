@@ -168,9 +168,9 @@ int sd_init_commands(void) {
     // 判定に使ったのはR1ではなく戻ってきた2バイトのため，その2バイトを並べて添える
     if (echoed != 0x01aa) {
         console_print("[FAIL] SD card: voltage check (CMD8): check pattern mismatch (");
-        print_hex(echoed >> 8);
+        print_hex_byte(echoed >> 8);
         console_print(" ");
-        print_hex(echoed);
+        print_hex_byte(echoed);
         console_print(")\n");
         return 0;
     }

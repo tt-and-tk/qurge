@@ -14,7 +14,7 @@ char hex(int value) {
 }
 
 // 1バイトの値を"0x??"の形式で出力する(改行は付けない)
-void print_hex(char value) {
+void print_hex_byte(char value) {
     char hex_buf[5];  // 出力用の一時バッファ
     // "0x"に続けて上位・下位の4ビットを1桁ずつ並べ，終端して出力する
     hex_buf[0] = '0';
@@ -45,6 +45,6 @@ void print_hex_word(unsigned int value) {
 void print_response(char value) {
     // 応答値を括弧で囲んで出力し，行を終える
     console_print(" (");
-    print_hex(value);
+    print_hex_byte(value);
     console_print(")\n");
 }

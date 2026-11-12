@@ -13,10 +13,10 @@ const int INSTRUCTION_SIZE = 8;     // 1命令のバイト数(実行ファイル
 const int EXIT_SUCCESS = 0;         // 組み込みコマンドが成功した場合の終了状態
 const int EXIT_FAILURE = 1;         // 組み込みコマンドがエラーになった場合と，実行ファイルを実行できなかった場合・例外で終わった場合の終了状態
 
-char input[INPUT_SIZE];  // 1行分の入力バッファ
-char cmd[INPUT_SIZE];    // 入力の先頭トークン(コマンド名)
-int exit_status = 0;     // statusコマンドで出力する終了状態(電源を入れたときの起動の成否か，その後に実行した直前のコマンドの成否)
-int exit_exception = 0;  // 直前のコマンドを終わらせた例外の原因の番号(例外で終わっていなければ0．statusコマンドが終了状態の代わりに出力する)
+char input[INPUT_SIZE];                     // 1行分の入力バッファ
+char cmd[INPUT_SIZE];                       // 入力の先頭トークン(コマンド名)
+int exit_status = 0;                        // statusコマンドで出力する終了状態(電源を入れたときの起動の成否か，その後に実行した直前のコマンドの成否)
+int exit_exception_cause = EXCEPTION_NONE;  // 直前のコマンドを終わらせた例外の原因の番号(例外で終わっていなければ0．statusコマンドが終了状態の代わりに出力する)
 
 // エラーメッセージの前置き"<コマンド名>: "を出力する(どのコマンドが出したエラーかが分かるようにするため)
 void print_error_head(void) {
@@ -520,8 +520,9 @@ int handle_help(int pos) {
     return EXIT_SUCCESS;
 }
 
-// statusコマンド: 保持している終了状態(電源を入れたときの起動の成否か，直前のコマンドの成否)を10進数で出力する
-// 直前のコマンドが例外で終わっていれば，終了状態の代わりに"exception <原因の番号>"を出力する(実行ファイルが返しうる数値と区別するため)
+// statusコマンド: 直前のコマンドの終わり方(電源を入れたときの起動の成否か，直前のコマンドの成否)を1行で出力する．出力は次のどちらかである
+// - 直前のコマンドが例外で終わった場合: "exception <原因の番号>"(実行ファイルが返しうる数値と区別するため)
+// - それ以外の場合: 保持している終了状態の10進数
 // 何度実行しても同じ値を確かめられるよう，引数の誤りも含め，保持している終了状態をそのまま返し，終了状態と例外の原因を変えない
 int handle_status(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
@@ -530,9 +531,9 @@ int handle_status(int pos) {
         return exit_status;
     }
     // 例外で終わっていれば，例外の原因の番号を1行で出力する
-    if (exit_exception != 0) {
+    if (exit_exception_cause != EXCEPTION_NONE) {
         console_print("exception ");
-        console_print_decimal(exit_exception);
+        console_print_decimal(exit_exception_cause);
         console_print("\n");
         return exit_status;
     }
@@ -636,10 +637,12 @@ int run_executable(void) {
     // 入力行を半角空白で区切ってコマンド名と引数を渡し，ユーザーモードで実行する
     status = exec_run(input);
     // 例外で終わっていれば，原因を出力して残す(戻り値は不定のため使わない)
-    if (exec_exception_cause != 0) {
+    if (exec_exception_cause != EXCEPTION_NONE) {
+        // 前置きに続けて，例外の原因とPCを出力する
         print_error_head();
         exec_print_exception();
-        exit_exception = exec_exception_cause;
+        // statusコマンドで確かめられるよう，例外の原因の番号を残す
+        exit_exception_cause = exec_exception_cause;
         return EXIT_FAILURE;
     }
     // 終了のシステムコールで伝えられた終了状態を返す
@@ -654,7 +657,7 @@ int dispatch(int pos) {
         return handle_status(pos);
     }
     // ほかのコマンドは終了状態を改めるため，直前のコマンドの例外の原因を消す
-    exit_exception = 0;
+    exit_exception_cause = EXCEPTION_NONE;
     // コマンド名と一致する処理を呼び，どれとも一致しなければ既定のディレクトリの実行ファイルを探す
     if (streq(cmd, "echo")) {
         return handle_echo(pos);
