@@ -13,7 +13,7 @@ PYNQ-Z2(Zynq-7000)上に実装する自作CPUと，それを動かすソフト�
 | `specification` | `specification/` | CPUアーキテクチャ・ISA・アセンブリ言語・コンパイラ・Qosmosの仕様と，実機の構成のドキュメント(唯一の一次情報源) |
 | `pyntaxis` | `assembler/` | 自作アセンブリ言語Pyntaxis(`.pt`) → SystemVerilog ROM(`.sv`)，または自作OS Qosmosの実行ファイルへのアセンブラ |
 | `pynesis` | `compiler/` | 自作プログラミング言語Pynesis(`.pn`) → アセンブリ言語Pyntaxisへのコンパイラ．`pyntaxis`のソースファイルをincludeして使用し，`.sv`または実行ファイルまで一貫変換も可能 |
-| `qurge`(本リポジトリ) | `mypc/` | CPU・メモリ・ROM等のハードウェア全体のVivadoプロジェクト(SystemVerilog)と，ROM上で動く自作OS Qosmos(シェルやファイルシステムなど．Pynesisで記述．仕様は`specification`の`qosmos.md`) |
+| `qurge`(本リポジトリ) | `mypc/` | CPU・メモリ・ROM等のハードウェア全体のVivadoプロジェクト(SystemVerilog)と，ROM上で動く自作OS Qosmos(シェルやファイルシステムなど．Pynesisで記述．仕様は`specification`の`qosmos/`) |
 | `for-pynthesis-skills` | `for-pynthesis-skills/` | 上記各リポジトリで共有するissue起票・対応支援スキルを提供する．特定のリポジトリが主担当と判断できない，全リポジトリに影響するissueの起票先(受け皿)でもある |
 
 ```
@@ -47,7 +47,7 @@ ROMの内容(`mypc.srcs/sources_1/new/rom_sv.sv`)は，QosmosのPynesisソース
 pn2mc.exe -pn mypc.srcs/pn/qosmos.pn -pt mypc.srcs/pn/qosmos.pt -sv mypc.srcs/sources_1/new/rom_sv.sv
 ```
 
-`pn2mc.exe`は`compiler`リポジトリでビルドし，そのディレクトリにPATHを通しておく．起動引数は`specification`の`compiler.md`を参照する．`-sv`を省略すると`.pt`と同じ場所へ出力されVivadoが読む`rom_sv.sv`は更新されないため，省略しない．
+`pn2mc.exe`は`compiler`リポジトリでビルドし，そのディレクトリにPATHを通しておく．起動引数は`specification`の`pynesis/compiler/usage.md`を参照する．`-sv`は必ず指定する．省略すると`.pt`と同じ場所へ出力され，Vivadoが読む`rom_sv.sv`が古いまま残るためである．
 
 生成し直した`rom_sv.sv`に差分が出たらコミットする．`.pn`の変更によるものはその変更と同じコミットに含め，コンパイラ・アセンブラの更新によるものは単独でコミットする．チェックアウトした直後に変換ツールなしで合成できるよう，`rom_sv.sv`もGit管理下に置いているためである．
 
@@ -68,7 +68,7 @@ ROMの内容(`rom_sv.sv`)とブロックダイアグラムは，どちらのテ�
 PYNQ-Z2は，電源を入れるとボードのSDカードスロットに挿したカードのBOOT.BINから起動する．BOOT.BINには，FSBLとビットストリームだけを入れる．FSBL(First Stage Boot Loader)は，PS(ARM)が最初に実行するプログラムで，PSを初期化してからビットストリームをPLへ書き込む．書き込み後にプログラムを実行するのはPL上のCPUだけで，PSのCPUは何も実行しない．\
 書き込み後もPSが受け持つのは，CPUへのクロックとリセットの供給と，UART0(USBのシリアル通信の回路)の2つである．クロックとリセットは，PSを初期化して初めて供給される．PYNQ-Z2の電源用のUSBはUART0にだけつながっているため，PL上のUARTの橋渡し回路が，PSのS_AXI_GP0ポート(PLの回路がPS内の周辺回路のレジスタを読み書きするための入口)を通してUART0のレジスタを読み書きする．通信速度などのUART0の設定はFSBLが済ませる．
 
-SDカードは，BOOT.BINを置くボードのカードと，Qosmosのファイルシステムを置くシールド(ボードのArduinoヘッダに重ねる拡張基板)のカードの2枚を使う．カードの置き方・ジャンパの設定，シールドの重ね方と配線などの実機の構成は，`specification`の`board.md`を参照する．
+SDカードは，BOOT.BINを置くボードのカードと，Qosmosのファイルシステムを置くシールド(ボードのArduinoヘッダに重ねる拡張基板)のカードの2枚を使う．カードの用意・ジャンパの設定などの操作手順は，`specification`の`operation.md`を参照する．シールドの重ね方と配線などの実機の構成は，`specification`の`board.md`を参照する．
 
 ### BOOT.BINの作成
 
