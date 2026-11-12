@@ -11,11 +11,12 @@
 const int INPUT_SIZE = CONSOLE_LINE_SIZE;  // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
 const int INSTRUCTION_SIZE = 8;     // 1命令のバイト数(実行ファイルの大きさはこの倍数になる)
 const int EXIT_SUCCESS = 0;         // 組み込みコマンドが成功した場合の終了状態
-const int EXIT_FAILURE = 1;         // 組み込みコマンドがエラーになった場合と，実行ファイルを実行できなかった場合の終了状態
+const int EXIT_FAILURE = 1;         // 組み込みコマンドがエラーになった場合と，実行ファイルを実行できなかった場合・例外で終わった場合の終了状態
 
 char input[INPUT_SIZE];  // 1行分の入力バッファ
 char cmd[INPUT_SIZE];    // 入力の先頭トークン(コマンド名)
 int exit_status = 0;     // statusコマンドで出力する終了状態(電源を入れたときの起動の成否か，その後に実行した直前のコマンドの成否)
+int exit_exception = 0;  // 直前のコマンドを終わらせた例外の原因の番号(例外で終わっていなければ0．statusコマンドが終了状態の代わりに出力する)
 
 // エラーメッセージの前置き"<コマンド名>: "を出力する(どのコマンドが出したエラーかが分かるようにするため)
 void print_error_head(void) {
@@ -520,11 +521,19 @@ int handle_help(int pos) {
 }
 
 // statusコマンド: 保持している終了状態(電源を入れたときの起動の成否か，直前のコマンドの成否)を10進数で出力する
-// 何度実行しても同じ値を確かめられるよう，引数の誤りも含め，保持している終了状態をそのまま返して値を変えない
+// 直前のコマンドが例外で終わっていれば，終了状態の代わりに"exception <原因の番号>"を出力する(実行ファイルが返しうる数値と区別するため)
+// 何度実行しても同じ値を確かめられるよう，引数の誤りも含め，保持している終了状態をそのまま返し，終了状態と例外の原因を変えない
 int handle_status(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
+        return exit_status;
+    }
+    // 例外で終わっていれば，例外の原因の番号を1行で出力する
+    if (exit_exception != 0) {
+        console_print("exception ");
+        console_print_decimal(exit_exception);
+        console_print("\n");
         return exit_status;
     }
     // 終了状態を1行で出力する
@@ -573,11 +582,12 @@ int load_executable(struct FatEntry *entry) {
 // 既定のディレクトリ/binから，コマンド名と同じ名前の実行ファイルを探し，実行ファイルに割り振る領域へ読み込んでユーザーモードで実行する(コマンド名は空でないこと)
 // 実行ファイルには，コマンド名とそれに続く引数を入力行から取り出し，argc・argvとして渡す
 // 実行ファイルが見つからなければ，組み込みコマンドとも一致しなかったコマンドとして未対応のエラーにする
-// 戻り値: 実行ファイルが終了のシステムコールで伝えた終了状態 / EXIT_FAILURE(実行ファイルを実行できなかった)
+// 実行ファイルが例外で終われば，例外の原因をエラーとして出力し，statusコマンドで確かめられるよう原因の番号を残す
+// 戻り値: 実行ファイルが終了のシステムコールで伝えた終了状態 / EXIT_FAILURE(実行ファイルを実行できなかったか，例外で終わった)
 int run_executable(void) {
     struct FatEntry dir;    // 既定のディレクトリのエントリ
     struct FatEntry entry;  // 見つかった実行ファイルのエントリ
-    int status;             // FAT32の各関数の結果
+    int status;             // FAT32の各関数の結果・実行ファイルの終了状態
 
     // ドットを含む名前は探さない(実行ファイルは拡張子の無いファイルに限り，データファイルを打ち間違いで命令として実行しないため)
     for (int i = 0; cmd[i] != '\0'; i++) {
@@ -623,20 +633,33 @@ int run_executable(void) {
     }
     // TCPの出力バッファの中身は実行ファイルが終わるまで送られずに残るため，実行する前に送る
     console_tcp_flush();
-    // 入力行を半角空白で区切ってコマンド名と引数を渡し，ユーザーモードで実行して，終了のシステムコールで伝えられた終了状態を返す
-    return exec_run(input);
+    // 入力行を半角空白で区切ってコマンド名と引数を渡し，ユーザーモードで実行する
+    status = exec_run(input);
+    // 例外で終わっていれば，原因を出力して残す(戻り値は不定のため使わない)
+    if (exec_exception_cause != 0) {
+        print_error_head();
+        exec_print_exception();
+        exit_exception = exec_exception_cause;
+        return EXIT_FAILURE;
+    }
+    // 終了のシステムコールで伝えられた終了状態を返す
+    return status;
 }
 
 // グローバル配列cmdの内容に応じた処理を呼び出し，その終了状態を返す(streqは配列変数のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
 // 引数の取り出し対象は1行分の入力を保持するinputで固定のため，コマンド側へは位置だけを渡す
 int dispatch(int pos) {
+    // statusコマンドは，直前のコマンドの例外の原因を出力するため，消す前に処理する
+    if (streq(cmd, "status")) {
+        return handle_status(pos);
+    }
+    // ほかのコマンドは終了状態を改めるため，直前のコマンドの例外の原因を消す
+    exit_exception = 0;
     // コマンド名と一致する処理を呼び，どれとも一致しなければ既定のディレクトリの実行ファイルを探す
     if (streq(cmd, "echo")) {
         return handle_echo(pos);
     } else if (streq(cmd, "help")) {
         return handle_help(pos);
-    } else if (streq(cmd, "status")) {
-        return handle_status(pos);
     } else if (streq(cmd, "ls")) {
         return handle_ls(pos);
     } else if (streq(cmd, "cat")) {
