@@ -29,15 +29,15 @@
 #include "network.pn"
 #include "uart.pn"
 
-const int CONSOLE_TCP_PORT = 23;          // telnetでの接続を待ち受けるポート番号(telnetの標準のポート番号)
-const int CONSOLE_LINE_SIZE = 64;         // コンソールから受け取る1行を置く配列の要素数(ヌル終端の分を含む)
-const int CONSOLE_TCP_OUTPUT_SIZE = 256;  // TCPの出力バッファのバイト数
-const int CONSOLE_TCP_INPUT_SIZE = 64;    // TCPから受信したデータを置くバッファのバイト数
-const int CONSOLE_DECIMAL_SIZE = 12;      // 10進数を出力する一時バッファの要素数(intで最も長い"-2147483648"とヌル終端の分)
+static const int CONSOLE_TCP_PORT = 23;          // telnetでの接続を待ち受けるポート番号(telnetの標準のポート番号)
+const int CONSOLE_LINE_SIZE = 64;                // コンソールから受け取る1行を置く配列の要素数(ヌル終端の分を含む)
+static const int CONSOLE_TCP_OUTPUT_SIZE = 256;  // TCPの出力バッファのバイト数
+static const int CONSOLE_TCP_INPUT_SIZE = 64;    // TCPから受信したデータを置くバッファのバイト数
+static const int CONSOLE_DECIMAL_SIZE = 12;      // 10進数を出力する一時バッファの要素数(intで最も長い"-2147483648"とヌル終端の分)
 
 // 1行の編集に使う文字コード
-const int CONSOLE_BS = 0x08;   // BS(バックスペース)
-const int CONSOLE_DEL = 0x7f;  // DEL(バックスペースキーでBSの代わりに送られることがある)
+static const int CONSOLE_BS = 0x08;   // BS(バックスペース)
+static const int CONSOLE_DEL = 0x7f;  // DEL(バックスペースキーでBSの代わりに送られることがある)
 
 // 端末の種類
 const int CONSOLE_TERMINAL_TCP = 0;   // telnetで接続した端末
@@ -49,49 +49,49 @@ const int CONSOLE_TCP_LISTENING = 1;  // 待ち受け中
 const int CONSOLE_TCP_CONNECTED = 2;  // 接続中
 
 // 入力を受け取る関数が，文字の代わりに返す値
-const int CONSOLE_NEW_CONNECTION = -1;  // 受け取る前に，新たな端末がtelnetで接続した
+static const int CONSOLE_NEW_CONNECTION = -1;  // 受け取る前に，新たな端末がtelnetで接続した
 
 // 1行の入力の結果
 const int CONSOLE_LINE_DONE = 1;            // 1行を受け取った
 const int CONSOLE_LINE_NEW_CONNECTION = 0;  // 受け取る途中で，新たな端末がtelnetで接続した(受け取り途中の行は捨てる)
 
 // telnetのコマンドの値
-const unsigned char TELNET_IAC = 0xff;   // IAC(続くバイトがコマンドであることを示す)
-const unsigned char TELNET_DONT = 0xfe;  // DONT
-const unsigned char TELNET_DO = 0xfd;    // DO
-const unsigned char TELNET_WONT = 0xfc;  // WONT
-const unsigned char TELNET_WILL = 0xfb;  // WILL
-const unsigned char TELNET_SB = 0xfa;    // SB(サブネゴシエーションの始まり)
-const unsigned char TELNET_SE = 0xf0;    // SE(サブネゴシエーションの終わり)
+static const unsigned char TELNET_IAC = 0xff;   // IAC(続くバイトがコマンドであることを示す)
+static const unsigned char TELNET_DONT = 0xfe;  // DONT
+static const unsigned char TELNET_DO = 0xfd;    // DO
+static const unsigned char TELNET_WONT = 0xfc;  // WONT
+static const unsigned char TELNET_WILL = 0xfb;  // WILL
+static const unsigned char TELNET_SB = 0xfa;    // SB(サブネゴシエーションの始まり)
+static const unsigned char TELNET_SE = 0xf0;    // SE(サブネゴシエーションの終わり)
 
 // telnetのオプションの番号
-const unsigned char TELNET_ECHO = 1;  // エコー(相手の端末で入力された文字の表示を，こちらが行う)
-const unsigned char TELNET_SGA = 3;   // SGA(Suppress Go Ahead．送り終えるたびに送るGAというコマンドを省き，1文字ずつ送り合えるようにする)
+static const unsigned char TELNET_ECHO = 1;  // エコー(相手の端末で入力された文字の表示を，こちらが行う)
+static const unsigned char TELNET_SGA = 3;   // SGA(Suppress Go Ahead．送り終えるたびに送るGAというコマンドを省き，1文字ずつ送り合えるようにする)
 
 // telnetの受信の状態(受信したバイトをデータとして扱うかコマンドとして扱うかの判断に使う)
-const int TELNET_STATE_DATA = 0;     // データを受け取っている
-const int TELNET_STATE_COMMAND = 1;  // IACの直後
-const int TELNET_STATE_OPTION = 2;   // 交渉のコマンドの直後(オプションの番号を待っている)
-const int TELNET_STATE_SUB = 3;      // サブネゴシエーションの中
-const int TELNET_STATE_SUB_IAC = 4;  // サブネゴシエーションの中のIACの直後
+static const int TELNET_STATE_DATA = 0;     // データを受け取っている
+static const int TELNET_STATE_COMMAND = 1;  // IACの直後
+static const int TELNET_STATE_OPTION = 2;   // 交渉のコマンドの直後(オプションの番号を待っている)
+static const int TELNET_STATE_SUB = 3;      // サブネゴシエーションの中
+static const int TELNET_STATE_SUB_IAC = 4;  // サブネゴシエーションの中のIACの直後
 
 int console_tcp_state = CONSOLE_TCP_IDLE;                 // telnetでの接続の状態
-char console_tcp_output[CONSOLE_TCP_OUTPUT_SIZE];         // TCPの出力バッファ(telnetで接続した端末へ送る出力を，まとめて送るまでためておく)
-int console_tcp_output_length = 0;                        // TCPの出力バッファにためたバイト数
-char console_last_output = 0;                             // コンソールへ最後に出力した文字(改行の前に復帰を補うかの判断に使う)
-char console_tcp_input[CONSOLE_TCP_INPUT_SIZE];           // TCPから受信したデータ
-int console_tcp_input_length = 0;                         // 受信したデータのバイト数
-int console_tcp_input_position = 0;                       // 受信したデータのうち，次に処理する位置
-int console_tcp_after_cr = 0;                             // telnetで接続した端末から直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
-int console_uart_after_cr = 0;                            // UARTで接続した端末から直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
+static char console_tcp_output[CONSOLE_TCP_OUTPUT_SIZE];  // TCPの出力バッファ(telnetで接続した端末へ送る出力を，まとめて送るまでためておく)
+static int console_tcp_output_length = 0;                 // TCPの出力バッファにためたバイト数
+static char console_last_output = 0;                      // コンソールへ最後に出力した文字(改行の前に復帰を補うかの判断に使う)
+static char console_tcp_input[CONSOLE_TCP_INPUT_SIZE];    // TCPから受信したデータ
+static int console_tcp_input_length = 0;                  // 受信したデータのバイト数
+static int console_tcp_input_position = 0;                // 受信したデータのうち，次に処理する位置
+static int console_tcp_after_cr = 0;                      // telnetで接続した端末から直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
+static int console_uart_after_cr = 0;                     // UARTで接続した端末から直前に受け取った文字が復帰(CR)か(0:違う，1:復帰)
 int console_last_input_terminal = CONSOLE_TERMINAL_UART;  // 直前に受け取った文字を送ってきた端末の種類
-int console_telnet_state = TELNET_STATE_DATA;             // telnetの受信の状態
-unsigned char console_telnet_command = 0;                 // 受け取った交渉のコマンド(オプションの番号を待つ間に控える)
-int console_telnet_echo = 0;                              // エコーのオプションが有効か(0:無効，1:有効．有効な間だけ，入力された文字をtelnetで接続した端末へ表示する)
-int console_telnet_sga = 0;                               // SGAのオプションが有効か(0:無効，1:有効．GAは有効・無効によらず送らない)
+static int console_telnet_state = TELNET_STATE_DATA;      // telnetの受信の状態
+static unsigned char console_telnet_command = 0;          // 受け取った交渉のコマンド(オプションの番号を待つ間に控える)
+static int console_telnet_echo = 0;                       // エコーのオプションが有効か(0:無効，1:有効．有効な間だけ，入力された文字をtelnetで接続した端末へ表示する)
+static int console_telnet_sga = 0;                        // SGAのオプションが有効か(0:無効，1:有効．GAは有効・無効によらず送らない)
 
 // telnetでの接続を閉じる．TCPの出力バッファの中身と処理する前の受信データは捨てる
-void console_tcp_disconnect(void) {
+static void console_tcp_disconnect(void) {
     // 接続を閉じる
     tcp_close();
     // 待ち受け前の状態へ戻す(次に入力を待つときに，待ち受けを始め直す)
@@ -125,7 +125,7 @@ void console_tcp_flush(void) {
 }
 
 // telnetで接続した端末があれば，TCPの出力バッファの末尾に1バイト加え，バッファが満杯になれば送る．接続していなければ捨てる
-void console_put_tcp(char c) {
+static void console_put_tcp(char c) {
     // 接続が切れた後に加えたバイトを次の接続へ持ち越さないよう，接続していなければ捨てる
     if (console_tcp_state != CONSOLE_TCP_CONNECTED) {
         return;
@@ -140,7 +140,7 @@ void console_put_tcp(char c) {
 }
 
 // 1文字を両方の端末へ出力する
-void console_put(char c) {
+static void console_put(char c) {
     // UARTで接続した端末へ送る
     uart_send(c);
     // TCPの出力バッファに加える
@@ -151,7 +151,7 @@ void console_put(char c) {
 
 // 入力された文字を表示するため，1文字を出力する
 // UARTで接続した端末へは常に出力し，telnetで接続した端末へはエコーのオプションが有効な間だけ出力する(無効な間は，表示をその端末自身に任せる)
-void console_echo(char c) {
+static void console_echo(char c) {
     // UARTで接続した端末へ送る
     uart_send(c);
     // エコーのオプションが有効であれば，TCPの出力バッファに加える
@@ -241,7 +241,7 @@ void console_print_decimal(int value) {
 
 // telnetの交渉のコマンドを，オプションの番号を添えてTCPの出力バッファへ加える
 // 加えたIACはコマンドの始まりを表すため，データの0xFFのように2つ並べることはしない
-void console_telnet_send(unsigned char command, unsigned char option) {
+static void console_telnet_send(unsigned char command, unsigned char option) {
     // IAC，コマンド，オプションの番号の順に加える
     console_put_tcp(TELNET_IAC);
     console_put_tcp(command);
@@ -327,7 +327,7 @@ void console_tcp_close(void) {
 // telnetでの接続から受信したデータを1バイトだけ，届くのを待たずに取り出す
 // 受信したデータをすべて取り出し終えていれば，TCPの出力バッファの中身を送ってから受信し直す
 // 戻り値: 取り出したバイトの値(0〜255) / -1(接続していないか，取り出せるバイトが無い)
-int console_receive_tcp_byte(void) {
+static int console_receive_tcp_byte(void) {
     int status;  // 受信の結果
     int b;       // 取り出したバイトの値
 
@@ -366,7 +366,7 @@ int console_receive_tcp_byte(void) {
 
 // 自分の側のオプションを，相手の要求(DO:有効にする，DONT:無効にする)どおりに切り替え，切り替えたことを応答する
 // 既に要求どおりであれば，自分の申し出への同意か重複した要求のため応答しない(応答し合いが続かないようにするため)
-void console_telnet_switch(int *enabled, unsigned char command, unsigned char option) {
+static void console_telnet_switch(int *enabled, unsigned char command, unsigned char option) {
     int requested = (command == TELNET_DO);  // 要求された状態(0:無効，1:有効)
 
     // 既に要求どおりであれば何もしない
@@ -385,7 +385,7 @@ void console_telnet_switch(int *enabled, unsigned char command, unsigned char op
 
 // 相手から受け取った交渉のコマンドに応じて，自分の側のオプションを切り替えるか，要求・申し出を断る
 // 相手の同意や拒否には応答しない(応答し合いが続かないようにするため)
-void console_telnet_negotiate(unsigned char command, unsigned char option) {
+static void console_telnet_negotiate(unsigned char command, unsigned char option) {
     // 相手が自分の側でオプションを使うと申し出てきた(WILL)ときは，DONTを返してすべて断る
     // 相手の端末は端末の種類や画面の大きさを伝える機能などを申し出てくるが，Qosmosはそれらの値を使わないため
     if (command == TELNET_WILL) {
@@ -414,7 +414,7 @@ void console_telnet_negotiate(unsigned char command, unsigned char option) {
 // 受信の区切りをまたいだコマンドも扱えるよう，どこまで受け取ったかは受信の状態として呼び出しをまたいで控える
 // 交渉への応答はTCPの出力バッファへ加わり，次に受信するときにバッファの他の中身と一緒に送られる
 // 戻り値: データの文字の値(0〜255) / -1(コマンドの一部として処理した)
-int console_telnet_receive(unsigned char b) {
+static int console_telnet_receive(unsigned char b) {
     // 受信の状態に応じて，バイトをデータとして返すか，コマンドの一部として処理して状態を進める
     if (console_telnet_state == TELNET_STATE_DATA) {
         // データの途中では，IACであればコマンドの始まりとして次のバイトを待ち，それ以外はデータの1文字とする
@@ -466,7 +466,7 @@ int console_telnet_receive(unsigned char b) {
 // 端末は，Enterキーを復帰とLFの2文字か，復帰とNULの2文字で送ることがあるため，2文字目を読み捨てて1つの改行として扱う
 // after_crには，その端末から直前に受け取った文字が復帰かを控える変数を渡す(この関数が更新する)
 // 戻り値: 1(読み捨てる) / 0(文字として扱う)
-int console_skip_after_cr(int *after_cr, int c) {
+static int console_skip_after_cr(int *after_cr, int c) {
     // 復帰の直後のLF・NULは読み捨てる
     if (
         // 直前に受け取った文字が復帰である
@@ -486,7 +486,7 @@ int console_skip_after_cr(int *after_cr, int c) {
 // telnetで接続した端末からはtelnetのコマンドを除いたデータを受け取り，どちらの端末からも復帰の直後のLF・NULは読み捨てる
 // 文字を受け取ったときは，その文字を送ってきた端末の種類も控える
 // 戻り値: 受け取った文字の値(0〜255) / CONSOLE_NEW_CONNECTION(新たな端末がtelnetで接続した)
-int console_receive_char(void) {
+static int console_receive_char(void) {
     int b;  // telnetでの接続から受信したバイトの値(0〜255)か，受信したバイトが無いことを表す-1
     int c;  // 受け取った文字の値(0〜255)か，文字が無いことを表す-1
 

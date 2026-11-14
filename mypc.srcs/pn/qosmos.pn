@@ -8,32 +8,32 @@
 #include "fat.pn"
 #include "exec.pn"
 
-const int INPUT_SIZE = CONSOLE_LINE_SIZE;  // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
-const int INSTRUCTION_SIZE = 8;     // 1命令のバイト数(実行ファイルの大きさはこの倍数になる)
-const int EXIT_SUCCESS = 0;         // 組み込みコマンドが成功した場合の終了状態
-const int EXIT_FAILURE = 1;         // 組み込みコマンドがエラーになった場合と，実行ファイルを実行できなかった場合・例外で終わった場合の終了状態
+static const int INPUT_SIZE = CONSOLE_LINE_SIZE;  // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
+static const int INSTRUCTION_SIZE = 8;     // 1命令のバイト数(実行ファイルの大きさはこの倍数になる)
+static const int EXIT_SUCCESS = 0;         // 組み込みコマンドが成功した場合の終了状態
+static const int EXIT_FAILURE = 1;         // 組み込みコマンドがエラーになった場合と，実行ファイルを実行できなかった場合・例外で終わった場合の終了状態
 
-char input[INPUT_SIZE];                     // 1行分の入力バッファ
-char cmd[INPUT_SIZE];                       // 入力の先頭トークン(コマンド名)
-int exit_status = 0;                        // statusコマンドで出力する終了状態(電源を入れたときの起動の成否か，その後に実行した直前のコマンドの成否)
-int exit_exception_cause = EXCEPTION_NONE;  // 直前のコマンドを終わらせた例外の原因の番号(例外で終わっていなければ0．statusコマンドが終了状態の代わりに出力する)
+static char input[INPUT_SIZE];                     // 1行分の入力バッファ
+static char cmd[INPUT_SIZE];                       // 入力の先頭トークン(コマンド名)
+static int exit_status = 0;                        // statusコマンドで出力する終了状態(電源を入れたときの起動の成否か，その後に実行した直前のコマンドの成否)
+static int exit_exception_cause = EXCEPTION_NONE;  // 直前のコマンドを終わらせた例外の原因の番号(例外で終わっていなければ0．statusコマンドが終了状態の代わりに出力する)
 
 // エラーメッセージの前置き"<コマンド名>: "を出力する(どのコマンドが出したエラーかが分かるようにするため)
-void print_error_head(void) {
+static void print_error_head(void) {
     // 実行中のコマンド名に区切りを続けて出力する
     console_print(cmd);
     console_print(": ");
 }
 
 // エラーを"<コマンド名>: <msg>"の形式で出力する(msgは末尾の改行まで含めて渡す)
-void print_error(char *msg) {
+static void print_error(char *msg) {
     // 前置きに続けてメッセージを出力する
     print_error_head();
     console_print(msg);
 }
 
 // FAT32の各関数が返した失敗を，実行中のコマンドのエラーとして出力する
-void print_fat_error(int status) {
+static void print_fat_error(int status) {
     // 前置きに続けて，失敗の理由のメッセージを出力する
     print_error_head();
     fat_print_error(status);
@@ -42,7 +42,7 @@ void print_fat_error(int status) {
 // ちょうど1つの引数を取るコマンドで，posより後ろの引数をargへ取り出す(argはINPUT_SIZE要素で確保すること)
 // 引数が無いか余分な引数があればエラーを出力して0を返し，取り出せれば1を返す
 // 入力行の解析を担うargs.pnに置かないのは，シェルの入力行inputとコマンド名を前置するエラー表示を使うため(args.pnはシェルに依存しない)
-int extract_only_arg(int pos, char *arg) {
+static int extract_only_arg(int pos, char *arg) {
     // 直後の引数を取り出す
     pos = extract_arg(input, pos, arg, INPUT_SIZE);
     // 引数が指定されていなければ何もしない
@@ -60,7 +60,7 @@ int extract_only_arg(int pos, char *arg) {
 
 // echoコマンド: コマンド名以降の引数部分をそのまま出力する
 // 以降の組み込みコマンドの処理は，いずれも終了状態を返す(保持している値をそのまま返すstatusを除き，EXIT_SUCCESSかEXIT_FAILURE)
-int handle_echo(int pos) {
+static int handle_echo(int pos) {
     char args[INPUT_SIZE];  // コマンド名を除いた引数部分
     // コマンド名より後ろを丸ごと取り出し，改行を付けて出力する
     extract_text_arg(input, pos, args, INPUT_SIZE);
@@ -71,7 +71,7 @@ int handle_echo(int pos) {
 
 // ディレクトリの走査で，エントリの名前を1行出力する(ディレクトリは末尾に'/'を付けて区別する)
 // fat_walkへ渡す関数は走査を打ち切るかどうかを戻り値で伝える決まりのため，常に続ける場合もvoidにはしない
-int print_entry(struct FatEntry *entry) {
+static int print_entry(struct FatEntry *entry) {
     char text[FAT_NAME_TEXT_SIZE];  // 表示用の名前
     // エントリの名前を"NAME.EXT"形式に整えて出力する
     fat_format_name(entry, text);
@@ -87,7 +87,7 @@ int print_entry(struct FatEntry *entry) {
 }
 
 // lsコマンド: 現在のディレクトリにあるファイル・ディレクトリの名前を順に出力する
-int handle_ls(int pos) {
+static int handle_ls(int pos) {
     int status;  // 走査の結果
 
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
@@ -105,7 +105,7 @@ int handle_ls(int pos) {
 }
 
 // catコマンド: 引数のファイル名に対応するファイルの内容を出力する
-int handle_cat(int pos) {
+static int handle_cat(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(読み出すファイル名)
     struct FatEntry entry;  // 見つかったファイルのエントリ
     struct FatFile file;    // 読み出し中のファイルの位置
@@ -157,7 +157,7 @@ int handle_cat(int pos) {
 }
 
 // touchコマンド: 引数のファイル名で，内容が空のファイルを作成する
-int handle_touch(int pos) {
+static int handle_touch(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(作成するファイル名)
     struct FatEntry entry;  // 作成したファイルのエントリ
     int status;             // 作成の結果
@@ -176,7 +176,7 @@ int handle_touch(int pos) {
 }
 
 // writeコマンド: 引数の先頭をファイル名，残りを内容として，ファイルの内容を丸ごと置き換える(ファイルが無ければ作成する)
-int handle_write(int pos) {
+static int handle_write(int pos) {
     char name[INPUT_SIZE];     // 先頭の引数(書き込むファイル名)
     char content[INPUT_SIZE];  // ファイル名を除いた残り(書き込む内容)
     int length = 0;            // 書き込む内容のバイト数
@@ -205,7 +205,7 @@ int handle_write(int pos) {
 }
 
 // rmコマンド: 引数のファイル名に対応するファイルを削除する
-int handle_rm(int pos) {
+static int handle_rm(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(削除するファイル名)
     struct FatEntry entry;  // 削除するファイルのエントリ
     int status;             // 検索・削除の結果
@@ -227,7 +227,7 @@ int handle_rm(int pos) {
 }
 
 // mvコマンド: 引数の先頭を旧ファイル名，次を新ファイル名として名前を変更する
-int handle_mv(int pos) {
+static int handle_mv(int pos) {
     char old_name[INPUT_SIZE];  // 先頭の引数(旧ファイル名)
     char new_name[INPUT_SIZE];  // 次の引数(新ファイル名)
     struct FatEntry entry;      // 名前を変更するエントリ
@@ -259,7 +259,7 @@ int handle_mv(int pos) {
 }
 
 // mkdirコマンド: 引数の名前で，空のディレクトリを作成する
-int handle_mkdir(int pos) {
+static int handle_mkdir(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(作成するディレクトリ名)
     int status;             // 作成の結果
 
@@ -277,7 +277,7 @@ int handle_mkdir(int pos) {
 }
 
 // rmdirコマンド: 引数の名前に対応する空のディレクトリを削除する
-int handle_rmdir(int pos) {
+static int handle_rmdir(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(削除するディレクトリ名)
     struct FatEntry entry;  // 削除するディレクトリのエントリ
     int status;             // 検索・削除の結果
@@ -299,7 +299,7 @@ int handle_rmdir(int pos) {
 }
 
 // cdコマンド: 引数の名前のディレクトリへ現在のディレクトリを移す．引数が無ければルートディレクトリへ移す
-int handle_cd(int pos) {
+static int handle_cd(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(移動先のディレクトリ名)
     int status;             // 移動の結果
 
@@ -324,7 +324,7 @@ int handle_cd(int pos) {
 }
 
 // pwdコマンド: 現在のディレクトリの絶対パスを出力する
-int handle_pwd(int pos) {
+static int handle_pwd(int pos) {
     char path[FAT_PATH_SIZE];  // 現在のディレクトリの絶対パス
     int status;                // パスの取得の結果
 
@@ -346,7 +346,7 @@ int handle_pwd(int pos) {
 
 // SDカードを初期化し，カード上のFAT32ファイルシステムをマウントする．各段階の成否を[ OK ]・[FAIL]の行で出力する
 // 戻り値: 1(マウントまで成功) / 0(失敗．ファイルシステムは外れた状態になる)
-int init_storage(void) {
+static int init_storage(void) {
     int status;  // マウントの結果
 
     // 初期化に失敗したときに前のカードのファイルシステムを使い続けないよう，先に外しておく
@@ -368,7 +368,7 @@ int init_storage(void) {
 }
 
 // IPv4アドレスを"a.b.c.d"の形式で出力する(改行は付けない)
-void print_ipv4(unsigned int address) {
+static void print_ipv4(unsigned int address) {
     // 上位のバイトから順に10進数で出力し，間を'.'で区切る
     for (int i = 3; i >= 0; i--) {
         console_print_decimal((address >> (i << 3)) & 0xff);
@@ -381,7 +381,7 @@ void print_ipv4(unsigned int address) {
 
 // Ethernetモジュールを初期化し，ネットワークの設定を書き込む．各段階の成否を[ OK ]・[FAIL]の行で出力する
 // 戻り値: 1(設定まで成功) / 0(失敗)
-int init_network(void) {
+static int init_network(void) {
     int status;  // 初期化と設定の結果
 
     // モジュールをリセットし，ネットワークの設定を書き込む
@@ -413,7 +413,7 @@ int init_network(void) {
 }
 
 // OS名Qosmosを大きな文字(アスキーアート)で出力し，副題を添える
-void print_banner(void) {
+static void print_banner(void) {
     // figletのstandardフォントで描いた5行と，空行を挟んだ副題を出力する
     console_print("  ___\n");
     console_print(" / _ \\  ___  ___ _ __ ___   ___  ___\n");
@@ -426,7 +426,7 @@ void print_banner(void) {
 
 // OS名を出力し，ファイルシステムをマウントしていなければ，やり直し方を出力する
 // ネットワークの設定の失敗は伝えない．起動時の行で伝えており，失敗していてもtelnetでの接続を受け付けられるまで設定をやり直すため
-void print_welcome(void) {
+static void print_welcome(void) {
     // OS名を出力する
     print_banner();
     // ファイルシステムをマウントしていなければ，カードを差してrebootでやり直すよう伝える
@@ -438,7 +438,7 @@ void print_welcome(void) {
 // OSの起動処理．ハードウェアを初期化してファイルシステムをマウントし，telnetでの接続を閉じてからネットワークを設定する
 // 呼ぶたびにハードウェアの初期化からやり直すため，再起動にもそのまま使える．戻り値は終了状態で，マウントに成功すれば成功，失敗すれば失敗を表す
 // ネットワークの設定の成否は戻り値に含めない．失敗しても，telnetでの接続を受け付けられるまで設定をやり直すため
-int boot(void) {
+static int boot(void) {
     int mounted;  // ファイルシステムをマウントできたか(0:失敗，1:成功)
 
     // ハードウェアを初期化し，ファイルシステムをマウントする
@@ -456,7 +456,7 @@ int boot(void) {
 }
 
 // rebootコマンド: OSを再起動する(電源投入時と同じ起動処理をやり直し，OS名を出力する)
-int handle_reboot(int pos) {
+static int handle_reboot(int pos) {
     int status;  // 起動処理の終了状態
 
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
@@ -473,7 +473,7 @@ int handle_reboot(int pos) {
 }
 
 // exitコマンド: TCPの出力バッファの中身を送ってからtelnetでの接続を閉じる
-int handle_exit(int pos) {
+static int handle_exit(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
@@ -495,7 +495,7 @@ int handle_exit(int pos) {
 }
 
 // helpコマンド: 利用可能なコマンドの一覧を表示する
-int handle_help(int pos) {
+static int handle_help(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていれば何もしない
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
@@ -525,7 +525,7 @@ int handle_help(int pos) {
 // - それ以外の場合: 保持している終了状態の10進数
 // 何度実行しても同じ値を確かめられるよう，保持している終了状態をそのまま返し，終了状態と例外の原因を変えない
 // ほかの組み込みコマンドはエラーで終了状態を1にするが，このコマンドは引数が多すぎるエラーでも変えない
-int handle_status(int pos) {
+static int handle_status(int pos) {
     // 引数を取らないコマンドのため，引数が指定されていればエラーを出力し，終了状態を変えずに返す
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
@@ -545,13 +545,13 @@ int handle_status(int pos) {
 }
 
 // 未対応コマンドのエラーメッセージを表示する
-void handle_unknown(void) {
+static void handle_unknown(void) {
     // 未対応である旨のエラーを出力する
     print_error("unknown command\n");
 }
 
 // 実行ファイルentryの内容を，実行ファイルに割り振る領域の先頭から書き写す(大きさは検査済みのものを渡すこと)
-int load_executable(struct FatEntry *entry) {
+static int load_executable(struct FatEntry *entry) {
     struct FatFile file;                               // 読み出し中の実行ファイルの位置
     int length;                                        // 読み込んだセクタのうち内容にあたるバイト数
     int status;                                        // FAT32の各関数の結果
@@ -586,7 +586,7 @@ int load_executable(struct FatEntry *entry) {
 // 実行ファイルが見つからなければ，組み込みコマンドとも一致しなかったコマンドとして未対応のエラーにする
 // 実行ファイルが例外で終われば，例外の原因をエラーとして出力し，statusコマンドで確かめられるよう原因の番号を残す
 // 戻り値: 実行ファイルが終了のシステムコールで伝えた終了状態 / EXIT_FAILURE(実行ファイルを実行できなかったか，例外で終わった)
-int run_executable(void) {
+static int run_executable(void) {
     struct FatEntry dir;    // 既定のディレクトリのエントリ
     struct FatEntry entry;  // 見つかった実行ファイルのエントリ
     int status;             // FAT32の各関数の結果・実行ファイルの終了状態
@@ -652,7 +652,7 @@ int run_executable(void) {
 
 // グローバル配列cmdの内容に応じた処理を呼び出し，その終了状態を返す(streqは配列変数のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)
 // 引数の取り出し対象は1行分の入力を保持するinputで固定のため，コマンド側へは位置だけを渡す
-int dispatch(int pos) {
+static int dispatch(int pos) {
     // statusコマンドは，直前のコマンドの例外の原因を出力するため，消す前に処理する
     if (streq(cmd, "status")) {
         return handle_status(pos);

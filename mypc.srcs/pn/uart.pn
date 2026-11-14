@@ -9,22 +9,22 @@
 #pragma once
 
 // UARTのレジスタへ書き込む指示と通知
-const unsigned int UART_TX_REQUEST = 0x100;  // 送信の指示
-const unsigned int UART_RX_POP = 0x200;      // 読み終えた通知
+static const unsigned int UART_TX_REQUEST = 0x100;  // 送信の指示
+static const unsigned int UART_RX_POP = 0x200;      // 読み終えた通知
 
 // UARTのレジスタから読み出す状態
-const int UART_RX_HEAD_SHIFT = 16;                 // 受信バッファの先頭のバイトの位置
-const unsigned int UART_RX_NOT_EMPTY = 0x1000000;  // 受信したバイトがあるか
-const unsigned int UART_TX_NOT_FULL = 0x2000000;   // 送信バッファに空きがあるか
+static const int UART_RX_HEAD_SHIFT = 16;                 // 受信バッファの先頭のバイトの位置
+static const unsigned int UART_RX_NOT_EMPTY = 0x1000000;  // 受信したバイトがあるか
+static const unsigned int UART_TX_NOT_FULL = 0x2000000;   // 送信バッファに空きがあるか
 
 // 送信バッファの空きを待つ空ループの反復回数の上限
 // タイマーが無いため，空ループ1反復の命令数から最短の時間を見積もる．1反復はコンパイル結果で4命令以上であり，QurgeのCPUは1サイクル(100MHzで10ns)に多くとも2命令しか実行しないため，20ns以上かかる
 // 橋渡し回路が動いていれば，空きは1バイトを送る時間(115200bpsで約87us)ごとにできるため，その10倍ほどの1ms以上待つ回数とする
-const int UART_SEND_WAIT_LOOPS = 50000;
+static const int UART_SEND_WAIT_LOOPS = 50000;
 
 // 送信が止まっているか(0:止まっていない，1:止まっている)
 // 送信バッファに空きができるのを上限の回数まで待っても，空きができなかったときに，送信が止まっているとみなして1にする．空きができたときに0に戻す
-int uart_stalled = 0;
+static int uart_stalled = 0;
 
 // 1バイトを送信バッファへ入れる．空きが無いときは，送信が止まっているか(止まっているとみなす条件は，送信が止まっているかを表す変数の説明を参照)で次のように扱う
 // - 止まっていない: 上限の回数まで空くのを待ち，空かなければ捨てて，送信が止まっているとみなす

@@ -14,7 +14,7 @@
 #include "syscall_dispatch.pn"
 
 // argvの配列に取る要素数．1行から取り出せる文字列の数が最も多い場合(1文字と空白が交互に並ぶ場合)の数に，末尾のnullptrの1つを足す
-const int EXEC_ARGV_SIZE = CONSOLE_LINE_SIZE / 2 + 1;
+static const int EXEC_ARGV_SIZE = CONSOLE_LINE_SIZE / 2 + 1;
 
 // 例外の原因の番号(1以上は，CPUが例外ハンドラへ飛ぶときにECAUSEへ書き込む値)
 const int EXCEPTION_NONE = 0;         // 例外で終わっていないことを表す
@@ -24,12 +24,12 @@ const int EXCEPTION_PRIVILEGED = 3;   // カーネルモードでだけ許され
 const int EXCEPTION_DIVIDE_ZERO = 4;  // 割り算の除数が0である
 const int EXCEPTION_MEMORY = 5;       // メモリを読み書きする番地が範囲外である
 
-unsigned int exec_start_sp;      // 実行ファイルへ入るときのSP(領域の中の番地)
-unsigned int exec_kernel_sp;     // 実行ファイルを起動するときに控えておく，カーネルモードのSP．実行ファイルへ入る関数の戻り先を指す
-unsigned int exec_user_sp;       // システムコールの命令でカーネルモードへ移った時点のSP(領域の中の番地)
-int exec_exit_status;            // 実行ファイルが終了のシステムコールで伝えた終了状態
-int exec_exception_cause;        // 実行ファイルを終わらせた例外の原因の番号(例外で終わっていなければ0)
-unsigned int exec_exception_pc;  // 実行ファイルを終わらせた例外を起こした命令のPC(例外で終わった場合だけ意味を持つ)
+static unsigned int exec_start_sp;      // 実行ファイルへ入るときのSP(領域の中の番地)
+static unsigned int exec_kernel_sp;     // 実行ファイルを起動するときに控えておく，カーネルモードのSP．実行ファイルへ入る関数の戻り先を指す
+static unsigned int exec_user_sp;       // システムコールの命令でカーネルモードへ移った時点のSP(領域の中の番地)
+static int exec_exit_status;            // 実行ファイルが終了のシステムコールで伝えた終了状態
+int exec_exception_cause;               // 実行ファイルを終わらせた例外の原因の番号(例外で終わっていなければ0)
+static unsigned int exec_exception_pc;  // 実行ファイルを終わらせた例外を起こした命令のPC(例外で終わった場合だけ意味を持つ)
 
 // 実行ファイルへ渡すコマンド名と引数(lineを半角空白で区切ったもの)を領域の末尾に置き，実行ファイルへ入るときのSP(領域の中の番地)を返す
 // 渡す1行は，ヌル終端を含めてコンソールの1行の大きさ(64バイト)以内であること(置く大きさが，領域の末尾に取った引数の置き場に収まる前提のため)
@@ -40,7 +40,7 @@ unsigned int exec_exception_pc;  // 実行ファイルを終わらせた例外�
 // - SP-8・SP-4: argc・argv(argvの配列の先頭の領域の中の番地)
 // 置く大きさは，文字列が最大で1行分の64バイト，揃えが最大3バイト，配列が最大33要素×4バイト，SP-8からSPまでが12バイトの
 // 合計211バイトで，領域の末尾に取った引数の置き場(256バイト)に収まる
-unsigned int exec_place_args(char *line) {
+static unsigned int exec_place_args(char *line) {
     char *argv[EXEC_ARGV_SIZE];  // 各文字列の先頭のメモリの番地
     int length = 0;              // lineの文字数
     unsigned int text;           // 文字列を置く先頭の領域の中の番地
@@ -87,7 +87,7 @@ unsigned int exec_place_args(char *line) {
 // この関数の呼び出し元へは，次のどちらかの場合に，システムコールハンドラか例外ハンドラがSPを戻してから直接戻る．このため，どちらの場合もこの関数の末尾の命令は実行されない
 // - 実行ファイルが終了のシステムコールを実行した場合: システムコールハンドラが，終了状態を返して戻る
 // - 実行ファイルが例外を起こした場合: 例外ハンドラが，例外の原因とPCを控えて戻る(戻り値は不定)
-int exec_enter(void) {
+static int exec_enter(void) {
     // システムコールハンドラ・例外ハンドラが呼び出し元へ戻れるよう，戻り先を指すSPを控える
     exec_kernel_sp = SP;
     // 実行ファイルのスタックへ切り替え，戻り先(領域の先頭の命令)へユーザーモードで移る
@@ -97,7 +97,7 @@ int exec_enter(void) {
 
 // システムコールハンドラ．実行ファイルがシステムコールの命令を実行すると，カーネルモードへ移ってここへ飛ぶ(フレームの大きさは0)
 // 終了を求められれば，終了状態を返してシェルへ戻る．それ以外は機能を実行して実行ファイルへ戻る
-int exec_syscall_entry(void) {
+static int exec_syscall_entry(void) {
     // 実行ファイルのSPを控え，カーネルモードのスタックへ切り替える
     // (切り替えるまでは，SPが領域の中の番地のままで，カーネルモードではそのまま使えないため，関数を呼ばない)
     exec_user_sp = SP;
@@ -113,7 +113,7 @@ int exec_syscall_entry(void) {
 
 // 例外ハンドラ．実行ファイルが例外を起こすと，カーネルモードへ移ってここへ飛ぶ(フレームの大きさは0)
 // 例外の原因と例外を起こした命令のPCを控え，シェルへ戻る．例外を起こした命令から先は実行しない
-void exec_exception_entry(void) {
+static void exec_exception_entry(void) {
     // SPを実行ファイルの起動時に控えた値へ戻し，カーネルモードのスタックへ切り替える
     // (切り替えるまでは，SPが領域の中の番地のままで，カーネルモードではそのまま使えないため，関数を呼ばない)
     SP = exec_kernel_sp;

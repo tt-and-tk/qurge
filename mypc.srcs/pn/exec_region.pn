@@ -3,9 +3,9 @@
 // 領域の中の番地は，命令の取り出しとメモリの読み書きのたびにCPUがメモリの番地へ変換する．カーネルモードで動くOSは変換されないため，ここの関数で変換する
 #pragma once
 
-const int EXEC_REGION_BASE = 0x8000;      // 領域の先頭のメモリの番地(メモリの後半の先頭)
-const int EXEC_REGION_SIZE = 0x8000;      // 領域の大きさ(メモリの後半全体)
-const int EXEC_ARGS_AREA_SIZE = 256;      // 領域の末尾のうち，実行ファイルへ渡すコマンド名と引数を置くために取る大きさ
+const int EXEC_REGION_BASE = 0x8000;         // 領域の先頭のメモリの番地(メモリの後半の先頭)
+const int EXEC_REGION_SIZE = 0x8000;         // 領域の大きさ(メモリの後半全体)
+static const int EXEC_ARGS_AREA_SIZE = 256;  // 領域の末尾のうち，実行ファイルへ渡すコマンド名と引数を置くために取る大きさ
 const int EXEC_CODE_SIZE = EXEC_REGION_SIZE - EXEC_ARGS_AREA_SIZE;  // 読み込める実行ファイルの大きさの上限(領域のうち，末尾のコマンド名と引数の置き場より手前)
 
 // 領域の中の番地addrからsizeバイトの範囲が領域に収まれば，その先頭に対応するメモリの番地を指すポインタを返す．収まらなければnullptrを返す

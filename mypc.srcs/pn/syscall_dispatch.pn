@@ -8,7 +8,7 @@
 
 // FAT32の各関数が返した失敗を，実行ファイルへ返すエラーの値に変換する
 // 実行ファイルへはFAT32の内部の区別を見せず，実行ファイルが対処を変えうる種類だけに分けて返す
-int syscall_fat_error(int status) {
+static int syscall_fat_error(int status) {
     // 失敗の理由ごとに対応する値を返す
     switch (status) {
         case FAT_ERR_TOO_LARGE:
@@ -27,7 +27,7 @@ int syscall_fat_error(int status) {
 }
 
 // 領域の中の番地aにある名前のファイルの大きさ(バイト数)を返す
-int syscall_file_size(int a) {
+static int syscall_file_size(int a) {
     char *name = exec_region_string(a);  // ファイル名
     struct FatEntry entry;               // 見つかったファイルのエントリ
     int status;                          // 検索の結果
@@ -49,7 +49,7 @@ int syscall_file_size(int a) {
 }
 
 // 領域の中の番地aにある名前のファイルの内容を，領域の中の番地bからcバイトの読み込み先へ丸ごと読み込み，そのバイト数を返す
-int syscall_file_read(int a, int b, int c) {
+static int syscall_file_read(int a, int b, int c) {
     char *name = exec_region_string(a);    // ファイル名
     char *buf = exec_region_buffer(b, c);  // 読み込み先
     int length;                            // 読み込んだバイト数
@@ -68,7 +68,7 @@ int syscall_file_read(int a, int b, int c) {
 }
 
 // 領域の中の番地aにある名前のファイルの内容を，領域の中の番地bからのcバイトで丸ごと置き換え(無ければ作成し)，0を返す
-int syscall_file_write(int a, int b, int c) {
+static int syscall_file_write(int a, int b, int c) {
     char *name = exec_region_string(a);     // ファイル名
     char *data = exec_region_buffer(b, c);  // 書き込む内容
     int status;                             // 書き込みの結果
@@ -86,7 +86,7 @@ int syscall_file_write(int a, int b, int c) {
 }
 
 // コンソールから1行を受け取り，領域の中の番地aからのbバイトの格納先へヌル終端付きで格納し，格納した文字数を返す
-int syscall_console_read(int a, int b) {
+static int syscall_console_read(int a, int b) {
     char *buf = exec_region_buffer(a, b);  // 格納先
     int length = 0;                        // 格納した文字数
 
@@ -110,7 +110,7 @@ int syscall_console_read(int a, int b) {
 }
 
 // 領域の中の番地aからのbバイトをコンソールへ出力し，0を返す
-int syscall_console_write(int a, int b) {
+static int syscall_console_write(int a, int b) {
     char *data = exec_region_buffer(a, b);  // 出力するバイト列
 
     // バイト列が領域の外にあるか，出力するバイトが1つも無ければ出力できない
@@ -128,7 +128,7 @@ int syscall_console_write(int a, int b) {
 
 // 番号numberのシステムコールの処理を引数a〜dで実行し，その結果を返す(戻り値: 0以上は成功，負の値はエラー)
 // コンソールへ出すのは，実行ファイルが出力を求めたバイト列と，1行を受け取る間のエコーだけである(エラーを表示するかどうかは，呼び出した実行ファイルが決めるため)
-int syscall_dispatch(int number, int a, int b, int c, int d) {
+static int syscall_dispatch(int number, int a, int b, int c, int d) {
     // 番号に対応する機能を実行する
     switch (number) {
         // ファイルの大きさを返す

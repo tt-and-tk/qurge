@@ -2,10 +2,10 @@
 #pragma once
 #include "console.pn"
 
-const int HEX_WORD_DIGITS = 8;  // 4バイトの値を表す16進数の桁数
+static const int HEX_WORD_DIGITS = 8;  // 4バイトの値を表す16進数の桁数
 
 // 0〜15の値を16進数1桁の文字へ変換する
-char hex(int value) {
+static char hex(int value) {
     // 0〜9は数字，10〜15は英小文字のa〜fで表す
     if (value < 10) {
         return '0' + value;
