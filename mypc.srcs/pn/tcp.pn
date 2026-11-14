@@ -114,7 +114,7 @@ static int tcp_connected(void) {
 // 戻り値: TCP_OK / TCP_ERR_NOT_READY / TCP_ERR_SOCKET
 int tcp_listen(int port) {
     // モジュールが応答しない状態でコマンドを書くと受け付けを待ち続けるため，設定に成功した場合に限りソケットを操作する
-    if (eth_ready == 0) {
+    if (eth_is_ready() == 0) {
         return TCP_ERR_NOT_READY;
     }
     // 前の接続が残っていても使えるよう，ソケットを閉じる
