@@ -109,6 +109,7 @@ static int handle_cat(int pos) {
     char name[INPUT_SIZE];  // 先頭の引数(読み出すファイル名)
     struct FatEntry entry;  // 見つかったファイルのエントリ
     struct FatFile file;    // 読み出し中のファイルの位置
+    unsigned char *data;    // 読み込んだセクタの内容の先頭
     int length;             // 読み込んだセクタのうち内容にあたるバイト数
     int status;             // FAT32の各関数の結果
     int last = '\n';        // 最後に出力した文字(内容が改行で終わらなければ改行を補うため．空のファイルでは補わないよう改行から始める)
@@ -131,7 +132,7 @@ static int handle_cat(int pos) {
     // 1セクタずつ読み込んで出力する
     while (1) {
         // 次の1セクタを読み込む．全て読み終えていれば出力を終える
-        status = fat_read(&file, &length);
+        status = fat_read(&file, &data, &length);
         if (status == FAT_END) {
             break;
         }
@@ -145,9 +146,9 @@ static int handle_cat(int pos) {
             return EXIT_FAILURE;
         }
         // 末尾に改行を補うかどうか判断できるよう，内容の最後の文字を控える
-        last = fat_sector[length - 1];
+        last = data[length - 1];
         // 読み込んだセクタのうち，内容にあたる部分を出力する
-        console_write((char *)fat_sector, length);
+        console_write((char *)data, length);
     }
     // 内容が改行で終わっていなければ，次のプロンプトが同じ行に並ばないよう改行を補う
     if (last != '\n') {
@@ -389,13 +390,13 @@ static int init_network(void) {
     // リセットの後にモジュールが応答しなければ，読み出した値を添えてリセットの段階の失敗を出力する
     if (status == NETWORK_NO_RESPONSE) {
         console_print("[FAIL] Ethernet: reset: no response");
-        print_response(network_version);
+        print_response(network_get_version());
         return 0;
     }
     // 応答したバージョンがW5100Sのものでなければ，読み出した値を添えてリセットの段階の失敗を出力する
     if (status == NETWORK_BAD_VERSION) {
         console_print("[FAIL] Ethernet: reset: unexpected version");
-        print_response(network_version);
+        print_response(network_get_version());
         return 0;
     }
     console_print("[ OK ] Ethernet: reset\n");
@@ -430,7 +431,7 @@ static void print_welcome(void) {
     // OS名を出力する
     print_banner();
     // ファイルシステムをマウントしていなければ，カードを差してrebootでやり直すよう伝える
-    if (fat_mounted == 0) {
+    if (fat_is_mounted() == 0) {
         console_print("Storage is not available. Insert a card and run reboot.\n");
     }
 }
@@ -482,9 +483,9 @@ static int handle_exit(int pos) {
     // 閉じる接続が無ければ失敗とする．次のいずれかの場合が当たる
     if (
         // UARTで接続した端末から入力された
-        console_last_input_terminal != CONSOLE_TERMINAL_TCP
+        console_get_last_input_terminal() != CONSOLE_TERMINAL_TCP
         // コマンドを受け取った後の出力の送信で，telnetでの接続が切れた
-        || console_tcp_state != CONSOLE_TCP_CONNECTED
+        || console_get_tcp_state() != CONSOLE_TCP_CONNECTED
     ) {
         print_error("not connected\n");
         return EXIT_FAILURE;
@@ -552,10 +553,11 @@ static void handle_unknown(void) {
 
 // 実行ファイルentryの内容を，実行ファイルに割り振る領域の先頭から書き写す(大きさは検査済みのものを渡すこと)
 static int load_executable(struct FatEntry *entry) {
-    struct FatFile file;                               // 読み出し中の実行ファイルの位置
-    int length;                                        // 読み込んだセクタのうち内容にあたるバイト数
-    int status;                                        // FAT32の各関数の結果
-    unsigned int *src = (unsigned int *)fat_sector;    // 読み込んだセクタを4バイト単位で読む位置
+    struct FatFile file;  // 読み出し中の実行ファイルの位置
+    unsigned char *data;  // 読み込んだセクタの内容の先頭
+    int length;           // 読み込んだセクタのうち内容にあたるバイト数
+    int status;           // FAT32の各関数の結果
+    unsigned int *src;    // 読み込んだセクタを4バイト単位で読む位置
     unsigned int *dst = (unsigned int *)EXEC_REGION_BASE;  // 次に書き込む領域の位置
 
     // 実行ファイルを先頭から読み出せるよう開く
@@ -566,13 +568,15 @@ static int load_executable(struct FatEntry *entry) {
     // 1セクタずつ読み込み，全て読み終えるまで書き写す
     while (1) {
         // 次の1セクタを読み込む．全て読み終えていれば書き写し終えている
-        status = fat_read(&file, &length);
+        status = fat_read(&file, &data, &length);
         if (status == FAT_END) {
             return FAT_OK;
         }
         if (status != FAT_OK) {
             return status;
         }
+        // 読み込んだセクタを4バイト単位で読む
+        src = (unsigned int *)data;
         // 内容を4バイト単位で書き写す(大きさが命令のバイト数の倍数のため，最後のセクタの内容も4バイト単位で割り切れる．1バイトずつ写すより命令数が少ない)
         for (int i = 0; i < (length >> 2); i++) {
             *dst = src[i];
@@ -599,7 +603,7 @@ static int run_executable(void) {
         }
     }
     // 現在のディレクトリによらず，ルートディレクトリ直下の既定のディレクトリから探す
-    status = fat_find_in(fat_root_cluster, "bin", &dir);
+    status = fat_find_in(fat_get_root_cluster(), "bin", &dir);
     // 既定の名前がディレクトリでなければ，既定のディレクトリが無いものとして扱う
     if (status == FAT_OK && (dir.attr & ATTR_DIRECTORY) == 0) {
         status = FAT_ERR_NOT_FOUND;
@@ -637,13 +641,13 @@ static int run_executable(void) {
     console_tcp_flush();
     // 入力行を半角空白で区切ってコマンド名と引数を渡し，ユーザーモードで実行する
     status = exec_run(input);
-    // 例外で終わっていれば，原因を出力して残す(戻り値は不定のため使わない)
-    if (exec_exception_cause != EXCEPTION_NONE) {
+    // statusコマンドで確かめられるよう，例外の原因の番号を残す(終了のシステムコールで終わった場合は，例外なしを表す番号が残る)
+    exit_exception_cause = exec_get_exception_cause();
+    // 例外で終わっていれば，原因を出力する(戻り値は不定のため使わない)
+    if (exit_exception_cause != EXCEPTION_NONE) {
         // 前置きに続けて，例外の原因とPCを出力する
         print_error_head();
         exec_print_exception();
-        // statusコマンドで確かめられるよう，例外の原因の番号を残す
-        exit_exception_cause = exec_exception_cause;
         return EXIT_FAILURE;
     }
     // 終了のシステムコールで伝えられた終了状態を返す

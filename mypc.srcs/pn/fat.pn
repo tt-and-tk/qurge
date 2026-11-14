@@ -168,10 +168,10 @@ struct FatFile {
 };
 
 // セクタの読み書きに使う領域．全ての読み書きで共用するため，カードを読み書きする関数を呼ぶと内容が置き換わる
-unsigned char fat_sector[SD_BLOCK_SIZE];
+static unsigned char fat_sector[SD_BLOCK_SIZE];
 
 // マウントしたファイルシステムの情報(fat_mountが設定する)
-int fat_mounted = 0;                          // ファイルシステムをマウントしているか(0:未マウント，1:マウント済み)．起動直後はまだマウントしていないため0から始める
+static int fat_mounted = 0;                   // ファイルシステムをマウントしているか(0:未マウント，1:マウント済み)．起動直後はまだマウントしていないため0から始める
 static unsigned int fat_start;                // 1つ目のFATの先頭セクタ番号
 static unsigned int fat_num_fats;             // FATの個数(本体と複製を合わせた数．1か2)
 static unsigned int fat_sectors_per_fat;      // FAT1つあたりの大きさ(セクタ数)
@@ -179,7 +179,7 @@ static unsigned int fat_data_start;           // データ領域(クラスタ2)�
 static unsigned int fat_sectors_per_cluster;  // 1クラスタあたりの大きさ(セクタ数)
 static unsigned int fat_cluster_shift;        // 1クラスタあたりの大きさ(セクタ数)の2の対数
 static unsigned int fat_cluster_count;        // データ領域のクラスタ数
-unsigned int fat_root_cluster;                // ルートディレクトリの開始クラスタ
+static unsigned int fat_root_cluster;         // ルートディレクトリの開始クラスタ
 static unsigned int fat_fsinfo_sector;        // FSInfoセクタの番号．マウントした後，空きクラスタ数を「不明」を表す値へ書き換えたら0にする(FSInfoセクタが無い場合も0)
 static unsigned int fat_next_free;            // 空きクラスタを探すときに調べ始めるクラスタ(前回確保したクラスタ．毎回データ領域の先頭から調べ直さないため)
 
@@ -357,6 +357,17 @@ void fat_unmount(void) {
     fat_mounted = 0;
 }
 
+// ファイルシステムをマウントしているかを返す
+// 戻り値: 1(マウント済み) / 0(未マウント)
+int fat_is_mounted(void) {
+    return fat_mounted;
+}
+
+// マウントしたファイルシステムのルートディレクトリの開始クラスタを返す(マウントしていなければ値は保証されない)
+unsigned int fat_get_root_cluster(void) {
+    return fat_root_cluster;
+}
+
 // 初期化済みのSDカード上のFAT32ファイルシステムをマウントする(カードを差し替えた後は，sd_initで初期化し直してから呼び直す)
 int fat_mount(void) {
     unsigned int fs_start = 0;  // ファイルシステムの先頭セクタ番号(パーティションを持たないカードでは0)
@@ -366,7 +377,7 @@ int fat_mount(void) {
     fat_unmount();
 
     // セクタ番号をそのまま番地として読み出せるカード(SDHC/SDXC)であることは初期化で確かめるため，初期化が済んでいなければ読まない
-    if (sd_ready == 0) {
+    if (sd_is_ready() == 0) {
         return FAT_ERR_INIT;
     }
 
@@ -802,9 +813,10 @@ int fat_open(struct FatEntry *entry, struct FatFile *file) {
     return FAT_OK;
 }
 
-// fileの次の1セクタをfat_sectorへ読み込み，そのうちファイルの内容にあたるバイト数をlengthへ返す．全て読み終えていればFAT_ENDを返す
+// fileの次の1セクタを読み込み，内容の先頭の番地をdataへ，そのうちファイルの内容にあたるバイト数をlengthへ返す．全て読み終えていればFAT_ENDを返す
+// dataが指す内容は，カードを読み書きする関数を次に呼ぶと置き換わる(全ての読み書きでセクタの領域を共用するため)．呼び出し元は書き換えないこと
 // 読み終わりはクラスタチェーンの終わりではなく残りのバイト数で判定する(最後のクラスタの残りのセクタには内容が無いため)
-int fat_read(struct FatFile *file, int *length) {
+int fat_read(struct FatFile *file, unsigned char **data, int *length) {
     unsigned int next;  // 次のクラスタ
     int status;         // 次のクラスタを求めた結果
 
@@ -835,6 +847,8 @@ int fat_read(struct FatFile *file, int *length) {
         return FAT_ERR_READ;
     }
     file->sector++;
+    // 読み込んだ内容の先頭の番地を返す
+    *data = fat_sector;
     // 最後のセクタは残りのバイト数だけが内容にあたる
     if (file->remaining < SD_BLOCK_SIZE) {
         *length = file->remaining;
@@ -851,6 +865,7 @@ int fat_read(struct FatFile *file, int *length) {
 int fat_read_file(char *file_name, char *buf, unsigned int size, int *length) {
     struct FatEntry entry;  // 読み出すファイルのエントリ
     struct FatFile file;    // 読み出し中のファイルの位置
+    unsigned char *data;    // 読み込んだセクタの内容の先頭
     int sector_length;      // 読み込んだセクタのうち内容にあたるバイト数
     int status;             // FAT32の各関数の結果
     int copied = 0;         // bufへ書き写したバイト数
@@ -872,7 +887,7 @@ int fat_read_file(char *file_name, char *buf, unsigned int size, int *length) {
     // 1セクタずつ読み込み，全て読み終えるまで書き写す
     while (1) {
         // 次の1セクタを読み込む．全て読み終えていれば書き写し終えている
-        status = fat_read(&file, &sector_length);
+        status = fat_read(&file, &data, &sector_length);
         if (status == FAT_END) {
             *length = copied;
             return FAT_OK;
@@ -882,7 +897,7 @@ int fat_read_file(char *file_name, char *buf, unsigned int size, int *length) {
         }
         // 内容を1バイトずつ書き写す(bufは4バイト境界にそろうとは限らないため，4バイト単位では写さない)
         for (int i = 0; i < sector_length; i++) {
-            buf[copied] = fat_sector[i];
+            buf[copied] = data[i];
             copied++;
         }
     }

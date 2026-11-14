@@ -28,7 +28,7 @@ static unsigned int exec_start_sp;      // 実行ファイルへ入るときのS
 static unsigned int exec_kernel_sp;     // 実行ファイルを起動するときに控えておく，カーネルモードのSP．実行ファイルへ入る関数の戻り先を指す
 static unsigned int exec_user_sp;       // システムコールの命令でカーネルモードへ移った時点のSP(領域の中の番地)
 static int exec_exit_status;            // 実行ファイルが終了のシステムコールで伝えた終了状態
-int exec_exception_cause;               // 実行ファイルを終わらせた例外の原因の番号(例外で終わっていなければ0)
+static int exec_exception_cause;        // 実行ファイルを終わらせた例外の原因の番号(実行ファイルを起動するたびに0にするため，例外で終わっていなければ0)
 static unsigned int exec_exception_pc;  // 実行ファイルを終わらせた例外を起こした命令のPC(例外で終わった場合だけ意味を持つ)
 
 // 実行ファイルへ渡すコマンド名と引数(lineを半角空白で区切ったもの)を領域の末尾に置き，実行ファイルへ入るときのSP(領域の中の番地)を返す
@@ -170,4 +170,10 @@ int exec_run(char *line) {
     exec_start_sp = exec_place_args(line);
     // 実行ファイルへ入り，システムコールハンドラか例外ハンドラから戻ってきた値を返す
     return exec_enter();
+}
+
+// 直前に実行した実行ファイルを終わらせた例外の原因の番号を返す(実行ファイルを一度も実行していなければ，値は保証されない)
+// 実行した実行ファイルが例外で終わっていなければ，EXCEPTION_NONEを返す
+int exec_get_exception_cause(void) {
+    return exec_exception_cause;
 }

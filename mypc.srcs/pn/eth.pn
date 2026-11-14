@@ -37,7 +37,7 @@ static int eth_csn = 1;   // 初期値はハードウェアのリセット値(�
 static int eth_rstn = 1;  // 初期値はハードウェアのリセット値(非リセット)と揃える
 
 // リセットからネットワークの設定までを終え，通信に使える状態か(0:使えない，1:使える)．起動直後はまだ設定していないため0から始める
-int eth_ready = 0;
+static int eth_ready = 0;
 
 // CSnとRSTnのピンを，変数に記録した出力レベルにする(SCK・MOSIはLowにする)
 static void eth_output_control(void) {
@@ -169,5 +169,11 @@ int eth_configure(unsigned int mac_high, unsigned int mac_low, unsigned int ip, 
         && eth_read_bytes(ETH_SUBR, 4) == subnet
         // ゲートウェイ
         && eth_read_bytes(ETH_GAR, 4) == gateway;
+    return eth_ready;
+}
+
+// リセットからネットワークの設定までを終え，通信に使える状態かを返す
+// 戻り値: 1(使える) / 0(使えない)
+int eth_is_ready(void) {
     return eth_ready;
 }
