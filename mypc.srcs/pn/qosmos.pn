@@ -641,7 +641,7 @@ static int run_executable(void) {
     console_tcp_flush();
     // 入力行を半角空白で区切ってコマンド名と引数を渡し，ユーザーモードで実行する
     status = exec_run(input);
-    // statusコマンドで確かめられるよう，例外の原因の番号を残す(例外で終わっていなければ，例外で終わっていないことを表す番号になる)
+    // statusコマンドで確かめられるよう，例外の原因の番号を残す(終了のシステムコールで終わった場合は，例外なしを表す番号が残る)
     exit_exception_cause = exec_get_exception_cause();
     // 例外で終わっていれば，原因を出力する(戻り値は不定のため使わない)
     if (exit_exception_cause != EXCEPTION_NONE) {
