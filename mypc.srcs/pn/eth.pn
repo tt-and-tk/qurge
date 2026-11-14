@@ -21,33 +21,33 @@ const int ETH_SIPR = 0x000f;  // 自身のIPアドレス(4バイト)
 const int ETH_VERR = 0x0080;  // チップのバージョン(1バイト)
 
 // SPIフレームの1バイト目に送るOPコード
-const int ETH_OP_READ = 0x0f;   // 読み出し
-const int ETH_OP_WRITE = 0xf0;  // 書き込み
+static const int ETH_OP_READ = 0x0f;   // 読み出し
+static const int ETH_OP_WRITE = 0xf0;  // 書き込み
 
 // リセットの待ちに使う空ループの反復回数
 // タイマーが無いため，空ループ1反復の命令数から最短の時間を見積もる
 // 1反復はコンパイル結果で8命令であり，CPUは1サイクル(100MHzで10ns)に多くとも2命令しか実行しないため，40ns以上かかる
-const int ETH_RESET_HOLD_LOOPS = 20;       // RSTnをLowに保つ回数(800ns以上．データシートの560nsを上回る)
-const int ETH_RESET_WAIT_LOOPS = 1600000;  // RSTnをHighへ戻してから待つ回数(64ms以上．データシートの60.3msを上回る)
+static const int ETH_RESET_HOLD_LOOPS = 20;       // RSTnをLowに保つ回数(800ns以上．データシートの560nsを上回る)
+static const int ETH_RESET_WAIT_LOOPS = 1600000;  // RSTnをHighへ戻してから待つ回数(64ms以上．データシートの60.3msを上回る)
 
 // CSn(チップセレクト)とRSTn(リセット)の出力レベル(いずれもアクティブLowで，0:選択中・リセット中，1:非選択・非リセット)
 // ETH_SPIへの書き込みは常に全ビットを同時に置き換える
 // このため，SCK・MOSIだけを変えるときもCSn・RSTnを書き込み直す必要があり，その出力レベルを変数に記録しておく
-int eth_csn = 1;   // 初期値はハードウェアのリセット値(非選択)と揃える
-int eth_rstn = 1;  // 初期値はハードウェアのリセット値(非リセット)と揃える
+static int eth_csn = 1;   // 初期値はハードウェアのリセット値(非選択)と揃える
+static int eth_rstn = 1;  // 初期値はハードウェアのリセット値(非リセット)と揃える
 
 // リセットからネットワークの設定までを終え，通信に使える状態か(0:使えない，1:使える)．起動直後はまだ設定していないため0から始める
 int eth_ready = 0;
 
 // CSnとRSTnのピンを，変数に記録した出力レベルにする(SCK・MOSIはLowにする)
-void eth_output_control(void) {
+static void eth_output_control(void) {
     // CSn(bit2)とRSTn(bit1)を並べて書き込む
     ETH_SPI = (eth_csn << 2) | (eth_rstn << 1);
 }
 
 // SPIモード0のビットバンギングで1バイトを送信し，同時に受信した1バイトを返す
 // SPIは全二重で送信と受信が常に対になるため，受信だけしたい場合は0xffを渡すこと
-unsigned char eth_spi_transfer(char data) {
+static unsigned char eth_spi_transfer(char data) {
     // ETH_SPIのビット割り当て(bit5:SCK / bit4:MISO(入力) / bit3:MOSI / bit2:CSn / bit1:RSTn / bit0:INTn(入力))
 
     unsigned char received = 0;                   // MISOから上位ビット順に組み立てる受信バイト
@@ -74,7 +74,7 @@ unsigned char eth_spi_transfer(char data) {
 
 // 1つのSPIフレーム(OPコード・番地2バイト・データ1バイト)を送り，データの位置で受信した1バイトを返す
 // モジュールはCSnを下げてから上げるまでを1つのSPIフレームとして扱うため，SPIフレームごとにCSnを上げ下げする
-unsigned char eth_frame(char op, unsigned short addr, char data) {
+static unsigned char eth_frame(char op, unsigned short addr, char data) {
     unsigned char received;  // データの位置で受信した1バイト
 
     // モジュールを選択する(CSnは次の転送の書き込みからピンに現れる)

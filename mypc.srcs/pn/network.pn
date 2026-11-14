@@ -3,11 +3,11 @@
 #include "eth.pn"
 
 // ネットワークの設定(IPv4アドレスは1つの値に上位バイトから並べる)
-const unsigned int NET_MAC_HIGH = 0x0200;         // MACアドレスの上位2バイト(先頭バイトの0x02はローカル管理のユニキャストアドレスを表す)
-const unsigned int NET_MAC_LOW = 0x00000001;      // MACアドレスの下位4バイト(02:00:00:00:00:01)
-const unsigned int NET_IP_ADDRESS = 0xc0a80ac8;   // 自身のIPアドレス(192.168.10.200)
-const unsigned int NET_SUBNET_MASK = 0xffffff00;  // サブネットマスク(255.255.255.0)
-const unsigned int NET_GATEWAY = 0xc0a80a01;      // ゲートウェイのIPアドレス(192.168.10.1)
+static const unsigned int NET_MAC_HIGH = 0x0200;         // MACアドレスの上位2バイト(先頭バイトの0x02はローカル管理のユニキャストアドレスを表す)
+static const unsigned int NET_MAC_LOW = 0x00000001;      // MACアドレスの下位4バイト(02:00:00:00:00:01)
+const unsigned int NET_IP_ADDRESS = 0xc0a80ac8;          // 自身のIPアドレス(192.168.10.200)
+static const unsigned int NET_SUBNET_MASK = 0xffffff00;  // サブネットマスク(255.255.255.0)
+static const unsigned int NET_GATEWAY = 0xc0a80a01;      // ゲートウェイのIPアドレス(192.168.10.1)
 
 // 通信に使える状態にした結果
 const int NETWORK_OK = 0;                 // 成功

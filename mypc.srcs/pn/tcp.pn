@@ -20,47 +20,47 @@ const int TCP_ERR_TOO_LONG = 4;   // 送信するデータが送信バッファ�
 const int TCP_PENDING = 5;        // 待ち受けている接続を，相手がまだ確立していない
 
 // ソケット0のレジスタの番地(複数バイトのものは先頭の番地で，値は上位バイトから順に並ぶ)
-const int TCP_MR = 0x0400;      // モード(1バイト)
-const int TCP_CR = 0x0401;      // コマンド(1バイト．書き込むと実行し，受け付けると0に戻る)
-const int TCP_IR = 0x0402;      // 通知のレジスタ(1バイト．立った通知は，そのビットへ1を書き込むと消える)
-const int TCP_SR = 0x0403;      // 状態(1バイト)
-const int TCP_PORT = 0x0404;    // 自身のポート番号(2バイト)
-const int TCP_TX_FSR = 0x0420;  // 送信バッファの空きバイト数(2バイト)
-const int TCP_TX_WR = 0x0424;   // 送信バッファの書き込み位置(2バイト)
-const int TCP_RX_RSR = 0x0426;  // 受信バッファに溜まったバイト数(2バイト)
-const int TCP_RX_RD = 0x0428;   // 受信バッファの読み出し位置(2バイト)
+static const int TCP_MR = 0x0400;      // モード(1バイト)
+static const int TCP_CR = 0x0401;      // コマンド(1バイト．書き込むと実行し，受け付けると0に戻る)
+static const int TCP_IR = 0x0402;      // 通知のレジスタ(1バイト．立った通知は，そのビットへ1を書き込むと消える)
+static const int TCP_SR = 0x0403;      // 状態(1バイト)
+static const int TCP_PORT = 0x0404;    // 自身のポート番号(2バイト)
+static const int TCP_TX_FSR = 0x0420;  // 送信バッファの空きバイト数(2バイト)
+static const int TCP_TX_WR = 0x0424;   // 送信バッファの書き込み位置(2バイト)
+static const int TCP_RX_RSR = 0x0426;  // 受信バッファに溜まったバイト数(2バイト)
+static const int TCP_RX_RD = 0x0428;   // 受信バッファの読み出し位置(2バイト)
 
 // ソケット0の送受信バッファ
 // 書き込み位置・読み出し位置は16ビットで進み続けるため，バッファの大きさで割った余りをバッファ内の位置とする
-const int TCP_TX_BASE = 0x4000;     // 送信バッファの先頭の番地
-const int TCP_RX_BASE = 0x6000;     // 受信バッファの先頭の番地
-const int TCP_BUFFER_SIZE = 2048;   // 送信・受信バッファそれぞれのバイト数
-const int TCP_BUFFER_MASK = 0x07ff; // 位置からバッファ内の位置を取り出すマスク(バッファのバイト数-1)
+static const int TCP_TX_BASE = 0x4000;      // 送信バッファの先頭の番地
+static const int TCP_RX_BASE = 0x6000;      // 受信バッファの先頭の番地
+static const int TCP_BUFFER_SIZE = 2048;    // 送信・受信バッファそれぞれのバイト数
+static const int TCP_BUFFER_MASK = 0x07ff;  // 位置からバッファ内の位置を取り出すマスク(バッファのバイト数-1)
 
 // モードのレジスタへ書き込む値
-const int TCP_MODE_TCP = 0x01;  // TCPで通信する
+static const int TCP_MODE_TCP = 0x01;  // TCPで通信する
 
 // コマンドのレジスタへ書き込む値
-const int TCP_CMD_OPEN = 0x01;    // モードとポート番号に従ってソケットを開く
-const int TCP_CMD_LISTEN = 0x02;  // 接続の待ち受けを始める
-const int TCP_CMD_DISCON = 0x08;  // 相手へ切断を伝える
-const int TCP_CMD_CLOSE = 0x10;   // 相手へ伝えずにソケットを閉じる
-const int TCP_CMD_SEND = 0x20;    // 送信バッファの書き込み位置までを送信する
-const int TCP_CMD_RECV = 0x40;    // 受信バッファの読み出し位置までを読み終えたことを伝える
+static const int TCP_CMD_OPEN = 0x01;    // モードとポート番号に従ってソケットを開く
+static const int TCP_CMD_LISTEN = 0x02;  // 接続の待ち受けを始める
+static const int TCP_CMD_DISCON = 0x08;  // 相手へ切断を伝える
+static const int TCP_CMD_CLOSE = 0x10;   // 相手へ伝えずにソケットを閉じる
+static const int TCP_CMD_SEND = 0x20;    // 送信バッファの書き込み位置までを送信する
+static const int TCP_CMD_RECV = 0x40;    // 受信バッファの読み出し位置までを読み終えたことを伝える
 
 // 通知のレジスタの各ビットが表す出来事
-const int TCP_IR_TIMEOUT = 0x08;  // 再送のタイムアウト(ソケットは閉じた状態になる)
-const int TCP_IR_SEND_OK = 0x10;  // 送信の完了
+static const int TCP_IR_TIMEOUT = 0x08;  // 再送のタイムアウト(ソケットは閉じた状態になる)
+static const int TCP_IR_SEND_OK = 0x10;  // 送信の完了
 
 // 状態のレジスタが返す値
-const int TCP_SR_CLOSED = 0x00;       // 閉じている
-const int TCP_SR_INIT = 0x13;         // TCPで開いている
-const int TCP_SR_LISTEN = 0x14;       // 接続を待ち受けている
-const int TCP_SR_ESTABLISHED = 0x17;  // 接続している
-const int TCP_SR_CLOSE_WAIT = 0x1c;   // 相手から切断を伝えられた(受信バッファに残ったデータは読み出せ，送信もできる)
+static const int TCP_SR_CLOSED = 0x00;       // 閉じている
+static const int TCP_SR_INIT = 0x13;         // TCPで開いている
+static const int TCP_SR_LISTEN = 0x14;       // 接続を待ち受けている
+static const int TCP_SR_ESTABLISHED = 0x17;  // 接続している
+static const int TCP_SR_CLOSE_WAIT = 0x1c;   // 相手から切断を伝えられた(受信バッファに残ったデータは読み出せ，送信もできる)
 
 // コマンドを書き込み，モジュールが受け付けるまで待つ(処理を終えるまでは待たないため，結果は状態のレジスタで確かめること)
-void tcp_command(int command) {
+static void tcp_command(int command) {
     // コマンドのレジスタへ書き込む
     eth_write(TCP_CR, command);
     // 受け付けると0に戻るため，それまで読み直す
@@ -69,7 +69,7 @@ void tcp_command(int command) {
 }
 
 // 相手へ伝えずにソケットを閉じ，閉じた状態になるまで待つ
-void tcp_close_socket(void) {
+static void tcp_close_socket(void) {
     // 閉じるコマンドを書き込む
     tcp_command(TCP_CMD_CLOSE);
     // 閉じた状態になるまで読み直す
@@ -79,7 +79,7 @@ void tcp_close_socket(void) {
 
 // 2バイトのレジスタを読み出す
 // モジュールが値を更新している途中に上位と下位を別々に読むと食い違った値になりうるため，2回続けて同じ値が読めるまで読み直す
-unsigned int tcp_read_word(unsigned short addr) {
+static unsigned int tcp_read_word(unsigned short addr) {
     unsigned int previous;  // 前回読み出した値
     unsigned int current;   // 今回読み出した値
 
@@ -100,7 +100,7 @@ unsigned int tcp_read_word(unsigned short addr) {
 
 // 接続しているかを返す(相手から切断を伝えられた後も，こちらが閉じるまでは接続しているとみなす)
 // 戻り値: 1(接続している) / 0(閉じている)
-int tcp_connected(void) {
+static int tcp_connected(void) {
     int status = eth_read(TCP_SR);  // ソケットの状態
     // 接続しているとみなす状態かを返す
     return

@@ -2,7 +2,7 @@
 #pragma once
 
 // bufのpos文字目以降に連続する空白を読み飛ばした位置を返す
-int skip_spaces(char *buf, int pos) {
+static int skip_spaces(char *buf, int pos) {
     // 区切りとして扱うのは半角空白だけで，タブ等の他の空白文字は引数の一部になる
     while (buf[pos] == ' ') {
         pos = pos + 1;
