@@ -99,7 +99,7 @@ static const unsigned int FSINFO_FREE_COUNT_UNKNOWN = 0xffffffff;  // 空きク�
 // FAT(クラスタチェーンの表)の形式
 static const int FAT_ENTRY_SIZE = 4;                                   // 1クラスタ分の値のバイト数
 static const int FAT_ENTRIES_PER_SECTOR = SD_BLOCK_SIZE / FAT_ENTRY_SIZE;  // 1セクタに収まるクラスタの数
-static const int FAT_ENTRIES_PER_SECTOR_SHIFT = 7;                     // FAT_ENTRIES_PER_SECTOR(128)の2の対数(実行時の除算を避けシフトで求めるため)
+static const int FAT_ENTRIES_PER_SECTOR_SHIFT = 7;                     // 1セクタに収まるクラスタの数(128)の2の対数(実行時の除算を避けシフトで求めるため)
 static const unsigned int FAT_CLUSTER_MASK = 0x0fffffff;               // FATの値のうちクラスタ番号を表す下位28ビット
 static const unsigned int FAT_CLUSTER_BAD = 0x0ffffff7;                // 不良クラスタを表す値(これ以上の値はクラスタの番号に使えない)
 static const unsigned int FAT_CLUSTER_END = 0x0ffffff8;                // これ以上の値はクラスタチェーンの終わりを表す
@@ -177,7 +177,7 @@ static unsigned int fat_num_fats;             // FATの個数(本体と複製を
 static unsigned int fat_sectors_per_fat;      // FAT1つあたりの大きさ(セクタ数)
 static unsigned int fat_data_start;           // データ領域(クラスタ2)の先頭セクタ番号
 static unsigned int fat_sectors_per_cluster;  // 1クラスタあたりの大きさ(セクタ数)
-static unsigned int fat_cluster_shift;        // fat_sectors_per_clusterの2の対数
+static unsigned int fat_cluster_shift;        // 1クラスタあたりの大きさ(セクタ数)の2の対数
 static unsigned int fat_cluster_count;        // データ領域のクラスタ数
 unsigned int fat_root_cluster;                // ルートディレクトリの開始クラスタ
 static unsigned int fat_fsinfo_sector;        // FSInfoセクタの番号．マウントした後，空きクラスタ数を「不明」を表す値へ書き換えたら0にする(FSInfoセクタが無い場合も0)
