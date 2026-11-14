@@ -28,6 +28,6 @@ CPU・メモリ・ROM等のハードウェア全体のVivadoプロジェクト�
 
 | 文書 | 内容 |
 |:-|:-|
-| `qurge/develop/index.md` | ハードウェアのソースの構成，編集してよいディレクトリ，合成・シミュレーション・BOOT.BINの作成の手順 |
+| `qurge/develop/index.md` | ハードウェアのソースの構成，編集の範囲，合成・シミュレーション・BOOT.BINの作成の手順 |
 | `qosmos/develop/index.md` | Qosmos(`mypc.srcs/pn/`)のソースの構成と，ROMの生成の手順 |
 | `README.md` | 仕様書全体の構成 |
