@@ -173,6 +173,7 @@ int exec_run(char *line) {
 }
 
 // 直前に実行した実行ファイルを終わらせた例外の原因の番号を返す(例外で終わっていなければEXCEPTION_NONE)
+// 実行ファイルを一度も実行していなければ，値は保証されない
 int exec_get_exception_cause(void) {
     return exec_exception_cause;
 }
