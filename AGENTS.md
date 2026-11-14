@@ -28,6 +28,6 @@ CPU・メモリ・ROM等のハードウェア全体のVivadoプロジェクト�
 
 | 文書(`specification`の中のパス) | 内容 |
 |:-|:-|
-| `qurge/develop/index.md` | ハードウェアの開発の文書の一覧．ソースの構成・編集の範囲・合成・シミュレーション・BOOT.BINの作成の手順の各文書を挙げる |
-| `qosmos/develop/index.md` | Qosmos(`mypc.srcs/pn/`)の開発の文書の一覧．ソースの構成とROMの生成の手順の文書を挙げる |
+| `qurge/develop/index.md` | ハードウェアの開発の手順を書いた文書の一覧 |
+| `qosmos/develop/index.md` | Qosmos(`mypc.srcs/pn/`)の開発の手順を書いた文書の一覧 |
 | `README.md` | 仕様書全体の構成 |
