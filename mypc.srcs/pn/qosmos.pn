@@ -526,7 +526,7 @@ int handle_help(int pos) {
 // 何度実行しても同じ値を確かめられるよう，保持している終了状態をそのまま返し，終了状態と例外の原因を変えない
 // ほかの組み込みコマンドはエラーで終了状態を1にするが，このコマンドは引数が多すぎるエラーでも変えない
 int handle_status(int pos) {
-    // 引数を取らないコマンドのため，引数が指定されていれば何もしない
+    // 引数を取らないコマンドのため，引数が指定されていればエラーを出力し，終了状態を変えずに返す
     if (has_extra_args(input, pos)) {
         print_error("too many arguments\n");
         return exit_status;
