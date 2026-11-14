@@ -1,6 +1,8 @@
-// 1バイトの値を16進数で表して出力する関数
+// 値を16進数で表して出力する関数
 #pragma once
 #include "console.pn"
+
+const int HEX_WORD_DIGITS = 8;  // 4バイトの値を表す16進数の桁数
 
 // 0〜15の値を16進数1桁の文字へ変換する
 char hex(int value) {
@@ -12,7 +14,7 @@ char hex(int value) {
 }
 
 // 1バイトの値を"0x??"の形式で出力する(改行は付けない)
-void print_hex(char value) {
+void print_hex_byte(char value) {
     char hex_buf[5];  // 出力用の一時バッファ
     // "0x"に続けて上位・下位の4ビットを1桁ずつ並べ，終端して出力する
     hex_buf[0] = '0';
@@ -23,10 +25,26 @@ void print_hex(char value) {
     console_print(hex_buf);
 }
 
+// 4バイトの値を"0x"に続く8桁の16進数の形式で出力する(改行は付けない)
+void print_hex_word(unsigned int value) {
+    char hex_buf[HEX_WORD_DIGITS + 3];  // 出力用の一時バッファ("0x"・8桁・ヌル終端)
+
+    // "0x"を並べる
+    hex_buf[0] = '0';
+    hex_buf[1] = 'x';
+    // 上位の4ビットから順に1桁ずつ並べる
+    for (int i = 0; i < HEX_WORD_DIGITS; i++) {
+        hex_buf[2 + i] = hex((value >> ((HEX_WORD_DIGITS - 1 - i) * 4)) & 0x0f);
+    }
+    // 終端して出力する
+    hex_buf[HEX_WORD_DIGITS + 2] = '\0';
+    console_print(hex_buf);
+}
+
 // 初期化に失敗した段階の行の末尾へ，判定に使った応答値を" (0x??)"の形で添えて改行する
 void print_response(char value) {
     // 応答値を括弧で囲んで出力し，行を終える
     console_print(" (");
-    print_hex(value);
+    print_hex_byte(value);
     console_print(")\n");
 }

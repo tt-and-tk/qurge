@@ -1,23 +1,35 @@
-// 実行ファイルを，領域の中でユーザーモードとして動かす処理．実行ファイルへ入る処理と，次の2つの場合にCPUがカーネルモードで飛ぶ先の関数を置く
+// 実行ファイルを，領域の中でユーザーモードとして動かす処理．
+// 実行ファイルへ入る処理と，実行ファイルを終わらせた例外の原因を出力する処理を置く．
+// あわせて，次の2つの場合にCPUがカーネルモードへ移って飛ぶ先の関数を置く
 // - 実行ファイルがシステムコールの命令を実行した場合: システムコールハンドラ
 // - 実行ファイルが例外を起こした場合: 例外ハンドラ
-// 実行ファイルへ入る前と，システムコールハンドラでカーネルモードへ入った後は，SPをカーネルモードのスタック(メモリの前半)に置く．
+// 実行ファイルへ入る前と，システムコールハンドラ・例外ハンドラでカーネルモードへ移った後は，SPをカーネルモードのスタック(メモリの前半)に置く．
 // SPを書き換える関数は，フレームの大きさが0になるよう，引数・ローカル変数を持たず，値はグローバル変数に置く
 // (フレームを持つ関数は，書き換えた後のSPを基準にフレームを読み書きしてしまうため，コンパイラがSPの書き換えを禁止している)
 #pragma once
 #include "args.pn"
 #include "console.pn"
 #include "exec_region.pn"
+#include "hex.pn"
 #include "syscall_dispatch.pn"
 
 // argvの配列に取る要素数．1行から取り出せる文字列の数が最も多い場合(1文字と空白が交互に並ぶ場合)の数に，末尾のnullptrの1つを足す
 const int EXEC_ARGV_SIZE = CONSOLE_LINE_SIZE / 2 + 1;
-const unsigned int KERNEL_STACK_EMPTY = 0x8000;  // カーネルモードの空のスタックを表すSP(メモリの前半の末尾の直後)
 
-unsigned int exec_start_sp;   // 実行ファイルへ入るときのSP(領域の中の番地)
-unsigned int exec_kernel_sp;  // 実行ファイルへ入る直前のカーネルモードのSP．実行ファイルへ入る関数の戻り先を指す
-unsigned int exec_user_sp;    // システムコールの命令でカーネルモードへ入った時点のSP(領域の中の番地)
-int exec_exit_status;         // 実行ファイルが終了のシステムコールで伝えた終了状態
+// 例外の原因の番号(1以上は，CPUが例外ハンドラへ飛ぶときにECAUSEへ書き込む値)
+const int EXCEPTION_NONE = 0;         // 例外で終わっていないことを表す
+const int EXCEPTION_FETCH = 1;        // 命令を取り出す番地が範囲外である
+const int EXCEPTION_ILLEGAL = 2;      // 不正な命令である
+const int EXCEPTION_PRIVILEGED = 3;   // カーネルモードでだけ許される操作を，ユーザーモードで行おうとした
+const int EXCEPTION_DIVIDE_ZERO = 4;  // 割り算の除数が0である
+const int EXCEPTION_MEMORY = 5;       // メモリを読み書きする番地が範囲外である
+
+unsigned int exec_start_sp;      // 実行ファイルへ入るときのSP(領域の中の番地)
+unsigned int exec_kernel_sp;     // 実行ファイルを起動するときに控えておく，カーネルモードのSP．実行ファイルへ入る関数の戻り先を指す
+unsigned int exec_user_sp;       // システムコールの命令でカーネルモードへ移った時点のSP(領域の中の番地)
+int exec_exit_status;            // 実行ファイルが終了のシステムコールで伝えた終了状態
+int exec_exception_cause;        // 実行ファイルを終わらせた例外の原因の番号(例外で終わっていなければ0)
+unsigned int exec_exception_pc;  // 実行ファイルを終わらせた例外を起こした命令のPC(例外で終わった場合だけ意味を持つ)
 
 // 実行ファイルへ渡すコマンド名と引数(lineを半角空白で区切ったもの)を領域の末尾に置き，実行ファイルへ入るときのSP(領域の中の番地)を返す
 // 渡す1行は，ヌル終端を含めてコンソールの1行の大きさ(64バイト)以内であること(置く大きさが，領域の末尾に取った引数の置き場に収まる前提のため)
@@ -72,23 +84,25 @@ unsigned int exec_place_args(char *line) {
 }
 
 // 実行ファイルの先頭の命令から，SPを実行ファイルへ入るときの値(コマンド名と引数を置いて決めた値)にしてユーザーモードで実行する(フレームの大きさは0)
-// この関数自身からは戻らない．実行ファイルが終了のシステムコールを実行すると，システムコールハンドラがSPを戻し，終了状態を返してこの関数の呼び出し元へ戻る
+// この関数の呼び出し元へは，次のどちらかの場合に，システムコールハンドラか例外ハンドラがSPを戻してから直接戻る．このため，どちらの場合もこの関数の末尾の命令は実行されない
+// - 実行ファイルが終了のシステムコールを実行した場合: システムコールハンドラが，終了状態を返して戻る
+// - 実行ファイルが例外を起こした場合: 例外ハンドラが，例外の原因とPCを控えて戻る(戻り値は不定)
 int exec_enter(void) {
-    // システムコールハンドラが呼び出し元へ戻れるよう，戻り先を指すSPを控える
+    // システムコールハンドラ・例外ハンドラが呼び出し元へ戻れるよう，戻り先を指すSPを控える
     exec_kernel_sp = SP;
     // 実行ファイルのスタックへ切り替え，戻り先(領域の先頭の命令)へユーザーモードで移る
     SP = exec_start_sp;
     sysret();
 }
 
-// システムコールハンドラ．実行ファイルがシステムコールの命令を実行するとカーネルモードでここへ飛ぶ(フレームの大きさは0)
-// 終了を求められれば，実行ファイルへ入る関数の呼び出し元へ，終了状態を返して戻る．それ以外は機能を実行して実行ファイルへ戻る
+// システムコールハンドラ．実行ファイルがシステムコールの命令を実行すると，カーネルモードへ移ってここへ飛ぶ(フレームの大きさは0)
+// 終了を求められれば，終了状態を返してシェルへ戻る．それ以外は機能を実行して実行ファイルへ戻る
 int exec_syscall_entry(void) {
     // 実行ファイルのSPを控え，カーネルモードのスタックへ切り替える
     // (切り替えるまでは，SPが領域の中の番地のままで，カーネルモードではそのまま使えないため，関数を呼ばない)
     exec_user_sp = SP;
     SP = exec_kernel_sp;
-    // 機能を実行し，終了を求められていれば，SPを実行ファイルへ入る関数の戻り先へ戻した状態のまま，その呼び出し元へ戻る
+    // 機能を実行し，終了を求められていれば，SPを実行ファイルの起動時に控えた値へ戻した状態のまま，シェルへ戻る
     if (syscall_handle(exec_user_sp, &exec_exit_status)) {
         return exec_exit_status;
     }
@@ -97,17 +111,54 @@ int exec_syscall_entry(void) {
     sysret();
 }
 
-// 例外ハンドラ．実行ファイルが例外を起こすとカーネルモードでここへ飛ぶ(フレームの大きさは0)
-// 空のスタックから戻ろうとして，カーネルモードの例外でCPUを停止させる(実行ファイルだけを終わらせてシェルへ戻る処理は，issue #341で置き換える)
-// 何もせずにいると，例外を起こした実行ファイルの状態のままOSを続けてしまうため
+// 例外ハンドラ．実行ファイルが例外を起こすと，カーネルモードへ移ってここへ飛ぶ(フレームの大きさは0)
+// 例外の原因と例外を起こした命令のPCを控え，シェルへ戻る．例外を起こした命令から先は実行しない
 void exec_exception_entry(void) {
-    // 空のスタックからの戻りは，戻り先をメモリの前半の外から読むため，カーネルモードの例外になる
-    SP = KERNEL_STACK_EMPTY;
+    // SPを実行ファイルの起動時に控えた値へ戻し，カーネルモードのスタックへ切り替える
+    // (切り替えるまでは，SPが領域の中の番地のままで，カーネルモードではそのまま使えないため，関数を呼ばない)
+    SP = exec_kernel_sp;
+    // 例外の原因と，例外を起こした命令のPCを控える
+    exec_exception_cause = (int)ECAUSE;
+    exec_exception_pc = KRET;
     return;
 }
 
-// 領域に読み込んだ実行ファイルへ，コマンド名と引数(lineを半角空白で区切ったもの)を渡してユーザーモードで実行し，終了状態を返す
+// 実行ファイルを終わらせた例外の原因と，例外を起こした命令のPCを，"<原因のメッセージ> (pc 0x????????)"の形式で改行を付けて出力する
+void exec_print_exception(void) {
+    // 原因ごとに決めたメッセージを出力する(想定外の番号もメッセージ無しにはしない)
+    switch (exec_exception_cause) {
+    case EXCEPTION_FETCH:
+        console_print("instruction fetch out of range");
+        break;
+    case EXCEPTION_ILLEGAL:
+        console_print("invalid instruction");
+        break;
+    case EXCEPTION_PRIVILEGED:
+        console_print("privileged operation");
+        break;
+    case EXCEPTION_DIVIDE_ZERO:
+        console_print("division by zero");
+        break;
+    case EXCEPTION_MEMORY:
+        console_print("memory access out of range");
+        break;
+    default:
+        console_print("unknown exception");
+        break;
+    }
+    // 例外を起こした命令のPCを添えて，行を終える
+    console_print(" (pc ");
+    print_hex_word(exec_exception_pc);
+    console_print(")\n");
+}
+
+// 領域に読み込んだ実行ファイルを起動する
+// 実行ファイルには，lineを半角空白で区切ったものをコマンド名と引数として渡す
+// 実行ファイルが終了のシステムコールで終われば，その終了状態を返す
+// 実行ファイルが例外で終われば，例外の原因の番号(1以上)とPCを控え，不定の値を返す
 int exec_run(char *line) {
+    // 例外で終わったかどうかを見分けられるよう，例外の原因を，例外で終わっていないことを表す番号にする
+    exec_exception_cause = EXCEPTION_NONE;
     // 領域と，システムコールの命令・例外でCPUが飛ぶ先を設定する
     UBASE = EXEC_REGION_BASE;
     USIZE = EXEC_REGION_SIZE;
@@ -117,6 +168,6 @@ int exec_run(char *line) {
     KRET = 0;
     // コマンド名と引数を領域の末尾に置き，実行ファイルへ入るときのSPを決める
     exec_start_sp = exec_place_args(line);
-    // 実行ファイルへ入り，終了のシステムコールで戻ってきた終了状態を返す
+    // 実行ファイルへ入り，システムコールハンドラか例外ハンドラから戻ってきた値を返す
     return exec_enter();
 }
