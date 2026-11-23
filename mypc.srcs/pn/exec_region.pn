@@ -1,13 +1,14 @@
 // 実行ファイルに割り振る領域の管理と，OSが領域の中の番地を読み書きするための関数
 // 領域は，メモリの後半のうちどの実行ファイルにも割り振っていない範囲(以下，空き)から，実行ファイルごとに必要な大きさだけ割り振る
 // 実行ファイルは，領域の先頭を0とするバイト単位の番地(以下，領域の中の番地)でユーザーモードとして動く
-// 領域の中の番地は，命令の取り出しとメモリの読み書きのたびにCPUがメモリの番地へ変換する．カーネルモードで動くOSは変換されないため，ここの関数で変換する
+// 領域の中の番地は，命令の取り出しとメモリの読み書きのたびにCPUがメモリの番地へ変換する．カーネルモードで動くOSは変換されないため，変換する関数もここに置く
+// 変換する関数は，実行ファイルへ入る前にUBASE・USIZEへ設定した領域(以下，今の領域)を対象とする(システムコールを処理する間も値が保たれるため)
 #pragma once
 
 static const unsigned int EXEC_MEMORY_BASE = 0x8000;    // 領域を割り振る範囲の先頭のメモリの番地(メモリの後半の先頭．カーネルモードのCALL/RETが戻り先を積み下ろししない範囲のため，OSのスタックと重ならない)
 static const unsigned int EXEC_MEMORY_END = 0x10000;    // 領域を割り振る範囲の末尾の次のメモリの番地(メモリの容量)
 static const unsigned int EXEC_ARGS_AREA_SIZE = 256;    // 領域の末尾のうち，実行ファイルへ渡すコマンド名と引数を置くために取る大きさ
-static const int EXEC_REGION_MAX = 8;                  // 同時に割り振れる領域の数(仮の値．複数の実行ファイルを同時に置く#363で見直す)
+static const int EXEC_REGION_MAX = 8;                   // 同時に割り振れる領域の数(仮の値．複数の実行ファイルを同時に置く#363で見直す)
 
 // 実行ファイルに割り振った領域
 struct ExecRegion {
@@ -47,7 +48,7 @@ int exec_region_alloc(unsigned int code_size, unsigned int reserve_size, unsigne
     if (stack_size > rest) {
         return 0;
     }
-    // 3つの合計を8の倍数へ切り上げ，引数の置き場を足す(合計は8の倍数の32512以下のため，切り上げても領域を割り振る範囲を超えない)
+    // 3つの合計を8の倍数へ切り上げ，引数の置き場を足す(合計は，範囲全体から引数の置き場を除いた8の倍数の大きさ以下のため，切り上げても範囲を超えない)
     size = ((code_size + reserve_size + stack_size + 7) & ~7) + EXEC_ARGS_AREA_SIZE;
     // 割り振った領域を番地の小さい順にたどり，その手前の空きに収まる最初の位置を探す
     for (index = 0; index < exec_region_count; index++) {
@@ -58,8 +59,12 @@ int exec_region_alloc(unsigned int code_size, unsigned int reserve_size, unsigne
         // 収まらなければ，その領域の直後の空きを調べる
         base = exec_regions[index].base + exec_regions[index].size;
     }
-    // どの領域の手前にも収まらず，最後の領域の直後から範囲の末尾までにも収まらなければ，割り振れない
-    if (index == exec_region_count && EXEC_MEMORY_END - base < size) {
+    // どの領域の手前にも収まらなければ，最後の領域の直後から範囲の末尾までに収まるかを確かめ，収まらなければ割り振れない
+    if (
+        // どの領域の手前にも収まらなかった
+        index == exec_region_count
+        // かつ，最後の領域の直後から範囲の末尾までにも収まらない
+        && EXEC_MEMORY_END - base < size) {
         return 0;
     }
     // 番地の順を保つよう，入れる位置から後ろの領域を1つずつ後ろへずらす
@@ -74,7 +79,7 @@ int exec_region_alloc(unsigned int code_size, unsigned int reserve_size, unsigne
     return 1;
 }
 
-// exec_region_allocで割り振った領域regionを，空きへ戻す(割り振った領域でなければ何もしない)
+// 割り振った領域regionを，空きへ戻す(割り振った領域でなければ何もしない)
 void exec_region_free(struct ExecRegion *region) {
     // 先頭の番地が一致する領域を探す
     for (int i = 0; i < exec_region_count; i++) {
@@ -90,7 +95,6 @@ void exec_region_free(struct ExecRegion *region) {
 }
 
 // 今の領域の中の番地addrからsizeバイトの範囲が領域に収まれば，その先頭に対応するメモリの番地を指すポインタを返す．収まらなければnullptrを返す
-// 今の領域は，実行ファイルへ入る前にUBASE・USIZEへ設定した領域である(システムコールを処理する間も値が保たれる)
 // (実行ファイルから受け取った番地を，読み書きする前に確かめるために使う．領域の外をカーネルモードで読み書きすると，OSのデータを壊すか，CPUが停止するため)
 // 実行ファイルがintで渡した負の番地とnullptrは，符号なしの値として領域の大きさを超えるため，領域の外として扱われる
 char *exec_region_buffer(unsigned int addr, int size) {
@@ -108,7 +112,7 @@ char *exec_region_buffer(unsigned int addr, int size) {
 }
 
 // 今の領域の中の番地addrから始まるヌル終端の文字列が，ヌル終端まで領域に収まれば，その先頭に対応するメモリの番地を指すポインタを返す．
-// 収まらなければnullptrを返す(今の領域はexec_region_bufferと同じ)
+// 収まらなければnullptrを返す
 char *exec_region_string(unsigned int addr) {
     char *text = exec_region_buffer(addr, 1);  // 文字列の先頭
 
