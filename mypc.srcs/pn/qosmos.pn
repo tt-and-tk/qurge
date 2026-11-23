@@ -596,6 +596,7 @@ static int load_executable(struct FatEntry *entry, struct ExecRegion *region) {
     if (status != FAT_OK) {
         return status;
     }
+
     // 1セクタずつ読み込み，全て読み終えるまで書き写す
     while (1) {
         // 次の1セクタを読み込む．全て読み終えていれば書き写し終えている
@@ -603,36 +604,44 @@ static int load_executable(struct FatEntry *entry, struct ExecRegion *region) {
         if (status == FAT_END) {
             return FAT_OK;
         }
+
         // 読み込みに失敗すれば，割り振った後の領域を空きへ戻す(読み込んだ途中までの命令列は実行しない)
         if (status != FAT_OK) {
             if (!is_first) {
                 exec_region_free(region);
             }
+
             return status;
         }
+
         // 読み込んだセクタを4バイト単位で読む
         src = (unsigned int *)data;
         // 先頭のセクタでなければ，セクタの先頭から書き写す
         start = 0;
+
         // 先頭のセクタなら，ヘッダを確かめて領域を割り振り，ヘッダの後ろから領域の先頭へ書き写す
         // (セクタはヘッダと1命令の合計より大きく，ファイルもその大きさ以上のため，先頭のセクタにヘッダ全体が入る)
         if (is_first) {
             if (!exec_header_valid(src, entry->size)) {
                 return EXEC_INVALID;
             }
+
             // スタックの量が未定なら，既定の量を割り振る
             stack_size = src[3];
             if (stack_size == EXEC_STACK_UNSPECIFIED) {
                 stack_size = EXEC_DEFAULT_STACK_SIZE;
             }
+
             // 命令列・命令列の直後に確保する範囲・スタックを収める領域を割り振る
             if (!exec_region_alloc(src[1], src[2], stack_size, region)) {
                 return EXEC_NO_MEMORY;
             }
+
             dst = (unsigned int *)region->base;
             start = EXEC_HEADER_SIZE >> 2;
             is_first = 0;
         }
+
         // 内容を4バイト単位で書き写す(ヘッダと命令列の大きさが4の倍数のため，最後のセクタの内容も4バイト単位で割り切れる．1バイトずつ写すより命令数が少ない)
         for (int i = start; i < (length >> 2); i++) {
             *dst = src[i];
@@ -688,23 +697,28 @@ static int run_executable(void) {
         print_error("invalid executable\n");
         return EXIT_FAILURE;
     }
+
     // ヘッダを確かめて，割り振った領域へ読み込む
     status = load_executable(&entry, &region);
+
     // ヘッダが条件に合わなければ実行しない
     if (status == EXEC_INVALID) {
         print_error("invalid executable\n");
         return EXIT_FAILURE;
     }
+
     // 領域を割り振れなければ実行しない
     if (status == EXEC_NO_MEMORY) {
         print_error("not enough memory\n");
         return EXIT_FAILURE;
     }
+
     // 読み込みに失敗すれば，その理由を出力する
     if (status != FAT_OK) {
         print_fat_error(status);
         return EXIT_FAILURE;
     }
+
     // TCPの出力バッファの中身は実行ファイルが終わるまで送られずに残るため，実行する前に送る
     console_tcp_flush();
     // 入力行を半角空白で区切ってコマンド名と引数を渡し，ユーザーモードで実行する

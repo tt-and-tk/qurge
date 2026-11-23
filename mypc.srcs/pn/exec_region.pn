@@ -26,7 +26,7 @@ static int exec_region_count = 0;                        // 割り振った領�
 //   - 空きに収まる位置が無い
 //   - 割り振った領域の数が上限に達している
 int exec_region_alloc(unsigned int code_size, unsigned int reserve_size, unsigned int stack_size, struct ExecRegion *region) {
-    unsigned int rest = EXEC_MEMORY_END - EXEC_MEMORY_BASE - EXEC_ARGS_AREA_SIZE;  // 領域を割り振る範囲全体から引数の置き場を除いた大きさのうち，まだ割り当てていない大きさ
+    unsigned int rest = EXEC_MEMORY_END - EXEC_MEMORY_BASE - EXEC_ARGS_AREA_SIZE;  // 3つを割り当てられる残りの大きさ(範囲全体から引数の置き場を除いた大きさから，3つを順に引いていく)
     unsigned int size;                                                             // 割り振る領域の大きさ
     unsigned int base = EXEC_MEMORY_BASE;                                          // 調べている空きの先頭のメモリの番地
     int index;                                                                     // 割り振った領域を表に入れる位置
@@ -35,6 +35,7 @@ int exec_region_alloc(unsigned int code_size, unsigned int reserve_size, unsigne
     if (exec_region_count == EXEC_REGION_MAX) {
         return 0;
     }
+
     // 3つが領域を割り振る範囲全体に収まるかを，残りの大きさから順に引いて確かめる
     // (大きさはヘッダからファイルの値をそのまま受け取るため，そのまま足すと桁あふれして収まると誤る)
     if (code_size > rest) {
@@ -48,17 +49,21 @@ int exec_region_alloc(unsigned int code_size, unsigned int reserve_size, unsigne
     if (stack_size > rest) {
         return 0;
     }
+
     // 3つの合計を8の倍数へ切り上げ，引数の置き場を足す(合計は，範囲全体から引数の置き場を除いた8の倍数の大きさ以下のため，切り上げても範囲を超えない)
     size = ((code_size + reserve_size + stack_size + 7) & ~7) + EXEC_ARGS_AREA_SIZE;
+
     // 割り振った領域を番地の小さい順にたどり，その手前の空きに収まる最初の位置を探す
     for (index = 0; index < exec_region_count; index++) {
         // 手前の空きに収まれば，そこへ割り振る
         if (exec_regions[index].base - base >= size) {
             break;
         }
+
         // 収まらなければ，その領域の直後の空きを調べる
         base = exec_regions[index].base + exec_regions[index].size;
     }
+
     // どの領域の手前にも収まらなければ，最後の領域の直後から範囲の末尾までに収まるかを確かめ，収まらなければ割り振れない
     if (
         // どの領域の手前にも収まらなかった
@@ -67,10 +72,12 @@ int exec_region_alloc(unsigned int code_size, unsigned int reserve_size, unsigne
         && EXEC_MEMORY_END - base < size) {
         return 0;
     }
+
     // 番地の順を保つよう，入れる位置から後ろの領域を1つずつ後ろへずらす
     for (int i = exec_region_count; i > index; i--) {
         exec_regions[i] = exec_regions[i - 1];
     }
+
     // 空いた位置に割り振った領域を入れる
     exec_regions[index].base = base;
     exec_regions[index].size = size;
@@ -88,6 +95,7 @@ void exec_region_free(struct ExecRegion *region) {
             for (int j = i + 1; j < exec_region_count; j++) {
                 exec_regions[j - 1] = exec_regions[j];
             }
+
             exec_region_count--;
             return;
         }
@@ -108,6 +116,7 @@ char *exec_region_buffer(unsigned int addr, int size) {
         || (unsigned int)size > USIZE - addr) {
         return nullptr;
     }
+
     return (char *)(UBASE + addr);
 }
 
@@ -120,6 +129,7 @@ char *exec_region_string(unsigned int addr) {
     if (text == nullptr) {
         return nullptr;
     }
+
     // 先頭から領域の末尾までにヌル終端があるかを調べる
     for (unsigned int i = 0; i < USIZE - addr; i++) {
         // ヌル終端があれば，文字列全体が領域に収まる
@@ -127,5 +137,6 @@ char *exec_region_string(unsigned int addr) {
             return text;
         }
     }
+
     return nullptr;
 }
