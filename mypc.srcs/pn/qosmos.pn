@@ -11,7 +11,7 @@
 static const int INPUT_SIZE = CONSOLE_LINE_SIZE;                // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
 static const int INSTRUCTION_SIZE = 8;                          // 1命令のバイト数(実行ファイルの命令列の大きさはこの倍数になる)
 static const int EXEC_HEADER_SIZE = 16;                         // 実行ファイルの先頭のヘッダのバイト数(4バイトのワードを4つ並べる)
-static const unsigned int EXEC_MAGIC = 0x0053517F;              // ヘッダの識別子(ファイル上で0x7F・'Q'・'S'・版数0の順に並ぶ4バイトを，ワードとして読んだ値)
+static const unsigned int EXEC_SIGNATURE = 0x0053517F;          // ヘッダのファイルシグネチャ(ファイル上で0x7F・'Q'・'S'・版数0の順に並ぶ4バイトを，ワードとして読んだ値)
 static const unsigned int EXEC_STACK_UNSPECIFIED = 0xFFFFFFFF;  // ヘッダのスタックの量のうち，量が未定であることを表す値
 static const unsigned int EXEC_DEFAULT_STACK_SIZE = 4096;       // スタックの量が未定の実行ファイルについて，領域に収まるかを確かめるのに使うスタックの量
 static const int EXEC_INVALID = -1;                             // 実行ファイルを読み込む関数が，ヘッダが条件に合わないことを表す戻り値(FAT32の各関数の結果と重ならない値)
@@ -558,7 +558,7 @@ static void handle_unknown(void) {
 
 // 実行ファイルのヘッダheaderが，実行できる実行ファイルの条件をすべて満たすかを返す(file_sizeは実行ファイル全体のバイト数で，ヘッダと1命令の合計以上であること)
 // 条件は次のとおり
-//   - 識別子が一致する
+//   - ファイルシグネチャが一致する
 //   - 命令列の大きさが，ファイルからヘッダを除いた大きさと一致し，命令のバイト数で割り切れる
 //   - 命令列・命令列の直後に確保する範囲・スタック(未定なら既定の量とみなす)が，領域のうち引数の置き場より手前に収まる
 // 戻り値: 1(すべて満たす) / 0(満たさない条件がある)
@@ -568,21 +568,23 @@ static int exec_header_valid(unsigned int *header, unsigned int file_size) {
     unsigned int stack_size = header[3];      // スタックの量
     unsigned int rest = EXEC_USABLE_SIZE;     // 領域のうち，まだ割り当てていない大きさ
 
-    // 識別子が一致し，命令列の大きさがヘッダの後ろの大きさと一致して命令のバイト数で割り切れなければ，満たさない
-    // (識別子は版数を含むため，形式の異なる版の実行ファイルも満たさない．命令のバイト数は2のべき乗のため，除算を避けて下位ビットで判定する)
+    // ファイルシグネチャが一致し，命令列の大きさがヘッダの後ろの大きさと一致して命令のバイト数で割り切れなければ，満たさない
+    // (ファイルシグネチャは版数を含むため，形式の異なる版の実行ファイルも満たさない．命令のバイト数は2のべき乗のため，除算を避けて下位ビットで判定する)
     if (
-        // 識別子が一致しない
-        header[0] != EXEC_MAGIC
+        // ファイルシグネチャが一致しない
+        header[0] != EXEC_SIGNATURE
         // または，命令列の大きさが，ファイルからヘッダを除いた大きさと一致しない
         || code_size != file_size - EXEC_HEADER_SIZE
         // または，命令列の大きさが，命令のバイト数で割り切れない
         || (code_size & (INSTRUCTION_SIZE - 1)) != 0) {
         return 0;
     }
+
     // スタックの量が未定なら，既定の量とみなす
     if (stack_size == EXEC_STACK_UNSPECIFIED) {
         stack_size = EXEC_DEFAULT_STACK_SIZE;
     }
+
     // 命令列・確保する範囲・スタックが領域に収まるかを，残りの大きさから順に引いて確かめる
     // (ヘッダの値はファイルから読む任意の値で，そのまま足すと桁あふれして収まると誤るため)
     if (code_size > rest) {
