@@ -6,7 +6,7 @@
 const int EXEC_REGION_BASE = 0x8000;         // 領域の先頭のメモリの番地(メモリの後半の先頭)
 const int EXEC_REGION_SIZE = 0x8000;         // 領域の大きさ(メモリの後半全体)
 static const int EXEC_ARGS_AREA_SIZE = 256;  // 領域の末尾のうち，実行ファイルへ渡すコマンド名と引数を置くために取る大きさ
-const int EXEC_CODE_SIZE = EXEC_REGION_SIZE - EXEC_ARGS_AREA_SIZE;  // 読み込める実行ファイルの大きさの上限(領域のうち，末尾のコマンド名と引数の置き場より手前)
+const int EXEC_USABLE_SIZE = EXEC_REGION_SIZE - EXEC_ARGS_AREA_SIZE;  // 領域のうち，実行ファイルの命令列・命令列の直後に確保する範囲・スタックを置ける大きさ(末尾のコマンド名と引数の置き場より手前)
 
 // 領域の中の番地addrからsizeバイトの範囲が領域に収まれば，その先頭に対応するメモリの番地を指すポインタを返す．収まらなければnullptrを返す
 // (実行ファイルから受け取った番地を，読み書きする前に確かめるために使う．領域の外をカーネルモードで読み書きすると，OSのデータを壊すか，CPUが停止するため)
