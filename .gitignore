@@ -24,7 +24,7 @@ mypc.srcs/utils_1/
 # 自動レビューループの出力ファイル
 review*.md
 
-# 文章を見直すために書き手へ渡したプロンプトと，書かせた下書き
+# issue対応時に文章を見直すため，別のClaudeへ書かせた下書きと，そのプロンプト
 draft*.md
 prompt*.md
 
