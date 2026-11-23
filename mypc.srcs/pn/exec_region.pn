@@ -19,14 +19,14 @@ struct ExecRegion {
 static struct ExecRegion exec_regions[EXEC_REGION_MAX];  // 割り振った領域(先頭の番地の小さい順に並べる)
 static int exec_region_count = 0;                        // 割り振った領域の数
 
-// 命令列・命令列の直後に確保する範囲・スタックの量(各バイト数)を収める領域を，空きのうち番地の最も小さい収まる位置から割り振り，regionへ書き込む
-// 領域の大きさは，3つの合計を8の倍数へ切り上げ(USIZEは8の倍数しか持てないため)，末尾に引数の置き場を足したものとする
+// 命令列・命令列の直後に確保する範囲・スタックの量のバイト数(以下，3つの大きさ)を収める領域を，空きのうち番地の最も小さい収まる位置から割り振り，regionへ書き込む
+// 領域の大きさは，3つの大きさの合計を8の倍数へ切り上げ(USIZEは8の倍数しか持てないため)，末尾に引数の置き場を足したものとする
 // 戻り値: 1(割り振った) / 0(割り振れない)．割り振れないのは次のいずれかの場合である
-//   - 3つが，領域を割り振る範囲全体にも収まらない
-//   - 空きに収まる位置が無い
 //   - 割り振った領域の数が上限に達している
+//   - 3つの大きさが，領域を割り振る範囲全体にも収まらない
+//   - 空きに収まる位置が無い
 int exec_region_alloc(unsigned int code_size, unsigned int reserve_size, unsigned int stack_size, struct ExecRegion *region) {
-    unsigned int rest = EXEC_MEMORY_END - EXEC_MEMORY_BASE - EXEC_ARGS_AREA_SIZE;  // 3つを割り当てられる残りの大きさ(範囲全体から引数の置き場を除いた大きさから，3つを順に引いていく)
+    unsigned int rest = EXEC_MEMORY_END - EXEC_MEMORY_BASE - EXEC_ARGS_AREA_SIZE;  // 3つの大きさを収められる残りの大きさ(初めは，範囲全体から引数の置き場を除いた大きさ)
     unsigned int size;                                                             // 割り振る領域の大きさ
     unsigned int base = EXEC_MEMORY_BASE;                                          // 調べている空きの先頭のメモリの番地
     int index;                                                                     // 割り振った領域を表に入れる位置
@@ -36,7 +36,7 @@ int exec_region_alloc(unsigned int code_size, unsigned int reserve_size, unsigne
         return 0;
     }
 
-    // 3つが領域を割り振る範囲全体に収まるかを，残りの大きさから順に引いて確かめる
+    // 3つの大きさが領域を割り振る範囲全体に収まるかを，残りの大きさから順に引いて確かめる
     // (大きさはヘッダからファイルの値をそのまま受け取るため，そのまま足すと桁あふれして収まると誤る)
     if (code_size > rest) {
         return 0;
@@ -50,7 +50,7 @@ int exec_region_alloc(unsigned int code_size, unsigned int reserve_size, unsigne
         return 0;
     }
 
-    // 3つの合計を8の倍数へ切り上げ，引数の置き場を足す(合計は，範囲全体から引数の置き場を除いた8の倍数の大きさ以下のため，切り上げても範囲を超えない)
+    // 3つの大きさの合計を8の倍数へ切り上げ，引数の置き場を足す(合計は，範囲全体から引数の置き場を除いた8の倍数の大きさ以下のため，切り上げても範囲を超えない)
     size = ((code_size + reserve_size + stack_size + 7) & ~7) + EXEC_ARGS_AREA_SIZE;
 
     // 割り振った領域を番地の小さい順にたどり，その手前の空きに収まる最初の位置を探す
