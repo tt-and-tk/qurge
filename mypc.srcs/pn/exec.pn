@@ -31,7 +31,7 @@ static int exec_exit_status;            // 実行ファイルが終了のシス�
 static int exec_exception_cause;        // 実行ファイルを終わらせた例外の原因の番号(実行ファイルを起動するたびに0にするため，例外で終わっていなければ0)
 static unsigned int exec_exception_pc;  // 実行ファイルを終わらせた例外を起こした命令のPC(例外で終わった場合だけ意味を持つ)
 
-// 実行ファイルへ渡すコマンド名と引数(lineを半角空白で区切ったもの)を領域の末尾に置き，実行ファイルへ入るときのSP(領域の中の番地)を返す
+// 実行ファイルへ渡すコマンド名と引数(lineを半角空白で区切ったもの)を今の領域(UBASE・USIZEへ設定した領域)の末尾に置き，実行ファイルへ入るときのSP(領域の中の番地)を返す
 // 渡す1行は，ヌル終端を含めてコンソールの1行の大きさ(64バイト)以内であること(置く大きさが，領域の末尾に取った引数の置き場に収まる前提のため)
 // 置く内容と，返すSPから見た位置は次のとおり．argc・argvは，CALLで呼んだ直後と同じ位置(引数の並びの先頭がSP-8)になる
 // - 領域の末尾: コマンド名と各引数の文字列(区切りの空白をヌル終端に置き換えたもの)
@@ -55,9 +55,9 @@ static unsigned int exec_place_args(char *line) {
         length++;
     }
     // 文字列を置く先頭を，ヌル終端まで領域の末尾に収まる位置にする
-    text = EXEC_REGION_SIZE - (length + 1);
+    text = USIZE - (length + 1);
     // その位置をメモリの番地へ変換する(カーネルモードでは番地が変換されないため)
-    dst = (char *)(EXEC_REGION_BASE + text);
+    dst = (char *)(UBASE + text);
     // ヌル終端まで書き写す
     for (int i = 0; i <= length; i++) {
         dst[i] = line[i];
@@ -67,17 +67,17 @@ static unsigned int exec_place_args(char *line) {
     // argvの配列を置く先頭を，文字列の下を4バイト境界に揃えた位置から，末尾のnullptrを含む要素数ぶん下げた位置にする
     array = (text & ~3) - (argc + 1) * 4;
     // その位置をメモリの番地へ変換する
-    words = (unsigned int *)(EXEC_REGION_BASE + array);
+    words = (unsigned int *)(UBASE + array);
     // 各文字列の先頭を，実行ファイルが読めるよう領域の中の番地へ直して並べる
     for (int i = 0; i < argc; i++) {
-        words[i] = (unsigned int)argv[i] - EXEC_REGION_BASE;
+        words[i] = (unsigned int)argv[i] - UBASE;
     }
     // 末尾のnullptrは，領域の外を指す値のまま置く
     words[argc] = (unsigned int)argv[argc];
     // 配列のすぐ下の4バイトを，戻り先を積んだ位置にあたるSPにする
     sp = array - 4;
     // SPの8バイト下をメモリの番地へ変換し，そこからargc・argvを並べる
-    words = (unsigned int *)(EXEC_REGION_BASE + sp - 8);
+    words = (unsigned int *)(UBASE + sp - 8);
     words[0] = argc;
     words[1] = array;
     return sp;
@@ -152,16 +152,16 @@ void exec_print_exception(void) {
     console_print(")\n");
 }
 
-// 領域に読み込んだ実行ファイルを起動する
+// 領域regionに読み込んだ実行ファイルを起動する
 // 実行ファイルには，lineを半角空白で区切ったものをコマンド名と引数として渡す
 // 実行ファイルが終了のシステムコールで終われば，その終了状態を返す
 // 実行ファイルが例外で終われば，例外の原因の番号(1以上)とPCを控え，不定の値を返す
-int exec_run(char *line) {
+int exec_run(struct ExecRegion *region, char *line) {
     // 例外で終わったかどうかを見分けられるよう，例外の原因を，例外で終わっていないことを表す番号にする
     exec_exception_cause = EXCEPTION_NONE;
     // 領域と，システムコールの命令・例外でCPUが飛ぶ先を設定する
-    UBASE = EXEC_REGION_BASE;
-    USIZE = EXEC_REGION_SIZE;
+    UBASE = region->base;
+    USIZE = region->size;
     KENTRY = (unsigned int)exec_syscall_entry;
     EENTRY = (unsigned int)exec_exception_entry;
     // 実行ファイルへ入る先を，領域の先頭の命令(領域の中のPC 0)にする
