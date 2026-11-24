@@ -562,7 +562,7 @@ static int run_executable(void) {
     // 入力行を半角空白で区切ってコマンド名と引数を渡し，実行ファイルを起動して終わるまで待つ
     status = exec_spawn(input, &result);
 
-    // 既定のディレクトリか実行ファイルが無いか，名前がファイル名の規則に合わなければ，未対応のコマンドとして扱う
+    // 名前が'.'を含むか，既定のディレクトリか実行ファイルが無いか，名前がファイル名の規則に合わなければ，未対応のコマンドとして扱う
     if (status == FAT_ERR_NOT_FOUND || status == FAT_ERR_BAD_NAME) {
         handle_unknown();
         return EXIT_FAILURE;

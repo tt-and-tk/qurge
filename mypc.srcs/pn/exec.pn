@@ -1,5 +1,5 @@
 // プロセス(メモリに置いた実行ファイル)を，領域の中でユーザーモードとして動かす処理．次のものを置く
-// - 実行中のプロセスの子として実行ファイルを起動し，終わるまで待つ処理
+// - 実行ファイルを起動し，終わるまで待つ処理(実行中のプロセスがあれば，その子として起動する)
 // - 実行ファイルがシステムコールの命令を実行した場合に，CPUがカーネルモードへ移って飛ぶ先の関数(システムコールハンドラ)
 // - 実行ファイルが例外を起こした場合に，CPUがカーネルモードへ移って飛ぶ先の関数(例外ハンドラ)
 // - プロセスを終わらせた例外の原因を出力する処理
@@ -22,7 +22,7 @@ static const int EXEC_ARGV_SIZE = CONSOLE_LINE_SIZE / 2 + 1;
 // プロセスの終わり方
 struct ExecResult {
     int exit_status;            // 終了のシステムコールで伝えた終了状態(例外で終わった場合は不定)
-    int exception_cause;        // 終わらせた例外の原因の番号(例外で終わっていなければEXCEPTION_NONE)
+    int exception_cause;        // 終わらせた例外の原因の番号(例外で終わっていなければ，例外なしを表す番号)
     unsigned int exception_pc;  // 例外を起こした命令のPC(例外で終わった場合だけ意味を持つ)
 };
 
@@ -158,7 +158,7 @@ void exec_print_exception(struct ExecResult *result) {
 // 実行ファイルには，lineを半角空白で区切ったものをコマンド名と引数として渡す
 // 親が子を起動するシステムコールを処理している途中であれば，親を再開するための値を表へ控え，子が終わった後に戻す
 static void exec_run(int process, char *line, struct ExecResult *result) {
-    int parent = process_table[process].parent;  // 親の表の位置(シェルが起動したプロセスはPROCESS_NONE)
+    int parent = process_table[process].parent;  // 親の表の位置(シェルが起動したプロセスは，どのプロセスも指さない位置)
 
     // 親があれば，子の終了を待つ間の値を控える(子を実行すると，CPUのレジスタとグローバル変数が子の値に変わるため)
     if (parent != PROCESS_NONE) {
@@ -195,7 +195,7 @@ static void exec_run(int process, char *line, struct ExecResult *result) {
     }
 }
 
-// 既定のディレクトリ/binから，lineの先頭のトークンを名前とする実行ファイルを，実行中のプロセスの子として起動し，終わるまで待って終わり方をresultへ書き込む
+// 既定のディレクトリ/binから，lineの先頭のトークンを名前とする実行ファイルを起動し，終わるまで待って終わり方をresultへ書き込む(実行中のプロセスがあれば，その子として起動する)
 // lineは半角空白で区切ったコマンド名と引数とし，ヌル終端を含めてコンソールの1行の大きさ以内で，コマンド名を含むこと
 // 戻り値: FAT_OK(起動して終わった) / 起動できなかった理由(実行ファイルを読み込む関数の戻り値)
 int exec_spawn(char *line, struct ExecResult *result) {
