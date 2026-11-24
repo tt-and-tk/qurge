@@ -25,7 +25,7 @@ const int SYS_SPAWN = 6;          // /binの実行ファイルを子として起
 
 // エラーを表す戻り値
 const int SYSCALL_ERR_UNKNOWN = -1;         // 未定義の番号を渡した
-const int SYSCALL_ERR_INVALID = -2;         // 引数の値が不正(番地が領域の外を指すか，バイト数に機能が受け付けない値を渡した)
+const int SYSCALL_ERR_INVALID = -2;         // 引数の値が不正(番地が領域の外を指す，バイト数に機能が受け付けない値を渡した，子を起動する機能で1行が63文字を超えるかコマンド名が無いか終了状態の格納先が4の倍数でない)
 const int SYSCALL_ERR_TOO_LARGE = -3;       // ファイルが読み込み先に収まらないか，大きさがintで表せない
 const int SYSCALL_ERR_NOT_FOUND = -4;       // 指定した名前のファイルが無い
 const int SYSCALL_ERR_IS_DIR = -5;          // 指定した名前がディレクトリを指す
