@@ -1,6 +1,7 @@
 // Qosmosの実行ファイルからOSの機能(システムコール)を呼び出すライブラリ．実行ファイルのソースから取り込んで使う
 // システムコールは，Pynesisの組み込み関数syscall(番号, 引数4つ)で呼ぶ．使わない引数には0を渡し，ポインタはintへキャストして渡す
 // 各関数の戻り値は，0以上が成功，負の値がエラー(値の意味はsyscall_number.pnのSYSCALL_ERR_*)を表す
+// 実行ファイルを扱う関数が起動するのは，/binに置いた実行ファイルだけである(シェルの組み込みコマンドは起動できない)
 // ファイルを扱う関数に渡す名前はいずれも，シェルの現在のディレクトリの直下にあるファイルの"NAME.EXT"形式の名前(パスは指定できない)
 // コンソールを扱う関数は，シェルと同じコンソール(telnetで接続した端末と，UARTで接続した端末の2つで共有する入出力)を使う
 #pragma once
@@ -26,7 +27,7 @@ int file_write(char *name, char *data, int length) {
     return syscall(SYS_FILE_WRITE, (int)name, (int)data, length, 0);
 }
 
-/// コンソールから改行までの1行を受け取り，sizeバイトの配列bufへヌル終端付きで格納し，格納した文字数を返す(改行は格納しない)
+// コンソールから改行までの1行を受け取り，sizeバイトの配列bufへヌル終端付きで格納し，格納した文字数を返す(改行は格納しない)
 // 1行がsize-1文字を超えれば，超えた分は捨てる
 // 打った文字の表示と1行の編集はQosmosが行う
 int console_read(char *buf, int size) {
@@ -51,4 +52,14 @@ int console_print(char *text) {
     }
     // 数えたバイト数を出力する
     return console_write(text, length);
+}
+
+// 1行lineを半角空白で区切り，先頭のコマンド名と同じ名前の/binの実行ファイルを子として起動し，残りを引数として渡して，子が終わるまで待つ
+// lineは63文字以内とする．コマンド名は，組み込みコマンドと同じ名前でも/binの実行ファイルを指す(照合はファイル名と同じく大文字・小文字を区別しない)
+// 子が終了のシステムコールで終われば，その終了状態をstatusの指す先へ書き込んで0を返す
+// 子が例外で終われば，その例外の原因の番号(syscall_number.pnのEXCEPTION_*．1以上)を返し，statusの指す先は書き換えない
+// 子を起動できなければ，エラーを返す(Qosmosはエラーメッセージを出力しない)
+int spawn(char *line, int *status) {
+    // 番号SYS_SPAWNのシステムコールを呼び出す
+    return syscall(SYS_SPAWN, (int)line, (int)status, 0, 0);
 }

@@ -1,0 +1,147 @@
+// 実行ファイルを既定のディレクトリ/binから探し，プロセスを作ってその領域へ読み込む処理
+// エラーは出力せず，結果を呼び出し元へ返す(出力するかどうかは，起動を求めたシェルか実行ファイルが決めるため)
+#pragma once
+#include "fat.pn"
+#include "process.pn"
+
+static const int INSTRUCTION_SIZE = 8;                          // 1命令のバイト数(実行ファイルの命令列の大きさはこの倍数になる)
+static const int EXEC_HEADER_SIZE = 16;                         // 実行ファイルの先頭のヘッダのバイト数(4バイトのワードを4つ並べる)
+static const unsigned int EXEC_SIGNATURE = 0x0053517F;          // ヘッダのファイルシグネチャ(ファイル上で0x7F・'Q'・'S'・版数0の順に並ぶ4バイトを，ワードとして読んだ値)
+static const unsigned int EXEC_STACK_UNSPECIFIED = 0xFFFFFFFF;  // ヘッダのスタックの量のうち，量が未定であることを表す値
+static const unsigned int EXEC_DEFAULT_STACK_SIZE = 4096;       // スタックの量が未定の実行ファイルに割り振るスタックの量
+const int EXEC_INVALID = -1;                                    // 実行ファイルを読み込む関数が，大きさかヘッダが条件に合わないことを表す戻り値(FAT32の各関数の結果と重ならない値)
+const int EXEC_NO_MEMORY = -2;                                  // 実行ファイルを読み込む関数が，プロセスを表に加えられないことを表す戻り値(FAT32の各関数の結果と重ならない値)
+
+// 実行ファイルのヘッダheaderが，実行ファイルの形式の条件をすべて満たすかを返す(file_sizeは実行ファイル全体のバイト数で，ヘッダと1命令の合計以上であること)
+// 条件は次のとおり(ファイルシグネチャは版数を含むため，形式の異なる版の実行ファイルも満たさない)
+//   - ファイルシグネチャが一致する
+//   - 命令列の大きさが，ファイルからヘッダを除いた大きさと一致し，命令のバイト数で割り切れる
+// 戻り値: 1(すべて満たす) / 0(満たさない条件がある)
+static int exec_header_valid(unsigned int *header, unsigned int file_size) {
+    unsigned int code_size = header[1];  // 命令列のバイト数
+
+    // 条件をすべて満たすかを返す(命令のバイト数は2のべき乗のため，除算を避けて下位ビットで判定する)
+    return (
+        // ファイルシグネチャが一致する
+        header[0] == EXEC_SIGNATURE
+        // かつ，命令列の大きさが，ファイルからヘッダを除いた大きさと一致する
+        && code_size == file_size - EXEC_HEADER_SIZE
+        // かつ，命令列の大きさが，命令のバイト数で割り切れる
+        && (code_size & (INSTRUCTION_SIZE - 1)) == 0);
+}
+
+// 実行ファイルentryのヘッダを確かめ，ヘッダに書かれた大きさの領域を持つプロセスを表に加えて，その表の位置をprocessへ書き込み，命令列を領域の先頭から書き写す
+// (entryの大きさはヘッダと1命令の合計以上であること)
+// ヘッダは領域へ書き写さない．成功した場合だけプロセスを表に加えたまま返す
+// 戻り値: FAT_OK / EXEC_INVALID(ヘッダが条件に合わない) / EXEC_NO_MEMORY(プロセスを表に加えられない) / FAT32の各関数が返した失敗
+static int exec_load_file(struct FatEntry *entry, int *process) {
+    struct FatFile file;      // 読み出し中の実行ファイルの位置
+    unsigned char *data;      // 読み込んだセクタの内容の先頭
+    int length;               // 読み込んだセクタのうち内容にあたるバイト数
+    int status;               // FAT32の各関数の結果
+    unsigned int *src;        // 読み込んだセクタを4バイト単位で読む位置
+    int start;                // 読み込んだセクタのうち，書き写し始める位置(4バイト単位)
+    int is_first = 1;         // 先頭のセクタを読み込む前か(先頭のセクタにヘッダがあり，プロセスはヘッダを確かめてから表に加えるため)
+    unsigned int stack_size;  // 割り振るスタックの量
+    unsigned int *dst;        // 次に書き込む領域の位置
+
+    // 実行ファイルを先頭から読み出せるよう開く
+    status = fat_open(entry, &file);
+    if (status != FAT_OK) {
+        return status;
+    }
+
+    // 1セクタずつ読み込み，全て読み終えるまで書き写す
+    while (1) {
+        // 次の1セクタを読み込む．全て読み終えていれば書き写し終えている
+        status = fat_read(&file, &data, &length);
+        if (status == FAT_END) {
+            return FAT_OK;
+        }
+
+        // 読み込みに失敗すれば，表に加えた後のプロセスを表から外す(読み込んだ途中までの命令列は実行しない)
+        if (status != FAT_OK) {
+            if (!is_first) {
+                process_destroy(*process);
+            }
+
+            return status;
+        }
+
+        // 読み込んだセクタを4バイト単位で読む
+        src = (unsigned int *)data;
+        // 先頭のセクタでなければ，セクタの先頭から書き写す
+        start = 0;
+
+        // 先頭のセクタなら，ヘッダを確かめてプロセスを表に加え，ヘッダの後ろから領域の先頭へ書き写す
+        // (セクタはヘッダと1命令の合計より大きく，ファイルもその大きさ以上のため，先頭のセクタにヘッダ全体が入る)
+        if (is_first) {
+            if (!exec_header_valid(src, entry->size)) {
+                return EXEC_INVALID;
+            }
+
+            // スタックの量が未定なら，既定の量を割り振る
+            stack_size = src[3];
+            if (stack_size == EXEC_STACK_UNSPECIFIED) {
+                stack_size = EXEC_DEFAULT_STACK_SIZE;
+            }
+
+            // 命令列・命令列の直後に確保する範囲・スタックを収める領域を持つプロセスを表に加える
+            *process = process_create(src[1], src[2], stack_size);
+            if (*process == PROCESS_NONE) {
+                return EXEC_NO_MEMORY;
+            }
+
+            dst = (unsigned int *)process_table[*process].base;
+            start = EXEC_HEADER_SIZE >> 2;
+            is_first = 0;
+        }
+
+        // 内容を4バイト単位で書き写す(ヘッダと命令列の大きさが4の倍数のため，最後のセクタの内容も4バイト単位で割り切れる．1バイトずつ写すより命令数が少ない)
+        for (int i = start; i < (length >> 2); i++) {
+            *dst = src[i];
+            dst++;
+        }
+    }
+}
+
+// 既定のディレクトリ/binから名前nameの実行ファイルを探し，その実行ファイルの領域を持つプロセスを実行中のプロセスの子として表に加えて，その表の位置をprocessへ書き込み，領域へ読み込む(名前は空でないこと)
+// 成功した場合だけプロセスを表に加えたまま返し，実行を終えたら呼び出し元が表から外す
+// 戻り値: FAT_OK / FAT_ERR_NOT_FOUND(名前が'.'を含むか，/binか実行ファイルが無い) / FAT_ERR_IS_DIR(名前がディレクトリを指す) /
+//         EXEC_INVALID(大きさかヘッダが条件に合わない) / EXEC_NO_MEMORY(プロセスを表に加えられない) / FAT32の各関数が返したそのほかの失敗
+int exec_load(char *name, int *process) {
+    struct FatEntry dir;    // 既定のディレクトリのエントリ
+    struct FatEntry entry;  // 見つかった実行ファイルのエントリ
+    int status;             // FAT32の各関数の結果
+
+    // ドットを含む名前は探さない(実行ファイルは拡張子の無いファイルに限り，データファイルを打ち間違いで命令として実行しないため)
+    for (int i = 0; name[i] != '\0'; i++) {
+        if (name[i] == '.') {
+            return FAT_ERR_NOT_FOUND;
+        }
+    }
+
+    // 現在のディレクトリによらず，ルートディレクトリ直下の既定のディレクトリから探す
+    status = fat_find_in(fat_get_root_cluster(), "bin", &dir);
+    // 既定の名前がディレクトリでなければ，既定のディレクトリが無いものとして扱う
+    if (status == FAT_OK && (dir.attr & ATTR_DIRECTORY) == 0) {
+        status = FAT_ERR_NOT_FOUND;
+    }
+    if (status == FAT_OK) {
+        status = fat_find_in(dir.cluster, name, &entry);
+    }
+    if (status != FAT_OK) {
+        return status;
+    }
+
+    // ディレクトリは実行できない
+    if ((entry.attr & ATTR_DIRECTORY) != 0) {
+        return FAT_ERR_IS_DIR;
+    }
+    // ヘッダと1命令を合わせた大きさに満たなければ実行しない
+    if (entry.size < EXEC_HEADER_SIZE + INSTRUCTION_SIZE) {
+        return EXEC_INVALID;
+    }
+    // ヘッダを確かめて，プロセスを表に加えて読み込む
+    return exec_load_file(&entry, process);
+}

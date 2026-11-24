@@ -1,0 +1,181 @@
+// プロセスの表と，OSが実行中のプロセスの領域の中の番地を読み書きするための関数
+// プロセスは，メモリに置いた実行ファイルである．プロセスごとに，メモリの後半のうちどのプロセスにも割り振っていない範囲(以下，空き)から，必要な大きさの範囲(以下，領域)を割り振る
+// 実行ファイルは，領域の先頭を0とするバイト単位の番地(以下，領域の中の番地)でユーザーモードとして動く
+// 領域の中の番地は，命令の取り出しとメモリの読み書きのたびにCPUがメモリの番地へ変換する．カーネルモードで動くOSは変換されないため，変換する関数もここに置く
+// 変換する関数は，実行中のプロセスの領域(UBASE・USIZEへ設定した領域)を対象とする(システムコールを処理する間も値が保たれるため)
+#pragma once
+
+static const unsigned int PROCESS_MEMORY_BASE = 0x8000;  // 領域を割り振る範囲の先頭のメモリの番地(メモリの後半の先頭．カーネルモードのCALL/RETが戻り先を積み下ろししない範囲のため，OSのスタックと重ならない)
+static const unsigned int PROCESS_MEMORY_END = 0x10000;  // 領域を割り振る範囲の末尾の次のメモリの番地(メモリの容量)
+static const unsigned int PROCESS_ARGS_AREA_SIZE = 256;  // 領域の末尾のうち，実行ファイルへ渡すコマンド名と引数を置くために取る大きさ
+static const int PROCESS_MAX = 16;                       // プロセスの表の要素数(同時にメモリに置けるプロセスの数)
+const int PROCESS_NONE = -1;                             // どのプロセスも指さないことを表す表の位置
+
+// プロセスの表の要素
+// 子の終了を待つ間の値は，プロセスが子を起動してから子が終わるまでの間だけ意味を持つ
+struct Process {
+    int used;                // 要素を使っているか(1: 使っている / 0: 空いている)
+    int parent;              // 親(このプロセスを起動し，終了を待つプロセス)の表の位置．シェルが起動したプロセスはPROCESS_NONE
+    unsigned int base;       // 領域の先頭のメモリの番地
+    unsigned int size;       // 領域の大きさ(8の倍数)
+    unsigned int sp;         // 子の終了を待つ間のSP(領域の中の番地)
+    unsigned int pc;         // 子の終了を待つ間の，再開する命令のPC
+    unsigned int kernel_sp;  // 子の終了を待つ間の，このプロセスが終わったときに戻るカーネルモードのSP
+};
+
+// プロセスの表(親を表の位置で指すため，要素の位置は動かさない)
+struct Process process_table[PROCESS_MAX];
+int process_current = PROCESS_NONE;  // 実行中のプロセスの表の位置(シェルが動いている間はPROCESS_NONE)
+
+// 先頭のメモリの番地baseから大きさsizeの範囲が，領域を割り振る範囲に収まり，どのプロセスの領域とも重ならないかを返す(baseは領域を割り振る範囲の中にあること)
+// 戻り値: 1(収まり，重ならない) / 0(収まらないか，重なる)
+static int process_fits(unsigned int base, unsigned int size) {
+    // 範囲の末尾を超えれば収まらない(baseは範囲の中にあるため，残りの大きさと比べれば桁あふれしない)
+    if (PROCESS_MEMORY_END - base < size) {
+        return 0;
+    }
+
+    // 使っている要素の領域と重なるかを順に調べる
+    for (int i = 0; i < PROCESS_MAX; i++) {
+        // 重なれば，その範囲には割り振れない
+        if (
+            // 要素を使っている
+            process_table[i].used
+            // かつ，範囲の先頭が領域の末尾より前にある
+            && base < process_table[i].base + process_table[i].size
+            // かつ，領域の先頭が範囲の末尾より前にある
+            && process_table[i].base < base + size) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+// 大きさsizeの範囲が収まる空きのうち，番地の最も小さい位置の先頭のメモリの番地を返す．収まる空きが無ければ0を返す(0は領域を割り振る範囲の外のため，見つかった番地と重ならない)
+// 番地の最も小さい位置は，領域を割り振る範囲の先頭か，いずれかの領域の直後になるため，それらだけを調べる
+static unsigned int process_find_free(unsigned int size) {
+    unsigned int found = 0;  // 見つかった位置のうち番地の最も小さい先頭(見つかっていなければ0)
+    unsigned int end;        // 調べている領域の直後のメモリの番地
+
+    // 範囲の先頭に収まれば，そこが番地の最も小さい位置になる
+    if (process_fits(PROCESS_MEMORY_BASE, size)) {
+        return PROCESS_MEMORY_BASE;
+    }
+
+    // 使っている要素の領域の直後を順に調べ，収まる位置のうち番地の最も小さいものを残す
+    for (int i = 0; i < PROCESS_MAX; i++) {
+        end = process_table[i].base + process_table[i].size;
+
+        // 見つかった位置より番地が小さく，収まれば残す
+        if (
+            // 要素を使っている
+            process_table[i].used
+            // かつ，まだ見つかっていないか，見つかった位置より番地が小さい
+            && (found == 0 || end < found)
+            // かつ，その位置に収まる
+            && process_fits(end, size)) {
+            found = end;
+        }
+    }
+
+    return found;
+}
+
+// 命令列・命令列の直後に確保する範囲・スタックの量のバイト数(以下，3つの大きさ)を収める領域を持つプロセスを，実行中のプロセスの子として表に加え，その表の位置を返す
+// 領域は空きのうち番地の最も小さい収まる位置から割り振る．大きさは，3つの大きさの合計を8の倍数へ切り上げ(USIZEは8の倍数しか持てないため)，末尾に引数の置き場を足したものとする
+// 加えられなければPROCESS_NONEを返す．加えられないのは次のいずれかの場合である
+//   - 表に空いている要素が無い
+//   - 3つの大きさが，領域を割り振る範囲全体にも収まらない
+//   - 空きに収まる位置が無い
+int process_create(unsigned int code_size, unsigned int reserve_size, unsigned int stack_size) {
+    unsigned int rest = PROCESS_MEMORY_END - PROCESS_MEMORY_BASE - PROCESS_ARGS_AREA_SIZE;  // 3つの大きさを収められる残りの大きさ(初めは，範囲全体から引数の置き場を除いた大きさ)
+    unsigned int size;                                                                      // 割り振る領域の大きさ
+    unsigned int base;                                                                      // 割り振る領域の先頭のメモリの番地
+    int process = PROCESS_NONE;                                                             // 加えるプロセスの表の位置
+
+    // 空いている要素を探し，無ければ加えられない
+    for (int i = 0; i < PROCESS_MAX; i++) {
+        if (!process_table[i].used) {
+            process = i;
+            break;
+        }
+    }
+
+    if (process == PROCESS_NONE) {
+        return PROCESS_NONE;
+    }
+
+    // 3つの大きさが領域を割り振る範囲全体に収まるかを，残りの大きさから順に引いて確かめる
+    // (大きさはヘッダからファイルの値をそのまま受け取るため，そのまま足すと桁あふれして収まると誤る)
+    if (code_size > rest) {
+        return PROCESS_NONE;
+    }
+    rest -= code_size;
+    if (reserve_size > rest) {
+        return PROCESS_NONE;
+    }
+    rest -= reserve_size;
+    if (stack_size > rest) {
+        return PROCESS_NONE;
+    }
+
+    // 3つの大きさの合計を8の倍数へ切り上げ，引数の置き場を足す(合計は，範囲全体から引数の置き場を除いた8の倍数の大きさ以下のため，切り上げても範囲を超えない)
+    size = ((code_size + reserve_size + stack_size + 7) & ~7) + PROCESS_ARGS_AREA_SIZE;
+    // 空きから領域を探し，無ければ加えられない
+    base = process_find_free(size);
+    if (base == 0) {
+        return PROCESS_NONE;
+    }
+
+    // 空いている要素に，実行中のプロセスを親として領域を記録する
+    process_table[process].used = 1;
+    process_table[process].parent = process_current;
+    process_table[process].base = base;
+    process_table[process].size = size;
+    return process;
+}
+
+// 表の位置processのプロセスを表から外す．領域は，どの要素からも指されなくなるため空きに戻る
+void process_destroy(int process) {
+    process_table[process].used = 0;
+}
+
+// 実行中のプロセスの領域の中の番地addrからsizeバイトの範囲が領域に収まれば，その先頭に対応するメモリの番地を指すポインタを返す．収まらなければnullptrを返す
+// (実行ファイルから受け取った番地を，読み書きする前に確かめるために使う．領域の外をカーネルモードで読み書きすると，OSのデータを壊すか，CPUが停止するため)
+// 実行ファイルがintで渡した負の番地とnullptrは，符号なしの値として領域の大きさを超えるため，領域の外として扱われる
+char *process_buffer(unsigned int addr, int size) {
+    // 範囲が領域に収まらなければ，nullptrを返す
+    if (
+        // 先頭が領域の外にある
+        addr >= USIZE
+        // または，大きさが負である
+        || size < 0
+        // または，末尾が領域の外にある(先頭が領域の中にあることを確かめた後に，残りの大きさと比べるため桁あふれしない)
+        || (unsigned int)size > USIZE - addr) {
+        return nullptr;
+    }
+
+    return (char *)(UBASE + addr);
+}
+
+// 実行中のプロセスの領域の中の番地addrから始まるヌル終端の文字列が，ヌル終端まで領域に収まれば，その先頭に対応するメモリの番地を指すポインタを返す．
+// 収まらなければnullptrを返す
+char *process_string(unsigned int addr) {
+    char *text = process_buffer(addr, 1);  // 文字列の先頭
+
+    // 先頭が領域の外にあれば，nullptrを返す
+    if (text == nullptr) {
+        return nullptr;
+    }
+
+    // 先頭から領域の末尾までにヌル終端があるかを調べる
+    for (unsigned int i = 0; i < USIZE - addr; i++) {
+        // ヌル終端があれば，文字列全体が領域に収まる
+        if (text[i] == '\0') {
+            return text;
+        }
+    }
+
+    return nullptr;
+}
