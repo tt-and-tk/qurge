@@ -24,18 +24,18 @@ const int SYS_EXIT = 5;           // 実行ファイルを終え，起動した�
 const int SYS_SPAWN = 6;          // /binの実行ファイルを子として起動し，終わるまで待つ．子が終了のシステムコールで終われば，子の終了状態を格納先へ書き込んで0を返し，例外で終われば例外の原因の番号を返す(a: 半角空白で区切ったコマンド名と引数の1行，b: 子の終了状態の格納先)
 
 // エラーを表す戻り値
-const int SYSCALL_ERR_UNKNOWN = -1;         // 未定義の番号を渡した
-const int SYSCALL_ERR_INVALID = -2;         // 引数の値が不正(番地が領域の外を指すか，intを書き込む番地が4の倍数でないか，バイト数に機能が受け付けない値を渡した)
-const int SYSCALL_ERR_TOO_LARGE = -3;       // ファイルが読み込み先に収まらないか，大きさがintで表せない
-const int SYSCALL_ERR_NOT_FOUND = -4;       // 指定した名前のファイルが無い
-const int SYSCALL_ERR_IS_DIR = -5;          // 指定した名前がディレクトリを指す
-const int SYSCALL_ERR_BAD_NAME = -6;        // 名前が8.3形式に収まらないか，名前に使えない文字を含む
-const int SYSCALL_ERR_FULL = -7;            // SDカードに空きが無い
-const int SYSCALL_ERR_IO = -8;              // SDカードを使う機能で，SDカードを読み書きできないか，ファイルシステムの記録が壊れている
-const int SYSCALL_ERR_NOT_EXECUTABLE = -9;  // 起動を求めたファイルが，実行ファイルの形式の条件に合わない
-const int SYSCALL_ERR_NO_MEMORY = -10;      // 起動を求めた実行ファイルに必要な大きさの領域が，空きに収まらない
-const int SYSCALL_ERR_TOO_MANY = -11;       // 同時にメモリに置ける実行ファイルの数が，上限に達している
-const int SYSCALL_ERR_BAD_COMMAND = -12;    // 起動を求めた1行が63文字を超えるか，コマンド名を含まない
+const int SYSCALL_ERR_UNKNOWN = -1;              // 未定義の番号を渡した
+const int SYSCALL_ERR_INVALID = -2;              // 引数の値が不正(番地が領域の外を指すか，intを書き込む番地が4の倍数でないか，バイト数に機能が受け付けない値を渡した)
+const int SYSCALL_ERR_TOO_LARGE = -3;            // ファイルが読み込み先に収まらないか，大きさがintで表せない
+const int SYSCALL_ERR_NOT_FOUND = -4;            // 指定した名前のファイルが無い
+const int SYSCALL_ERR_IS_DIR = -5;               // 指定した名前がディレクトリを指す
+const int SYSCALL_ERR_BAD_NAME = -6;             // 名前が8.3形式に収まらないか，名前に使えない文字を含む
+const int SYSCALL_ERR_FULL = -7;                 // SDカードに空きが無い
+const int SYSCALL_ERR_IO = -8;                   // SDカードを読み書きできないか，ファイルシステムの記録が壊れている
+const int SYSCALL_ERR_NOT_EXECUTABLE = -9;       // 起動を求めたファイルが，実行ファイルの形式の条件に合わない
+const int SYSCALL_ERR_NO_MEMORY = -10;           // 起動を求めた実行ファイルに必要な大きさの領域が，空きに収まらない
+const int SYSCALL_ERR_TOO_MANY_PROCESSES = -11;  // 同時にメモリに置ける実行ファイルの数が，上限に達している
+const int SYSCALL_ERR_BAD_COMMAND = -12;         // 起動を求める1行が63文字を超えるか，コマンド名を含まない
 
 // 子を起動する機能が返す，子を終わらせた例外の原因の番号(EXCEPTION_NONE以外は，CPUが例外ハンドラへ飛ぶときにECAUSEへ書き込む値)
 const int EXCEPTION_NONE = 0;         // 例外で終わっていないことを表す

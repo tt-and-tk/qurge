@@ -135,27 +135,31 @@ static int syscall_console_write(int a, int b) {
 // b: 子の終了状態の格納先の，領域の中の番地(子が終了のシステムコールで終わった場合だけ書き込む)
 // 戻り値: 0(子が終了のシステムコールで終わった) / 子を終わらせた例外の原因の番号 / エラー
 static int syscall_spawn(int a, int b) {
-    char *line = process_string(a);             // 1行
-    int *status = (int *)process_buffer(b, 4);  // 終了状態の格納先(子を実行すると領域の設定が子のものへ変わるため，起動する前にメモリの番地へ変換しておく)
-    struct ExecResult result;                   // 子の終わり方
-    int length = 0;                             // 1行の文字数
-    int load;                                   // 起動の結果
+    char *line = process_string(a);                  // 1行
+    int *exit_status = (int *)process_buffer(b, 4);  // 終了状態の格納先(子を実行すると領域の設定が子のものへ変わるため，起動する前にメモリの番地へ変換しておく)
+    struct ExecResult result;                        // 子の終わり方
+    int length = 0;                                  // 1行の文字数
+    int load;                                        // 起動の結果
 
-    // 引数を確かめる(子が動いた後に引数の誤りを返さないよう，起動する前にすべて確かめる)
+    // 起動する前に，引数をすべて確かめる
+    // 子が動いた後に引数の誤りを返すと，子の処理だけが残るため
+
     // 1行か格納先を受け取れなければ起動しない
     if (
         // 1行が領域の外にある
         line == nullptr
         // または，格納先が領域の外にある
-        || status == nullptr
+        || exit_status == nullptr
         // または，格納先が4の倍数でない(4バイトの値がワードをまたぎ，正しく書き込めないため)
         || (b & 3) != 0) {
         return SYSCALL_ERR_INVALID;
     }
+
     // ヌル終端までの文字数を数える
     while (line[length] != '\0') {
         length++;
     }
+
     // 1行の内容が起動に使えなければ起動しない
     if (
         // 1行がコンソールの1行に収まらない(子の領域の末尾に取る引数の置き場に収まらないため)
@@ -179,8 +183,8 @@ static int syscall_spawn(int a, int b) {
     }
 
     // プロセステーブルに空いている要素が無ければ，プロセスが多すぎることを返す
-    if (load == EXEC_TOO_MANY) {
-        return SYSCALL_ERR_TOO_MANY;
+    if (load == EXEC_TOO_MANY_PROCESSES) {
+        return SYSCALL_ERR_TOO_MANY_PROCESSES;
     }
 
     // それ以外の失敗は，FAT32の各関数の失敗として変換して返す
@@ -194,7 +198,7 @@ static int syscall_spawn(int a, int b) {
     }
 
     // 終了のシステムコールで終わっていれば，終了状態を格納先へ書き込む
-    *status = result.exit_status;
+    *exit_status = result.exit_status;
     return 0;
 }
 

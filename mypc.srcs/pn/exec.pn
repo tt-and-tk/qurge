@@ -155,10 +155,10 @@ void exec_print_exception(struct ExecResult *result) {
 }
 
 // 領域へ読み込んだプロセスを，終わるまで実行し，終わり方をresultへ書き込む
-// process: 実行するプロセスの要素の位置
+// process: 実行するプロセスのプロセステーブルでの位置
 // line: 実行ファイルへ渡す1行(半角空白で区切ったコマンド名と引数)
 static void exec_run(int process, char *line, struct ExecResult *result) {
-    int parent = process_table[process].parent;  // 親の要素の位置(シェルが起動したプロセスは，どのプロセスも指さない位置)
+    int parent = process_table[process].parent;  // 親のプロセステーブルでの位置(シェルが起動したプロセスは，どのプロセスも指さない位置)
 
     // 親があれば，親を再開するための値を控える(親は子を起動するシステムコールを処理している途中であり，子を実行するとCPUのレジスタとグローバル変数が子の値に変わるため)
     if (parent != PROCESS_NONE) {
@@ -200,7 +200,7 @@ static void exec_run(int process, char *line, struct ExecResult *result) {
 // 戻り値: FAT_OK(起動して終わった) / 起動できなかった理由(実行ファイルを読み込む関数の戻り値)
 int exec_spawn(char *line, struct ExecResult *result) {
     char name[CONSOLE_LINE_SIZE];  // コマンド名
-    int process;                   // 起動するプロセスの要素の位置
+    int process;                   // 起動するプロセスのプロセステーブルでの位置
     int status;                    // 読み込みの結果
 
     // 先頭のトークンをコマンド名として取り出し，その名前の実行ファイルを読み込む

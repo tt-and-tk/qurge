@@ -581,7 +581,7 @@ static int run_executable(void) {
     }
 
     // プロセステーブルに空いている要素が無ければ実行しない
-    if (status == EXEC_TOO_MANY) {
+    if (status == EXEC_TOO_MANY_PROCESSES) {
         print_error("too many processes\n");
         return EXIT_FAILURE;
     }

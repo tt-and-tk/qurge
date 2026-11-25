@@ -11,9 +11,9 @@ static const unsigned int EXEC_STACK_UNSPECIFIED = 0xFFFFFFFF;  // ヘッダの�
 static const unsigned int EXEC_DEFAULT_STACK_SIZE = 4096;       // スタックの量が未定の実行ファイルに割り振るスタックの量
 
 // 実行ファイルを読み込む関数が，読み込めなかった理由を表す戻り値(FAT32の各関数の結果と重ならない値)
-const int EXEC_INVALID = -1;    // 大きさかヘッダが条件に合わない
-const int EXEC_NO_MEMORY = -2;  // 必要な大きさの領域が空きに収まらない
-const int EXEC_TOO_MANY = -3;   // プロセステーブルに空いている要素が無い
+const int EXEC_INVALID = -1;             // 大きさかヘッダが条件に合わない
+const int EXEC_NO_MEMORY = -2;           // 必要な大きさの領域が空きに収まらない
+const int EXEC_TOO_MANY_PROCESSES = -3;  // プロセステーブルに空いている要素が無い
 
 // 実行ファイルのヘッダheaderが，実行ファイルの形式の条件を満たすかを返す
 // file_size: 実行ファイル全体のバイト数(ヘッダと1命令の合計以上であること)
@@ -21,24 +21,25 @@ const int EXEC_TOO_MANY = -3;   // プロセステーブルに空いている要
 static int exec_header_valid(unsigned int *header, unsigned int file_size) {
     unsigned int code_size = header[1];  // 命令列のバイト数
 
-    // 条件をすべて満たすかを返す(ファイルシグネチャは版数を含むため，形式の異なる版の実行ファイルも満たさない．命令のバイト数は2のべき乗のため，除算を避けて下位ビットで判定する)
+    // 条件をすべて満たすかを返す
     return (
-        // ファイルシグネチャが一致する
+        // ファイルシグネチャが一致する(ファイルシグネチャは版数を含むため，形式の異なる版の実行ファイルも満たさない)
         header[0] == EXEC_SIGNATURE
         // かつ，命令列の大きさが，ファイルからヘッダを除いた大きさと一致する
         && code_size == file_size - EXEC_HEADER_SIZE
-        // かつ，命令列の大きさが，命令のバイト数で割り切れる
+        // かつ，命令列の大きさが，命令のバイト数で割り切れる(命令のバイト数は2のべき乗のため，除算を避けて下位ビットで判定する)
         && (code_size & (INSTRUCTION_SIZE - 1)) == 0);
 }
 
 // 実行ファイルentryのプロセスをプロセステーブルに加え，その領域へ命令列を読み込む(entryの大きさはヘッダと1命令の合計以上であること)
-// process: 加えたプロセスの要素の位置の書き込み先(読み込めた場合だけ，プロセスをプロセステーブルに加えたまま返す)
-// 戻り値: FAT_OK / 読み込めなかった理由(EXEC_INVALID・EXEC_NO_MEMORY・EXEC_TOO_MANY・FAT32の各関数が返した失敗)
+// process: 加えたプロセスのプロセステーブルでの位置の書き込み先(読み込めた場合だけ，プロセスをプロセステーブルに加えたまま返す)
+// 戻り値: FAT_OK / 読み込めなかった理由(EXEC_INVALID・EXEC_NO_MEMORY・EXEC_TOO_MANY_PROCESSES・FAT32の各関数が返した失敗)
 static int exec_load_file(struct FatEntry *entry, int *process) {
     struct FatFile file;      // 読み出し中の実行ファイルの位置
     unsigned char *data;      // 読み込んだセクタの内容の先頭
     int length;               // 読み込んだセクタのうち内容にあたるバイト数
     int status;               // FAT32の各関数の結果
+    int created;              // プロセスを加えた結果
     unsigned int *src;        // 読み込んだセクタを4バイト単位で読む位置
     int start;                // 読み込んだセクタのうち，書き写し始める位置(4バイト単位)
     int is_first = 1;         // 先頭のセクタを読み込む前か(先頭のセクタにヘッダがあり，プロセスはヘッダを確かめてからプロセステーブルに加えるため)
@@ -74,7 +75,7 @@ static int exec_load_file(struct FatEntry *entry, int *process) {
         start = 0;
 
         // 先頭のセクタなら，ヘッダを確かめてプロセスをプロセステーブルに加え，ヘッダの後ろから領域の先頭へ書き写す
-        // (ヘッダは領域へ書き写さない．セクタはヘッダと1命令の合計より大きく，ファイルもその大きさ以上のため，先頭のセクタにヘッダ全体が入る)
+        // (セクタはヘッダと1命令の合計より大きく，ファイルもその大きさ以上のため，先頭のセクタにヘッダ全体が入る)
         if (is_first) {
             if (!exec_header_valid(src, entry->size)) {
                 return EXEC_INVALID;
@@ -87,11 +88,11 @@ static int exec_load_file(struct FatEntry *entry, int *process) {
             }
 
             // 命令列・命令列の直後に確保する範囲・スタックを収める領域を持つプロセスを加え，加えられなければその理由を返す
-            status = process_create(src[1], src[2], stack_size, process);
-            if (status == PROCESS_TABLE_FULL) {
-                return EXEC_TOO_MANY;
+            created = process_create(src[1], src[2], stack_size, process);
+            if (created == PROCESS_TABLE_FULL) {
+                return EXEC_TOO_MANY_PROCESSES;
             }
-            if (status == PROCESS_NO_MEMORY) {
+            if (created == PROCESS_NO_MEMORY) {
                 return EXEC_NO_MEMORY;
             }
 
@@ -109,9 +110,9 @@ static int exec_load_file(struct FatEntry *entry, int *process) {
 }
 
 // 既定のディレクトリ/binの実行ファイルnameを，プロセスとしてメモリへ読み込む(nameは空でないこと．実行中のプロセスがあれば，そのプロセスを親とする)
-// process: 読み込んだプロセスの要素の位置の書き込み先(読み込めた場合だけ，プロセスをプロセステーブルに加えたまま返す．実行を終えたら呼び出し元が外す)
+// process: 読み込んだプロセスのプロセステーブルでの位置の書き込み先(読み込めた場合だけ，プロセスをプロセステーブルに加えたまま返す)
 // 戻り値: FAT_OK / FAT_ERR_NOT_FOUND(名前が'.'を含むか，/binか実行ファイルが無い) / FAT_ERR_IS_DIR(名前がディレクトリを指す) /
-//         EXEC_INVALID / EXEC_NO_MEMORY / EXEC_TOO_MANY / FAT32の各関数が返したそのほかの失敗
+//         EXEC_INVALID / EXEC_NO_MEMORY / EXEC_TOO_MANY_PROCESSES / FAT32の各関数が返したそのほかの失敗
 int exec_load(char *name, int *process) {
     struct FatEntry dir;    // 既定のディレクトリのエントリ
     struct FatEntry entry;  // 見つかった実行ファイルのエントリ
