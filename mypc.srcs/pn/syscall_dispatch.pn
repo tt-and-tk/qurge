@@ -130,9 +130,10 @@ static int syscall_console_write(int a, int b) {
     return 0;
 }
 
-// 領域の中の番地aにある1行(半角空白で区切ったコマンド名と引数)のコマンド名と同じ名前の/binの実行ファイルを子として起動し，終わるまで待つ
-// 子が終了のシステムコールで終われば，終了状態を領域の中の番地bのintへ書き込んで0を返す．例外で終われば，その例外の原因の番号を返す(bは書き換えない)
-// 子を起動できなければ，エラーを返す(子が動いた後に引数の誤りを返さないよう，引数は起動する前にすべて確かめる)
+// /binの実行ファイルを子として起動し，終わるまで待つ
+// a: 半角空白で区切ったコマンド名と引数の1行の，領域の中の番地
+// b: 子の終了状態の格納先の，領域の中の番地(子が終了のシステムコールで終わった場合だけ書き込む)
+// 戻り値: 0(子が終了のシステムコールで終わった) / 子を終わらせた例外の原因の番号 / エラー
 static int syscall_spawn(int a, int b) {
     char *line = process_string(a);             // 1行
     int *status = (int *)process_buffer(b, 4);  // 終了状態の格納先(子を実行すると領域の設定が子のものへ変わるため，起動する前にメモリの番地へ変換しておく)
@@ -140,6 +141,7 @@ static int syscall_spawn(int a, int b) {
     int length = 0;                             // 1行の文字数
     int load;                                   // 起動の結果
 
+    // 引数を確かめる(子が動いた後に引数の誤りを返さないよう，起動する前にすべて確かめる)
     // 1行か格納先を受け取れなければ起動しない
     if (
         // 1行が領域の外にある
@@ -160,7 +162,7 @@ static int syscall_spawn(int a, int b) {
         length >= CONSOLE_LINE_SIZE
         // または，コマンド名が無い
         || !has_extra_args(line, 0)) {
-        return SYSCALL_ERR_INVALID;
+        return SYSCALL_ERR_BAD_COMMAND;
     }
 
     // 子を起動し，終わるまで待つ
@@ -171,9 +173,14 @@ static int syscall_spawn(int a, int b) {
         return SYSCALL_ERR_NOT_EXECUTABLE;
     }
 
-    // 領域を割り振れなければ，メモリが足りないことを返す
+    // 領域が空きに収まらなければ，メモリが足りないことを返す
     if (load == EXEC_NO_MEMORY) {
         return SYSCALL_ERR_NO_MEMORY;
+    }
+
+    // プロセステーブルに空いている要素が無ければ，プロセスが多すぎることを返す
+    if (load == EXEC_TOO_MANY) {
+        return SYSCALL_ERR_TOO_MANY;
     }
 
     // それ以外の失敗は，FAT32の各関数の失敗として変換して返す

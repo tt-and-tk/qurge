@@ -154,13 +154,13 @@ void exec_print_exception(struct ExecResult *result) {
     console_print(")\n");
 }
 
-// 表の位置processのプロセス(領域へ読み込み済みのもの)を実行し，終わり方をresultへ書き込む
-// 実行ファイルには，lineを半角空白で区切ったものをコマンド名と引数として渡す
-// 親が子を起動するシステムコールを処理している途中であれば，親を再開するための値を表へ控え，子が終わった後に戻す
+// 領域へ読み込んだプロセスを，終わるまで実行し，終わり方をresultへ書き込む
+// process: 実行するプロセスの要素の位置
+// line: 実行ファイルへ渡す1行(半角空白で区切ったコマンド名と引数)
 static void exec_run(int process, char *line, struct ExecResult *result) {
-    int parent = process_table[process].parent;  // 親の表の位置(シェルが起動したプロセスは，どのプロセスも指さない位置)
+    int parent = process_table[process].parent;  // 親の要素の位置(シェルが起動したプロセスは，どのプロセスも指さない位置)
 
-    // 親があれば，子の終了を待つ間の値を控える(子を実行すると，CPUのレジスタとグローバル変数が子の値に変わるため)
+    // 親があれば，親を再開するための値を控える(親は子を起動するシステムコールを処理している途中であり，子を実行するとCPUのレジスタとグローバル変数が子の値に変わるため)
     if (parent != PROCESS_NONE) {
         process_table[parent].sp = exec_user_sp;
         process_table[parent].pc = KRET;
@@ -195,12 +195,12 @@ static void exec_run(int process, char *line, struct ExecResult *result) {
     }
 }
 
-// 既定のディレクトリ/binから，lineの先頭のトークンを名前とする実行ファイルを起動し，終わるまで待って終わり方をresultへ書き込む(実行中のプロセスがあれば，その子として起動する)
-// lineは半角空白で区切ったコマンド名と引数とし，ヌル終端を含めてコンソールの1行の大きさ以内で，コマンド名を含むこと
+// /binの実行ファイルを起動し，終わるまで待って終わり方をresultへ書き込む(実行中のプロセスがあれば，その子として起動する)
+// line: 半角空白で区切ったコマンド名と引数の1行．ヌル終端を含めてコンソールの1行の大きさ以内で，コマンド名を含むこと
 // 戻り値: FAT_OK(起動して終わった) / 起動できなかった理由(実行ファイルを読み込む関数の戻り値)
 int exec_spawn(char *line, struct ExecResult *result) {
     char name[CONSOLE_LINE_SIZE];  // コマンド名
-    int process;                   // 起動するプロセスの表の位置
+    int process;                   // 起動するプロセスの要素の位置
     int status;                    // 読み込みの結果
 
     // 先頭のトークンをコマンド名として取り出し，その名前の実行ファイルを読み込む
@@ -214,7 +214,7 @@ int exec_spawn(char *line, struct ExecResult *result) {
     console_tcp_flush();
     // 実行ファイルへ入り，終わり方を受け取る
     exec_run(process, line, result);
-    // 終了のシステムコールと例外のどちらで終わってもここへ戻るため，ここでプロセスを表から外し，領域を空きへ戻す
+    // 終了のシステムコールと例外のどちらで終わってもここへ戻るため，ここでプロセスをプロセステーブルから外し，領域を空きへ戻す
     process_destroy(process);
     return FAT_OK;
 }

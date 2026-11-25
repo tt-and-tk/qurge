@@ -574,9 +574,15 @@ static int run_executable(void) {
         return EXIT_FAILURE;
     }
 
-    // 領域を割り振れなければ実行しない
+    // 領域が空きに収まらなければ実行しない
     if (status == EXEC_NO_MEMORY) {
         print_error("not enough memory\n");
+        return EXIT_FAILURE;
+    }
+
+    // プロセステーブルに空いている要素が無ければ実行しない
+    if (status == EXEC_TOO_MANY) {
+        print_error("too many processes\n");
         return EXIT_FAILURE;
     }
 
