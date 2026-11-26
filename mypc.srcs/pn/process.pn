@@ -169,7 +169,7 @@ char *process_buffer(unsigned int addr, int size) {
     return (char *)(UBASE + addr);
 }
 
-// 実行中のプロセスの領域の中の番地addrを，メモリの番地を指すポインタへ変換する．addrから始まるヌル終端の文字列が，ヌル終端まで領域に収まらなければnullptrを返す
+// 実行中のプロセスの領域の中の番地addrを，メモリの番地を指すポインタへ変換する．addrから始まる文字列が，ヌル終端まで領域に収まらなければnullptrを返す
 char *process_string(unsigned int addr) {
     char *text = process_buffer(addr, 1);  // 文字列の先頭
 
