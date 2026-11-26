@@ -26,7 +26,7 @@ int file_write(char *name, char *data, int length) {
     return syscall(SYS_FILE_WRITE, (int)name, (int)data, length, 0);
 }
 
-/// コンソールから改行までの1行を受け取り，sizeバイトの配列bufへヌル終端付きで格納し，格納した文字数を返す(改行は格納しない)
+// コンソールから改行までの1行を受け取り，sizeバイトの配列bufへヌル終端付きで格納し，格納した文字数を返す(改行は格納しない)
 // 1行がsize-1文字を超えれば，超えた分は捨てる
 // 打った文字の表示と1行の編集はQosmosが行う
 int console_read(char *buf, int size) {
@@ -51,4 +51,14 @@ int console_print(char *text) {
     }
     // 数えたバイト数を出力する
     return console_write(text, length);
+}
+
+// 実行ファイルを子として起動し，終わるまで待つ
+// line: 半角空白で区切ったコマンド名と引数の1行(63文字以内)．先頭のコマンド名と同じ名前の/binの実行ファイルを起動し，区切ったものをargc・argvとして渡す
+//       シェルの組み込みコマンドは起動できず，組み込みコマンドと同じ名前も/binの実行ファイルを指す
+// exit_status: 子の終了状態の格納先(子が終了のシステムコールで終わった場合だけ書き込む)
+// 戻り値: 0(子が終了のシステムコールで終わった) / 子を終わらせた例外の原因の番号(syscall_number.pnのEXCEPTION_*．1以上) / エラー(Qosmosはエラーメッセージを出力しない)
+int spawn(char *line, int *exit_status) {
+    // 番号SYS_SPAWNのシステムコールを呼び出す
+    return syscall(SYS_SPAWN, (int)line, (int)exit_status, 0, 0);
 }

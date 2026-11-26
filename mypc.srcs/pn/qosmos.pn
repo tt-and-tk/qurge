@@ -8,16 +8,9 @@
 #include "fat.pn"
 #include "exec.pn"
 
-static const int INPUT_SIZE = CONSOLE_LINE_SIZE;                // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
-static const int INSTRUCTION_SIZE = 8;                          // 1命令のバイト数(実行ファイルの命令列の大きさはこの倍数になる)
-static const int EXEC_HEADER_SIZE = 16;                         // 実行ファイルの先頭のヘッダのバイト数(4バイトのワードを4つ並べる)
-static const unsigned int EXEC_SIGNATURE = 0x0053517F;          // ヘッダのファイルシグネチャ(ファイル上で0x7F・'Q'・'S'・版数0の順に並ぶ4バイトを，ワードとして読んだ値)
-static const unsigned int EXEC_STACK_UNSPECIFIED = 0xFFFFFFFF;  // ヘッダのスタックの量のうち，量が未定であることを表す値
-static const unsigned int EXEC_DEFAULT_STACK_SIZE = 4096;       // スタックの量が未定の実行ファイルに割り振るスタックの量
-static const int EXEC_INVALID = -1;                             // 実行ファイルを読み込む関数が，ヘッダが条件に合わないことを表す戻り値(FAT32の各関数の結果と重ならない値)
-static const int EXEC_NO_MEMORY = -2;                           // 実行ファイルを読み込む関数が，領域を空きから割り振れないことを表す戻り値(FAT32の各関数の結果と重ならない値)
-static const int EXIT_SUCCESS = 0;                              // 組み込みコマンドが成功した場合の終了状態
-static const int EXIT_FAILURE = 1;                              // 組み込みコマンドがエラーになった場合と，実行ファイルを実行できなかった場合・例外で終わった場合の終了状態
+static const int INPUT_SIZE = CONSOLE_LINE_SIZE;  // 1行分の入力バッファの要素数(引数を取り出す配列も同じ幅で確保し，打ち切りを起こさない)
+static const int EXIT_SUCCESS = 0;                // 組み込みコマンドが成功した場合の終了状態
+static const int EXIT_FAILURE = 1;                // 組み込みコマンドがエラーになった場合と，実行ファイルを実行できなかった場合・例外で終わった場合の終了状態
 
 static char input[INPUT_SIZE];                     // 1行分の入力バッファ
 static char cmd[INPUT_SIZE];                       // 入力の先頭トークン(コマンド名)
@@ -557,185 +550,59 @@ static void handle_unknown(void) {
     print_error("unknown command\n");
 }
 
-// 実行ファイルのヘッダheaderが，実行ファイルの形式の条件をすべて満たすかを返す(file_sizeは実行ファイル全体のバイト数で，ヘッダと1命令の合計以上であること)
-// 条件は次のとおり(ファイルシグネチャは版数を含むため，形式の異なる版の実行ファイルも満たさない)
-//   - ファイルシグネチャが一致する
-//   - 命令列の大きさが，ファイルからヘッダを除いた大きさと一致し，命令のバイト数で割り切れる
-// 戻り値: 1(すべて満たす) / 0(満たさない条件がある)
-static int exec_header_valid(unsigned int *header, unsigned int file_size) {
-    unsigned int code_size = header[1];  // 命令列のバイト数
-
-    // 条件をすべて満たすかを返す(命令のバイト数は2のべき乗のため，除算を避けて下位ビットで判定する)
-    return (
-        // ファイルシグネチャが一致する
-        header[0] == EXEC_SIGNATURE
-        // かつ，命令列の大きさが，ファイルからヘッダを除いた大きさと一致する
-        && code_size == file_size - EXEC_HEADER_SIZE
-        // かつ，命令列の大きさが，命令のバイト数で割り切れる
-        && (code_size & (INSTRUCTION_SIZE - 1)) == 0);
-}
-
-// 実行ファイルentryのヘッダを確かめ，ヘッダに書かれた大きさの領域を空き(メモリの後半のうち，どの実行ファイルにも割り振っていない範囲)から割り振ってregionへ書き込み，
-// 命令列をその先頭から書き写す
-// (entryの大きさはヘッダと1命令の合計以上であること)
-// ヘッダは領域へ書き写さない．成功した場合だけ領域を割り振ったまま返し，実行を終えたら呼び出し元が空きへ戻す
-// 戻り値: FAT_OK / EXEC_INVALID(ヘッダが条件に合わない) / EXEC_NO_MEMORY(領域を割り振れない) / FAT32の各関数が返した失敗
-static int load_executable(struct FatEntry *entry, struct ExecRegion *region) {
-    struct FatFile file;      // 読み出し中の実行ファイルの位置
-    unsigned char *data;      // 読み込んだセクタの内容の先頭
-    int length;               // 読み込んだセクタのうち内容にあたるバイト数
-    int status;               // FAT32の各関数の結果
-    unsigned int *src;        // 読み込んだセクタを4バイト単位で読む位置
-    int start;                // 読み込んだセクタのうち，書き写し始める位置(4バイト単位)
-    int is_first = 1;         // 先頭のセクタを読み込む前か(先頭のセクタにヘッダがあり，領域はヘッダを確かめてから割り振るため)
-    unsigned int stack_size;  // 割り振るスタックの量
-    unsigned int *dst;        // 次に書き込む領域の位置
-
-    // 実行ファイルを先頭から読み出せるよう開く
-    status = fat_open(entry, &file);
-    if (status != FAT_OK) {
-        return status;
-    }
-
-    // 1セクタずつ読み込み，全て読み終えるまで書き写す
-    while (1) {
-        // 次の1セクタを読み込む．全て読み終えていれば書き写し終えている
-        status = fat_read(&file, &data, &length);
-        if (status == FAT_END) {
-            return FAT_OK;
-        }
-
-        // 読み込みに失敗すれば，割り振った後の領域を空きへ戻す(読み込んだ途中までの命令列は実行しない)
-        if (status != FAT_OK) {
-            if (!is_first) {
-                exec_region_free(region);
-            }
-
-            return status;
-        }
-
-        // 読み込んだセクタを4バイト単位で読む
-        src = (unsigned int *)data;
-        // 先頭のセクタでなければ，セクタの先頭から書き写す
-        start = 0;
-
-        // 先頭のセクタなら，ヘッダを確かめて領域を割り振り，ヘッダの後ろから領域の先頭へ書き写す
-        // (セクタはヘッダと1命令の合計より大きく，ファイルもその大きさ以上のため，先頭のセクタにヘッダ全体が入る)
-        if (is_first) {
-            if (!exec_header_valid(src, entry->size)) {
-                return EXEC_INVALID;
-            }
-
-            // スタックの量が未定なら，既定の量を割り振る
-            stack_size = src[3];
-            if (stack_size == EXEC_STACK_UNSPECIFIED) {
-                stack_size = EXEC_DEFAULT_STACK_SIZE;
-            }
-
-            // 命令列・命令列の直後に確保する範囲・スタックを収める領域を割り振る
-            if (!exec_region_alloc(src[1], src[2], stack_size, region)) {
-                return EXEC_NO_MEMORY;
-            }
-
-            dst = (unsigned int *)region->base;
-            start = EXEC_HEADER_SIZE >> 2;
-            is_first = 0;
-        }
-
-        // 内容を4バイト単位で書き写す(ヘッダと命令列の大きさが4の倍数のため，最後のセクタの内容も4バイト単位で割り切れる．1バイトずつ写すより命令数が少ない)
-        for (int i = start; i < (length >> 2); i++) {
-            *dst = src[i];
-            dst++;
-        }
-    }
-}
-
-// 既定のディレクトリ/binから，コマンド名と同じ名前の実行ファイルを探し，空きから割り振った領域へ読み込んでユーザーモードで実行する(コマンド名は空でないこと)
+// 既定のディレクトリ/binから，コマンド名と同じ名前の実行ファイルを探し，プロセスとして起動してユーザーモードで実行する(コマンド名は空でないこと)
 // 実行ファイルには，コマンド名とそれに続く引数を入力行から取り出し，argc・argvとして渡す
 // 実行ファイルが見つからなければ，組み込みコマンドとも一致しなかったコマンドとして未対応のエラーにする
 // 実行ファイルが例外で終われば，例外の原因をエラーとして出力し，statusコマンドで確かめられるよう原因の番号を残す
 // 戻り値: 実行ファイルが終了のシステムコールで伝えた終了状態 / EXIT_FAILURE(実行ファイルを実行できなかったか，例外で終わった)
 static int run_executable(void) {
-    struct FatEntry dir;       // 既定のディレクトリのエントリ
-    struct FatEntry entry;     // 見つかった実行ファイルのエントリ
-    struct ExecRegion region;  // 実行ファイルに割り振った領域
-    int status;                // FAT32の各関数の結果・実行ファイルの終了状態
+    struct ExecResult result;  // 実行ファイルの終わり方
+    int status;                // 起動の結果
 
-    // ドットを含む名前は探さない(実行ファイルは拡張子の無いファイルに限り，データファイルを打ち間違いで命令として実行しないため)
-    for (int i = 0; cmd[i] != '\0'; i++) {
-        if (cmd[i] == '.') {
-            handle_unknown();
-            return EXIT_FAILURE;
-        }
-    }
-    // 現在のディレクトリによらず，ルートディレクトリ直下の既定のディレクトリから探す
-    status = fat_find_in(fat_get_root_cluster(), "bin", &dir);
-    // 既定の名前がディレクトリでなければ，既定のディレクトリが無いものとして扱う
-    if (status == FAT_OK && (dir.attr & ATTR_DIRECTORY) == 0) {
-        status = FAT_ERR_NOT_FOUND;
-    }
-    if (status == FAT_OK) {
-        status = fat_find_in(dir.cluster, cmd, &entry);
-    }
-    // 既定のディレクトリか実行ファイルが無いか，名前がファイル名の規則に合わなければ，未対応のコマンドとして扱う
+    // 入力行を半角空白で区切ってコマンド名と引数を渡し，実行ファイルを起動して終わるまで待つ
+    status = exec_spawn(input, &result);
+
+    // 名前が'.'を含むか，既定のディレクトリか実行ファイルが無いか，名前がファイル名の規則に合わなければ，未対応のコマンドとして扱う
     if (status == FAT_ERR_NOT_FOUND || status == FAT_ERR_BAD_NAME) {
         handle_unknown();
         return EXIT_FAILURE;
     }
-    // それ以外の失敗(マウントしていない場合を含む)は，その理由を出力する
-    if (status != FAT_OK) {
-        print_fat_error(status);
-        return EXIT_FAILURE;
-    }
-    // ディレクトリは実行できない
-    if ((entry.attr & ATTR_DIRECTORY) != 0) {
-        print_fat_error(FAT_ERR_IS_DIR);
-        return EXIT_FAILURE;
-    }
-    // ヘッダと1命令を合わせた大きさに満たなければ実行しない
-    if (entry.size < EXEC_HEADER_SIZE + INSTRUCTION_SIZE) {
-        print_error("invalid executable\n");
-        return EXIT_FAILURE;
-    }
 
-    // ヘッダを確かめて，割り振った領域へ読み込む
-    status = load_executable(&entry, &region);
-
-    // ヘッダが条件に合わなければ実行しない
+    // 大きさかヘッダが条件に合わなければ実行しない
     if (status == EXEC_INVALID) {
         print_error("invalid executable\n");
         return EXIT_FAILURE;
     }
 
-    // 領域を割り振れなければ実行しない
+    // 領域が空きに収まらなければ実行しない
     if (status == EXEC_NO_MEMORY) {
         print_error("not enough memory\n");
         return EXIT_FAILURE;
     }
 
-    // 読み込みに失敗すれば，その理由を出力する
+    // プロセステーブルに空いている要素が無ければ実行しない
+    if (status == EXEC_TOO_MANY_PROCESSES) {
+        print_error("too many processes\n");
+        return EXIT_FAILURE;
+    }
+
+    // それ以外の失敗(マウントしていない場合と，名前がディレクトリを指す場合を含む)は，その理由を出力する
     if (status != FAT_OK) {
         print_fat_error(status);
         return EXIT_FAILURE;
     }
 
-    // TCPの出力バッファの中身は実行ファイルが終わるまで送られずに残るため，実行する前に送る
-    console_tcp_flush();
-    // 入力行を半角空白で区切ってコマンド名と引数を渡し，ユーザーモードで実行する
-    status = exec_run(&region, input);
-    // 終了のシステムコールと例外のどちらで終わってもここへ戻るため，ここで領域を空きへ戻す
-    exec_region_free(&region);
     // statusコマンドで確かめられるよう，例外の原因の番号を残す(終了のシステムコールで終わった場合は，例外なしを表す番号が残る)
-    exit_exception_cause = exec_get_exception_cause();
-    // 例外で終わっていれば，原因を出力する(戻り値は不定のため使わない)
+    exit_exception_cause = result.exception_cause;
+    // 例外で終わっていれば，原因を出力する(終了状態は不定のため使わない)
     if (exit_exception_cause != EXCEPTION_NONE) {
         // 前置きに続けて，例外の原因とPCを出力する
         print_error_head();
-        exec_print_exception();
+        exec_print_exception(&result);
         return EXIT_FAILURE;
     }
     // 終了のシステムコールで伝えられた終了状態を返す
-    return status;
+    return result.exit_status;
 }
 
 // グローバル配列cmdの内容に応じた処理を呼び出し，その終了状態を返す(streqは配列変数のみ受け付けるため，パラメータではなくグローバル配列を直接比較する)

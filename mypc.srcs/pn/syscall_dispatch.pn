@@ -1,10 +1,14 @@
 // システムコールの処理．実行ファイルから番号と引数を受け取り，番号に対応するOSの機能(各システムコールの処理)へ振り分ける
 // 実行ファイルが渡す番地は領域の中の番地であるため，領域に収まるかを確かめてからメモリの番地へ変換して使う
+// 子を起動する機能は，exec.pnの関数で子を実行する．exec.pnもこのファイルを取り込むが，#pragma onceにより一方の取り込みは読み飛ばされる(Pynesisは宣言の順序によらず参照できるため，どちらが先でもよい)
 #pragma once
+#include "args.pn"
 #include "console.pn"
-#include "exec_region.pn"
+#include "exec.pn"
+#include "exec_load.pn"
 #include "fat.pn"
 #include "lib/syscall_number.pn"
+#include "process.pn"
 
 // FAT32の各関数が返した失敗を，実行ファイルへ返すエラーの値に変換する
 // 実行ファイルへはFAT32の内部の区別を見せず，実行ファイルが対処を変えうる種類だけに分けて返す
@@ -28,9 +32,9 @@ static int syscall_fat_error(int status) {
 
 // 領域の中の番地aにある名前のファイルの大きさ(バイト数)を返す
 static int syscall_file_size(int a) {
-    char *name = exec_region_string(a);  // ファイル名
-    struct FatEntry entry;               // 見つかったファイルのエントリ
-    int status;                          // 検索の結果
+    char *name = process_string(a);  // ファイル名
+    struct FatEntry entry;           // 見つかったファイルのエントリ
+    int status;                      // 検索の結果
 
     // 名前が領域の外にあれば探せない
     if (name == nullptr) {
@@ -50,10 +54,10 @@ static int syscall_file_size(int a) {
 
 // 領域の中の番地aにある名前のファイルの内容を，領域の中の番地bからcバイトの読み込み先へ丸ごと読み込み，そのバイト数を返す
 static int syscall_file_read(int a, int b, int c) {
-    char *name = exec_region_string(a);    // ファイル名
-    char *buf = exec_region_buffer(b, c);  // 読み込み先
-    int length;                            // 読み込んだバイト数
-    int status;                            // 読み込みの結果
+    char *name = process_string(a);    // ファイル名
+    char *buf = process_buffer(b, c);  // 読み込み先
+    int length;                        // 読み込んだバイト数
+    int status;                        // 読み込みの結果
 
     // 名前・読み込み先が領域の外にあれば(読み込み先の大きさが負の場合を含む)読み込めない
     if (name == nullptr || buf == nullptr) {
@@ -69,9 +73,9 @@ static int syscall_file_read(int a, int b, int c) {
 
 // 領域の中の番地aにある名前のファイルの内容を，領域の中の番地bからのcバイトで丸ごと置き換え(無ければ作成し)，0を返す
 static int syscall_file_write(int a, int b, int c) {
-    char *name = exec_region_string(a);     // ファイル名
-    char *data = exec_region_buffer(b, c);  // 書き込む内容
-    int status;                             // 書き込みの結果
+    char *name = process_string(a);     // ファイル名
+    char *data = process_buffer(b, c);  // 書き込む内容
+    int status;                         // 書き込みの結果
 
     // 名前・内容が領域の外にあれば(内容のバイト数が負の場合を含む)書き込めない
     if (name == nullptr || data == nullptr) {
@@ -87,8 +91,8 @@ static int syscall_file_write(int a, int b, int c) {
 
 // コンソールから1行を受け取り，領域の中の番地aからのbバイトの格納先へヌル終端付きで格納し，格納した文字数を返す
 static int syscall_console_read(int a, int b) {
-    char *buf = exec_region_buffer(a, b);  // 格納先
-    int length = 0;                        // 格納した文字数
+    char *buf = process_buffer(a, b);  // 格納先
+    int length = 0;                    // 格納した文字数
 
     // 格納先が領域の外にあるか，ヌル終端の1バイトも格納できなければ受け取れない
     if (buf == nullptr || b < 1) {
@@ -111,7 +115,7 @@ static int syscall_console_read(int a, int b) {
 
 // 領域の中の番地aからのbバイトをコンソールへ出力し，0を返す
 static int syscall_console_write(int a, int b) {
-    char *data = exec_region_buffer(a, b);  // 出力するバイト列
+    char *data = process_buffer(a, b);  // 出力するバイト列
 
     // バイト列が領域の外にあるか，出力するバイトが1つも無ければ出力できない
     if (data == nullptr || b < 1) {
@@ -123,6 +127,78 @@ static int syscall_console_write(int a, int b) {
     // TCPの出力バッファの中身をtelnetで接続した端末へ送る(送れなければ，この中で接続が閉じる)
     // TCPの出力バッファの中身はシェルが次に入力を待つまで送られないため，実行ファイルが出力の後に長く計算すると表示が遅れる
     console_tcp_flush();
+    return 0;
+}
+
+// /binの実行ファイルを子として起動し，終わるまで待つ
+// a: 半角空白で区切ったコマンド名と引数の1行の，領域の中の番地
+// b: 子の終了状態の格納先の，領域の中の番地(子が終了のシステムコールで終わった場合だけ書き込む)
+// 戻り値: 0(子が終了のシステムコールで終わった) / 子を終わらせた例外の原因の番号 / エラー
+static int syscall_spawn(int a, int b) {
+    char *line = process_string(a);                  // 1行
+    int *exit_status = (int *)process_buffer(b, 4);  // 終了状態の格納先(子を実行すると領域の設定が子のものへ変わるため，起動する前にメモリの番地へ変換しておく)
+    struct ExecResult result;                        // 子の終わり方
+    int length = 0;                                  // 1行の文字数
+    int load;                                        // 起動の結果
+
+    // 起動する前に，引数をすべて確かめる
+    // 子が動いた後に引数の誤りを返すと，子の処理だけが残るため
+
+    // 1行か格納先を受け取れなければ起動しない
+    if (
+        // 1行が領域の外にある
+        line == nullptr
+        // または，格納先が領域の外にある
+        || exit_status == nullptr
+        // または，格納先が4の倍数でない(4バイトの値がワードをまたぎ，正しく書き込めないため)
+        || (b & 3) != 0) {
+        return SYSCALL_ERR_INVALID;
+    }
+
+    // ヌル終端までの文字数を数える
+    while (line[length] != '\0') {
+        length++;
+    }
+
+    // 1行の内容が起動に使えなければ起動しない
+    if (
+        // 1行がコンソールの1行に収まらない(子の領域の末尾に取る引数の置き場に収まらないため)
+        length >= CONSOLE_LINE_SIZE
+        // または，コマンド名が無い
+        || !has_extra_args(line, 0)) {
+        return SYSCALL_ERR_BAD_COMMAND;
+    }
+
+    // 子を起動し，終わるまで待つ
+    load = exec_spawn(line, &result);
+
+    // 大きさかヘッダが条件に合わなければ，実行ファイルではないことを返す
+    if (load == EXEC_INVALID) {
+        return SYSCALL_ERR_NOT_EXECUTABLE;
+    }
+
+    // 領域が空きに収まらなければ，メモリが足りないことを返す
+    if (load == EXEC_NO_MEMORY) {
+        return SYSCALL_ERR_NO_MEMORY;
+    }
+
+    // プロセステーブルに空いている要素が無ければ，プロセスが多すぎることを返す
+    if (load == EXEC_TOO_MANY_PROCESSES) {
+        return SYSCALL_ERR_TOO_MANY_PROCESSES;
+    }
+
+    // それ以外の失敗は，FAT32の各関数の失敗として変換して返す
+    if (load != FAT_OK) {
+        return syscall_fat_error(load);
+    }
+
+    // 例外で終わっていれば，例外の原因の番号を返す
+    if (result.exception_cause != EXCEPTION_NONE) {
+        return result.exception_cause;
+    }
+
+    // 終了のシステムコールで終わっていれば，終了状態を格納先へ書き込む
+    *exit_status = result.exit_status;
     return 0;
 }
 
@@ -146,6 +222,9 @@ static int syscall_dispatch(int number, int a, int b, int c, int d) {
         // コンソールへ出力する
         case SYS_CONSOLE_WRITE:
             return syscall_console_write(a, b);
+        // 実行ファイルを子として起動し，終わるまで待つ
+        case SYS_SPAWN:
+            return syscall_spawn(a, b);
     }
     // どの番号とも一致しなければ，未定義の番号としてエラーを返す
     return SYSCALL_ERR_UNKNOWN;
@@ -157,7 +236,7 @@ static int syscall_dispatch(int number, int a, int b, int c, int d) {
 // - 実行ファイルを終える機能: 終了状態をexit_statusの指す先へ書き込み，1を返す
 // - それ以外の機能: その機能を実行して戻り値を置き場へ書き込み，0を返す
 int syscall_handle(unsigned int user_sp, int *exit_status) {
-    int *args = (int *)exec_region_buffer(user_sp, SYSCALL_ARGS_SIZE);  // SPから並べた値
+    int *args = (int *)process_buffer(user_sp, SYSCALL_ARGS_SIZE);  // SPから並べた値
 
     // 並べた値を読めなければ，何もしない
     if (

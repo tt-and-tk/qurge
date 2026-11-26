@@ -1,37 +1,39 @@
-// 実行ファイルを，領域の中でユーザーモードとして動かす処理．
-// 実行ファイルへ入る処理と，実行ファイルを終わらせた例外の原因を出力する処理を置く．
-// あわせて，次の2つの場合にCPUがカーネルモードへ移って飛ぶ先の関数を置く
-// - 実行ファイルがシステムコールの命令を実行した場合: システムコールハンドラ
-// - 実行ファイルが例外を起こした場合: 例外ハンドラ
+// プロセス(メモリに置いた実行ファイル)を，領域の中でユーザーモードとして動かす処理．次のものを置く
+// - 実行ファイルを起動し，終わるまで待つ処理(実行中のプロセスがあれば，その子として起動する)
+// - 実行ファイルがシステムコールの命令を実行した場合に，CPUがカーネルモードへ移って飛ぶ先の関数(システムコールハンドラ)
+// - 実行ファイルが例外を起こした場合に，CPUがカーネルモードへ移って飛ぶ先の関数(例外ハンドラ)
+// - プロセスを終わらせた例外の原因を出力する処理
 // 実行ファイルへ入る前と，システムコールハンドラ・例外ハンドラでカーネルモードへ移った後は，SPをカーネルモードのスタック(メモリの前半)に置く．
+// 子を起動するシステムコールでは，親のシステムコールを処理している途中のカーネルモードのスタックの上に，子を実行する関数のフレームを積む．子が終わるとそこへ戻り，親のシステムコールの処理を続ける
 // SPを書き換える関数は，フレームの大きさが0になるよう，引数・ローカル変数を持たず，値はグローバル変数に置く
 // (フレームを持つ関数は，書き換えた後のSPを基準にフレームを読み書きしてしまうため，コンパイラがSPの書き換えを禁止している)
 #pragma once
 #include "args.pn"
 #include "console.pn"
-#include "exec_region.pn"
+#include "exec_load.pn"
 #include "hex.pn"
+#include "lib/syscall_number.pn"
+#include "process.pn"
 #include "syscall_dispatch.pn"
 
 // argvの配列に取る要素数．1行から取り出せる文字列の数が最も多い場合(1文字と空白が交互に並ぶ場合)の数に，末尾のnullptrの1つを足す
 static const int EXEC_ARGV_SIZE = CONSOLE_LINE_SIZE / 2 + 1;
 
-// 例外の原因の番号(1以上は，CPUが例外ハンドラへ飛ぶときにECAUSEへ書き込む値)
-const int EXCEPTION_NONE = 0;         // 例外で終わっていないことを表す
-const int EXCEPTION_FETCH = 1;        // 命令を取り出す番地が範囲外である
-const int EXCEPTION_ILLEGAL = 2;      // 不正な命令である
-const int EXCEPTION_PRIVILEGED = 3;   // カーネルモードでだけ許される操作を，ユーザーモードで行おうとした
-const int EXCEPTION_DIVIDE_ZERO = 4;  // 割り算の除数が0である
-const int EXCEPTION_MEMORY = 5;       // メモリを読み書きする番地が範囲外である
+// プロセスの終わり方
+struct ExecResult {
+    int exit_status;            // 終了のシステムコールで伝えた終了状態(例外で終わった場合は不定)
+    int exception_cause;        // 終わらせた例外の原因の番号(例外で終わっていなければ，例外なしを表す番号)
+    unsigned int exception_pc;  // 例外を起こした命令のPC(例外で終わった場合だけ意味を持つ)
+};
 
-static unsigned int exec_start_sp;      // 実行ファイルへ入るときのSP(領域の中の番地)
-static unsigned int exec_kernel_sp;     // 実行ファイルを起動するときに控えておく，カーネルモードのSP．実行ファイルへ入る関数の戻り先を指す
-static unsigned int exec_user_sp;       // システムコールの命令でカーネルモードへ移った時点のSP(領域の中の番地)
-static int exec_exit_status;            // 実行ファイルが終了のシステムコールで伝えた終了状態
-static int exec_exception_cause;        // 実行ファイルを終わらせた例外の原因の番号(実行ファイルを起動するたびに0にするため，例外で終わっていなければ0)
-static unsigned int exec_exception_pc;  // 実行ファイルを終わらせた例外を起こした命令のPC(例外で終わった場合だけ意味を持つ)
+static unsigned int exec_start_sp;                 // 実行ファイルへ入るときのSP(領域の中の番地)
+static unsigned int exec_kernel_sp;                // 実行中のプロセスへ入るときに控えておく，カーネルモードのSP．実行ファイルへ入る関数の戻り先を指す
+static unsigned int exec_user_sp;                  // 実行中のプロセスがシステムコールの命令でカーネルモードへ移った時点のSP(領域の中の番地)
+static int exec_exit_status;                       // プロセスが終了のシステムコールで伝えた終了状態
+static int exec_exception_cause = EXCEPTION_NONE;  // プロセスを終わらせた例外の原因の番号(例外で終わったプロセスの終わり方を，子を実行する関数が受け取るまでの間だけ0以外)
+static unsigned int exec_exception_pc;             // プロセスを終わらせた例外を起こした命令のPC(例外で終わった場合だけ意味を持つ)
 
-// 実行ファイルへ渡すコマンド名と引数(lineを半角空白で区切ったもの)を今の領域(UBASE・USIZEへ設定した領域)の末尾に置き，実行ファイルへ入るときのSP(領域の中の番地)を返す
+// 実行ファイルへ渡すコマンド名と引数(lineを半角空白で区切ったもの)を実行中のプロセスの領域の末尾に置き，実行ファイルへ入るときのSP(領域の中の番地)を返す
 // 渡す1行は，ヌル終端を含めてコンソールの1行の大きさ(64バイト)以内であること(置く大きさが，領域の末尾に取った引数の置き場に収まる前提のため)
 // 置く内容と，返すSPから見た位置は次のとおり．argc・argvは，CALLで呼んだ直後と同じ位置(引数の並びの先頭がSP-8)になる
 // - 領域の末尾: コマンド名と各引数の文字列(区切りの空白をヌル終端に置き換えたもの)
@@ -96,13 +98,13 @@ static int exec_enter(void) {
 }
 
 // システムコールハンドラ．実行ファイルがシステムコールの命令を実行すると，カーネルモードへ移ってここへ飛ぶ(フレームの大きさは0)
-// 終了を求められれば，終了状態を返してシェルへ戻る．それ以外は機能を実行して実行ファイルへ戻る
+// 終了を求められれば，終了状態を返して実行ファイルへ入る関数の呼び出し元へ戻る．それ以外は機能を実行して実行ファイルへ戻る
 static int exec_syscall_entry(void) {
     // 実行ファイルのSPを控え，カーネルモードのスタックへ切り替える
     // (切り替えるまでは，SPが領域の中の番地のままで，カーネルモードではそのまま使えないため，関数を呼ばない)
     exec_user_sp = SP;
     SP = exec_kernel_sp;
-    // 機能を実行し，終了を求められていれば，SPを実行ファイルの起動時に控えた値へ戻した状態のまま，シェルへ戻る
+    // 機能を実行し，終了を求められていれば，SPを実行ファイルへ入るときに控えた値へ戻した状態のまま，実行ファイルへ入る関数の呼び出し元へ戻る
     if (syscall_handle(exec_user_sp, &exec_exit_status)) {
         return exec_exit_status;
     }
@@ -112,9 +114,9 @@ static int exec_syscall_entry(void) {
 }
 
 // 例外ハンドラ．実行ファイルが例外を起こすと，カーネルモードへ移ってここへ飛ぶ(フレームの大きさは0)
-// 例外の原因と例外を起こした命令のPCを控え，シェルへ戻る．例外を起こした命令から先は実行しない
+// 例外の原因と例外を起こした命令のPCを控え，実行ファイルへ入る関数の呼び出し元へ戻る．例外を起こした命令から先は実行しない
 static void exec_exception_entry(void) {
-    // SPを実行ファイルの起動時に控えた値へ戻し，カーネルモードのスタックへ切り替える
+    // SPを実行ファイルへ入るときに控えた値へ戻し，カーネルモードのスタックへ切り替える
     // (切り替えるまでは，SPが領域の中の番地のままで，カーネルモードではそのまま使えないため，関数を呼ばない)
     SP = exec_kernel_sp;
     // 例外の原因と，例外を起こした命令のPCを控える
@@ -123,10 +125,10 @@ static void exec_exception_entry(void) {
     return;
 }
 
-// 実行ファイルを終わらせた例外の原因と，例外を起こした命令のPCを，"<原因のメッセージ> (pc 0x????????)"の形式で改行を付けて出力する
-void exec_print_exception(void) {
+// プロセスを終わらせた例外の原因と，例外を起こした命令のPCを，resultから"<原因のメッセージ> (pc 0x????????)"の形式で改行を付けて出力する
+void exec_print_exception(struct ExecResult *result) {
     // 原因ごとに決めたメッセージを出力する(想定外の番号もメッセージ無しにはしない)
-    switch (exec_exception_cause) {
+    switch (result->exception_cause) {
     case EXCEPTION_FETCH:
         console_print("instruction fetch out of range");
         break;
@@ -148,32 +150,71 @@ void exec_print_exception(void) {
     }
     // 例外を起こした命令のPCを添えて，行を終える
     console_print(" (pc ");
-    print_hex_word(exec_exception_pc);
+    print_hex_word(result->exception_pc);
     console_print(")\n");
 }
 
-// 領域regionに読み込んだ実行ファイルを起動する
-// 実行ファイルには，lineを半角空白で区切ったものをコマンド名と引数として渡す
-// 実行ファイルが終了のシステムコールで終われば，その終了状態を返す
-// 実行ファイルが例外で終われば，例外の原因の番号(1以上)とPCを控え，不定の値を返す
-int exec_run(struct ExecRegion *region, char *line) {
-    // 例外で終わったかどうかを見分けられるよう，例外の原因を，例外で終わっていないことを表す番号にする
-    exec_exception_cause = EXCEPTION_NONE;
-    // 領域と，システムコールの命令・例外でCPUが飛ぶ先を設定する
-    UBASE = region->base;
-    USIZE = region->size;
+// 領域へ読み込んだプロセスを，終わるまで実行し，終わり方をresultへ書き込む
+// process: 実行するプロセスのプロセステーブルでの位置
+// line: 実行ファイルへ渡す1行(半角空白で区切ったコマンド名と引数)
+static void exec_run(int process, char *line, struct ExecResult *result) {
+    int parent = process_table[process].parent;  // 親のプロセステーブルでの位置(シェルが起動したプロセスは，どのプロセスも指さない位置)
+
+    // 親があれば，親を再開するための値を控える(親は子を起動するシステムコールを処理している途中であり，子を実行するとCPUのレジスタとグローバル変数が子の値に変わるため)
+    if (parent != PROCESS_NONE) {
+        process_table[parent].sp = exec_user_sp;
+        process_table[parent].pc = KRET;
+        process_table[parent].kernel_sp = exec_kernel_sp;
+    }
+
+    // 子を実行中のプロセスにし，領域と，システムコールの命令・例外でCPUが飛ぶ先を設定する
+    process_current = process;
+    UBASE = process_table[process].base;
+    USIZE = process_table[process].size;
     KENTRY = (unsigned int)exec_syscall_entry;
     EENTRY = (unsigned int)exec_exception_entry;
     // 実行ファイルへ入る先を，領域の先頭の命令(領域の中のPC 0)にする
     KRET = 0;
     // コマンド名と引数を領域の末尾に置き，実行ファイルへ入るときのSPを決める
     exec_start_sp = exec_place_args(line);
-    // 実行ファイルへ入り，システムコールハンドラか例外ハンドラから戻ってきた値を返す
-    return exec_enter();
+    // 実行ファイルへ入り，システムコールハンドラか例外ハンドラから戻ってきた値を終了状態とする
+    result->exit_status = exec_enter();
+    // 例外の原因とPCを写し，次に終わるプロセスの終わり方を見分けられるよう，例外の原因を例外で終わっていないことを表す番号へ戻す
+    result->exception_cause = exec_exception_cause;
+    result->exception_pc = exec_exception_pc;
+    exec_exception_cause = EXCEPTION_NONE;
+
+    // 親を実行中のプロセスへ戻し，親があれば，控えた値を戻して親のシステムコールの処理を続けられるようにする
+    process_current = parent;
+    if (parent != PROCESS_NONE) {
+        UBASE = process_table[parent].base;
+        USIZE = process_table[parent].size;
+        KRET = process_table[parent].pc;
+        exec_user_sp = process_table[parent].sp;
+        exec_kernel_sp = process_table[parent].kernel_sp;
+    }
 }
 
-// 直前に実行した実行ファイルを終わらせた例外の原因の番号を返す(実行ファイルを一度も実行していなければ，値は保証されない)
-// 実行した実行ファイルが例外で終わっていなければ，EXCEPTION_NONEを返す
-int exec_get_exception_cause(void) {
-    return exec_exception_cause;
+// /binの実行ファイルを起動し，終わるまで待って終わり方をresultへ書き込む(実行中のプロセスがあれば，その子として起動する)
+// line: 半角空白で区切ったコマンド名と引数の1行．ヌル終端を含めてコンソールの1行の大きさ以内で，コマンド名を含むこと
+// 戻り値: FAT_OK(起動して終わった) / 起動できなかった理由(実行ファイルを読み込む関数の戻り値)
+int exec_spawn(char *line, struct ExecResult *result) {
+    char name[CONSOLE_LINE_SIZE];  // コマンド名
+    int process;                   // 起動するプロセスのプロセステーブルでの位置
+    int status;                    // 読み込みの結果
+
+    // 先頭のトークンをコマンド名として取り出し，その名前の実行ファイルを読み込む
+    extract_arg(line, 0, name, CONSOLE_LINE_SIZE);
+    status = exec_load(name, &process);
+    if (status != FAT_OK) {
+        return status;
+    }
+
+    // TCPの出力バッファの中身は実行ファイルが終わるまで送られずに残るため，実行する前に送る
+    console_tcp_flush();
+    // 実行ファイルへ入り，終わり方を受け取る
+    exec_run(process, line, result);
+    // 終了のシステムコールと例外のどちらで終わってもここへ戻るため，ここでプロセスをプロセステーブルから外し，領域を空きへ戻す
+    process_destroy(process);
+    return FAT_OK;
 }
