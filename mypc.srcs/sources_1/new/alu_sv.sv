@@ -182,9 +182,9 @@ module alu_sv (
     // レジスタの初期値．FPGAのコンフィグ直後の値とリセット時の値を兼ねており，
     // どちらの経路で初期化されても同じ状態から始まる
     localparam register_t REGISTER_INIT[REGISTER_MAX_ADDR:0] = '{
-        // スタックはメモリの前半に置き，前半の末尾から番地の小さい方へ伸ばす．スタックポインタは最後に積んだ値の番地を指すため，
-        // 何も積んでいない初期状態では，前半の末尾のすぐ上の番地にしておく
-        SP_ADDR:  register_t'(KERNEL_STACK_END),
+        // スタックはカーネル用の範囲に置き，範囲の末尾から番地の小さい方へ伸ばす．スタックポインタは最後に積んだ値の番地を指すため，
+        // 何も積んでいない初期状態では，範囲の末尾のすぐ上の番地にしておく
+        SP_ADDR:  register_t'(KERNEL_MEMORY_SIZE),
         // Arduino SPIのSSはアクティブLowのため，非選択を表すHighにする
         SPI_ADDR: 32'h1,
         // EthernetモジュールのRSTn・CSnはアクティブLowのため，非リセット・非選択を表すHighにする
@@ -1000,10 +1000,10 @@ module alu_sv (
                        : rs1_val;                                                                                   // rs1で指定された番地
 
     // mem_addressが読み書きしてよい範囲に収まっているか．動作状態と命令の種類に応じて，次の範囲とする
-    // - カーネルモードのJ系(CALL・RET): メモリの前半．
-    //   CALL・RETが読み書きするのは戻り先を積み下ろしするスタックで，スタックはメモリの前半に置く．
-    //   空のスタックでのRETを停止させ，CALLがメモリの後半を書き換えないようにするため，前半に限る．
-    //   前半の大きさは2のべき乗のため，前半に収まるかはビット幅で判定できる
+    // - カーネルモードのJ系(CALL・RET): カーネル用の範囲．
+    //   CALL・RETが読み書きするのは戻り先を積み下ろしするスタックで，スタックはカーネル用の範囲に置く．
+    //   空のスタックでのRETを停止させ，CALLがカーネル用の範囲の外を書き換えないようにするため，カーネル用の範囲に限る．
+    //   カーネル用の範囲の大きさは2のべき乗のため，範囲に収まるかはビット幅で判定できる
     // - カーネルモードのM系: メモリ全体
     // - ユーザーモード: 命令の種類によらず，領域(スタックも領域の中に置く)．
     //   前のサイクルにmem_addressから判定して控えた結果を使う(控える処理は，ユーザーモードで変換結果を控えるタスクを参照)
@@ -1011,8 +1011,8 @@ module alu_sv (
     assign mem_address_in_range =
         // カーネルモードなら，命令の種類に応じた範囲に収まるか
         kernel_mode ? (
-            // J系なら，メモリの前半に収まるか
-            (command.m_type == J_TYPE) ? util_p::is_within_bit_width(mem_address, $clog2(KERNEL_STACK_END))
+            // J系なら，カーネル用の範囲に収まるか
+            (command.m_type == J_TYPE) ? util_p::is_within_bit_width(mem_address, $clog2(KERNEL_MEMORY_SIZE))
             // M系なら，メモリ全体に収まるか
             : util_p::is_within_bit_width(mem_address, $bits(ram_p::address_bus_t)))
         // ユーザーモードなら，控えた判定の結果
