@@ -1087,6 +1087,23 @@ module cpu_tb;
         expect_mem32(32'h100, 32'h1234_5678);
         expect_reg(3, 32'h1234_5678);
 
+        // 0x10000番地へWMで書き込み，RMで読み戻す(番地の範囲判定や切り詰めが16ビット幅のままだと誤る番地を使う)
+        `BEGIN_TEST("16ビットで表せない番地をWM/RMで読み書きできる");
+        run('{movi(1, 32'h55aa_1234), wm(4'hf, 6'h00, 1, im(32'h1_0000)), rm(4'hf, 6'h00, 2, im(32'h1_0000))});
+        // 正常終了して書いた値が読め，番地を下位16ビットへ切り詰めた場合に当たる0番地は書き換わらない
+        expect_end();
+        expect_mem32(32'h1_0000, 32'h55aa_1234);
+        expect_reg(2, 32'h55aa_1234);
+        expect_mem32(32'h0, 32'h0);
+
+        // メモリの末尾の4バイトをRMR/WMRで読み書きする
+        `BEGIN_TEST("メモリの末尾の4バイトをRMR/WMRで読み書きできる");
+        run('{movi(1, ram_p::RAM_SIZE - 4), movi(2, 32'h0bad_f00d), wmr(4'hf, 1, 2, im(32'd0)), rmr(4'hf, 1, 3, im(32'd0))});
+        // 正常終了して書いた値が読める
+        expect_end();
+        expect_mem32(ram_p::RAM_SIZE - 4, 32'h0bad_f00d);
+        expect_reg(3, 32'h0bad_f00d);
+
         // メモリから21を読み出した直後に，その値を2倍する
         `BEGIN_TEST("RMの直後の命令は読んだ値を使える(フォワーディング)");
         run('{movi(1, 32'd21), wm(4'hf, 6'h00, 1, im(32'h100)), rm(4'hf, 6'h00, 2, im(32'h100)), add(2, 2, 3)});
@@ -1100,23 +1117,6 @@ module cpu_tb;
         // 直後の命令がレジスタの値21を読める
         expect_end();
         expect_reg(3, 32'd42);
-
-        // 16ビットで表せない0x10000番地へWMで書き込み，RMで読み戻す
-        `BEGIN_TEST("16ビットで表せない番地をWM/RMで読み書きできる");
-        run('{movi(1, 32'h55aa_1234), wm(4'hf, 6'h00, 1, im(32'h1_0000)), rm(4'hf, 6'h00, 2, im(32'h1_0000))});
-        // 正常終了して書いた値が読め，上位のビットを捨てた先の0番地は書き換わらない
-        expect_end();
-        expect_mem32(32'h1_0000, 32'h55aa_1234);
-        expect_reg(2, 32'h55aa_1234);
-        expect_mem32(32'h0, 32'h0);
-
-        // メモリの末尾の4バイトをWMR/RMRで読み書きする
-        `BEGIN_TEST("メモリの末尾の4バイトをWMR/RMRで読み書きできる");
-        run('{movi(1, ram_p::RAM_SIZE - 4), movi(2, 32'h0bad_f00d), wmr(4'hf, 1, 2, im(32'd0)), rmr(4'hf, 1, 3, im(32'd0))});
-        // 正常終了して書いた値が読める
-        expect_end();
-        expect_mem32(ram_p::RAM_SIZE - 4, 32'h0bad_f00d);
-        expect_reg(3, 32'h0bad_f00d);
 
         // メモリの範囲外の，容量と同じ番地へ書き込む
         `BEGIN_TEST("メモリの範囲外へのWMは書き込まずに停止する");
