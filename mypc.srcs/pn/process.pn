@@ -11,21 +11,29 @@ static const unsigned int PROCESS_ARGS_AREA_SIZE = 256;  // 領域の末尾の�
 static const int PROCESS_MAX = 16;                       // プロセステーブルの要素数(同時にメモリに置けるプロセスの数．子を起動するたびにカーネルモードのスタックを約180バイト積むため，16段でもカーネル用の範囲に収まる数とした)
 const int PROCESS_NONE = -1;                             // どのプロセスも指さないことを表す，プロセステーブルでの位置
 
+// プロセスがカーネルへ入った時点のレジスタのうち，SPとPC以外に控えるレジスタの並び
+// r0〜r15はレジスタ番地と同じ位置に，その後ろにRSI・RAXを置く(FLGはどの命令も書き換えず，UBASE・USIZEは領域から戻せるため控えない)
+const int PROCESS_REGISTER_COUNT = 18;  // 控えるレジスタの数
+const int PROCESS_REGISTER_RSI = 16;    // RSIの位置
+const int PROCESS_REGISTER_RAX = 17;    // RAXの位置
+
 // プロセスを加える関数の結果
 const int PROCESS_CREATED = 0;     // 加えた
 const int PROCESS_TABLE_FULL = 1;  // プロセステーブルに空いている要素が無い
 const int PROCESS_NO_MEMORY = 2;   // 必要な大きさの領域が空きに収まらない
 
 // プロセステーブルの要素．1つのプロセスを表す
-// 子の終了を待つ間の値は，プロセスが子を起動してから子が終わるまでの間だけ意味を持つ
+// 再開するための値は，プロセスがシステムコールの命令かタイマー割り込みでカーネルへ入るたびに控え，プロセスへ戻るときに戻す
+// (子の終了を待つ親や，割り込みで止めたプロセスを，CPUのレジスタとグローバル変数が別のプロセスの値に変わった後も再開できるようにするため)
 struct Process {
-    int used;                // 要素を使っているか(1: 使っている / 0: 空いている)
-    int parent;              // 親(このプロセスを起動し，終了を待つプロセス)のプロセステーブルでの位置．シェルが起動したプロセスは，どのプロセスも指さない位置
-    unsigned int base;       // 領域の先頭のメモリの番地
-    unsigned int size;       // 領域の大きさ(8の倍数)
-    unsigned int sp;         // 子の終了を待つ間のSP(領域の中の番地)
-    unsigned int pc;         // 子の終了を待つ間の，再開する命令のPC
-    unsigned int kernel_sp;  // 子の終了を待つ間の，このプロセスが終わったときに戻るカーネルモードのSP
+    int used;                                        // 要素を使っているか(1: 使っている / 0: 空いている)
+    int parent;                                      // 親(このプロセスを起動し，終了を待つプロセス)のプロセステーブルでの位置．シェルが起動したプロセスは，どのプロセスも指さない位置
+    unsigned int base;                               // 領域の先頭のメモリの番地
+    unsigned int size;                               // 領域の大きさ(8の倍数)
+    unsigned int sp;                                 // 再開するための値: カーネルへ入った時点のSP(領域の中の番地)
+    unsigned int pc;                                 // 再開するための値: 再開する命令のPC
+    unsigned int registers[PROCESS_REGISTER_COUNT];  // 再開するための値: カーネルへ入った時点のr0〜r15・RSI・RAX
+    unsigned int kernel_sp;                          // 再開するための値: このプロセスが終わったときに戻るカーネルモードのSP
 };
 
 // プロセステーブル(親をプロセステーブルでの位置で指すため，各要素は動かさない)
@@ -142,6 +150,14 @@ int process_create(unsigned int code_size, unsigned int reserve_size, unsigned i
     process_table[index].parent = process_current;
     process_table[index].base = base;
     process_table[index].size = size;
+    // 実行ファイルを先頭の命令から，レジスタをすべて0にして始めるための値を書く
+    // (SPとカーネルモードのSPは，実行ファイルへ入るときに決めて上書きする)
+    process_table[index].sp = 0;
+    process_table[index].pc = 0;
+    for (int i = 0; i < PROCESS_REGISTER_COUNT; i++) {
+        process_table[index].registers[i] = 0;
+    }
+    process_table[index].kernel_sp = 0;
     *process = index;
     return PROCESS_CREATED;
 }
