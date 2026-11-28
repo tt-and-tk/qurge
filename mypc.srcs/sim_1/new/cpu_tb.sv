@@ -329,7 +329,7 @@ module cpu_tb;
 
         // 実行段が取得し直すサイクルに先行取得する即値のジャンプが届いたかを，まだ届いていない状態から数え始める
         redirect_met_early_jump = 1'b0;
-        // 停止・正常終了・打ち切りのいずれかに至るまで1サイクルずつ進める
+        // 停止・ハンドラへ飛ぶ・正常終了・打ち切りのいずれかに至るまで1サイクルずつ進める
         for (int cycle = 0; ; cycle++) begin
             // 命令を置けない番地(カーネルモードではROMへ渡せる幅に収まらない番地，ユーザーモードでは範囲外の番地)へ進んで
             // 停止する場合は，CPUがその番地をどこにも残さないため，
@@ -338,8 +338,13 @@ module cpu_tb;
             unreachable_pc   = dut.alu_sv_0.fetch_pc;
             // ハンドラへ飛ぶ場合は，割り込みハンドラと例外ハンドラのどちらへ飛ぶかと，戻り先として書き込むPCと，そのときの飛び先のハンドラの番地を控える
             // (ハンドラへ飛んだ後は，ハンドラの命令がPCやハンドラの番地を書き換えうるため)
-            handler_jumped = (dut.alu_sv_0.other_exception_detected && !dut.alu_sv_0.kernel_mode) || dut.alu_sv_0.interrupt_accepted;
+            handler_jumped =
+                // ユーザーモードで例外を検出した
+                (dut.alu_sv_0.other_exception_detected && !dut.alu_sv_0.kernel_mode)
+                // または，割り込みを受け付けた
+                || dut.alu_sv_0.interrupt_accepted;
             if (handler_jumped) begin
+                // 割り込みハンドラへ飛ぶかを控える(割り込みと例外は同じサイクルに起きない)
                 jumped_by_interrupt = dut.alu_sv_0.interrupt_accepted;
                 // 割り込みなら取得しようとした命令のPCと割り込みハンドラの番地，例外なら例外を起こした命令のPCと例外ハンドラの番地
                 jump_pc    = jumped_by_interrupt ? dut.alu_sv_0.fetch_pc : dut.alu_sv_0.exception_pc;
@@ -361,7 +366,12 @@ module cpu_tb;
                 break;
             end
             // ハンドラへ飛んだ．ハンドラから実行を続けない場合は，ここで終わる
-            if (handler_jumped && stop_at_handler_jump) begin
+            if (
+                // ハンドラへ飛んだ
+                handler_jumped
+                // かつ，ハンドラへ飛んだところで終わらせる
+                && stop_at_handler_jump
+            ) begin
                 // ハンドラの番地から取得し直すと決まったかを控える
                 handler_redirected = dut.alu_sv_0.redirect_pending && dut.alu_sv_0.redirect_pc == handler_pc;
                 outcome = JUMPED_TO_HANDLER;
@@ -377,7 +387,7 @@ module cpu_tb;
                 outcome = ENDED;
                 break;
             end
-            // どちらにも至らないまま上限のサイクル数に達した
+            // いずれにも至らないまま上限のサイクル数に達した
             if (cycle >= MAX_CYCLES) begin
                 outcome = TIMED_OUT;
                 break;
@@ -491,7 +501,12 @@ module cpu_tb;
     // 戻り先・原因のレジスタ，カーネルモードへの切り替え，例外ハンドラの番地からの取得し直しを確かめる
     function automatic void expect_exception_jump(input int pc, input exception_cause_enum cause);
         // 例外ハンドラへ飛んで終わっていない
-        if (outcome != JUMPED_TO_HANDLER || jumped_by_interrupt) begin
+        if (
+            // ハンドラへ飛んで終わっていない
+            outcome != JUMPED_TO_HANDLER
+            // または，飛んだ先が割り込みハンドラである
+            || jumped_by_interrupt
+        ) begin
             fail($sformatf("例外ハンドラへ飛んでいない(%s，PC=%0d)", outcome.name(), regs[PC_ADDR]));
             return;
         end
@@ -509,27 +524,35 @@ module cpu_tb;
             fail($sformatf("例外ハンドラの番地(%0d)から取得し直していない", handler_pc));
     endfunction
 
-    // 直前の実行が，指定したPCの命令を取得する前に割り込みを受け付け，割り込みハンドラへ飛んで終わったことを確かめる．
-    // 戻り先のレジスタ，カーネルモードへの切り替え，割り込みハンドラの番地からの取得し直しを確かめる．
-    // 例外の原因のレジスタは割り込みでは書き換わらないため，引数で指定した例外の原因(割り込みハンドラへ飛ぶ前の値．既定値は例外なし)のままであることを確かめる
-    function automatic void expect_interrupt_jump(input int pc, input exception_cause_enum cause = EXCEPTION_NONE);
+    // 直前の実行が，指定したPCの命令を取得する前に割り込みを受け付け，割り込みハンドラへ飛んで終わったことを確かめる
+    function automatic void expect_interrupt_jump(
+        input int                  pc,                      // 割り込みで止めた命令のPC
+        input exception_cause_enum cause = EXCEPTION_NONE   // 割り込みハンドラへ飛ぶ前の例外の原因
+    );
         // 割り込みハンドラへ飛んで終わっていない
-        if (outcome != JUMPED_TO_HANDLER || !jumped_by_interrupt) begin
+        if (
+            // ハンドラへ飛んで終わっていない
+            outcome != JUMPED_TO_HANDLER
+            // または，飛んだ先が例外ハンドラである
+            || !jumped_by_interrupt
+        ) begin
             fail($sformatf("割り込みハンドラへ飛んでいない(%s，PC=%0d)", outcome.name(), regs[PC_ADDR]));
             return;
         end
         // 取得しようとした命令のPCが違う
-        if (regs[PC_ADDR] != pc)
+        if (regs[PC_ADDR] != pc) begin
             fail($sformatf("割り込みで止めた命令のPC: 期待値%0d，実際%0d", pc, regs[PC_ADDR]));
+        end
         // 戻り先に，取得しようとした命令のPCが入る
         expect_reg(KRET_ADDR, pc);
-        // 例外の原因のレジスタは書き換わらない
+        // 例外の原因のレジスタは割り込みでは書き換わらず，割り込みハンドラへ飛ぶ前の値のまま残る
         expect_reg(ECAUSE_ADDR, cause);
         // カーネルモードに切り替わる
         expect_kernel_mode(1'b1);
         // 割り込みハンドラの番地から取得し直す
-        if (!handler_redirected)
+        if (!handler_redirected) begin
             fail($sformatf("割り込みハンドラの番地(%0d)から取得し直していない", handler_pc));
+        end
     endfunction
 
     // メインメモリの指定した番地の1バイトを返す
@@ -2096,8 +2119,15 @@ module cpu_tb;
         run({movi(IENTRY_ADDR, 32'd6), movi(TINTERVAL_ADDR, 32'd60), enter_user_mode()});
         // 命令列の途中で割り込まれ，戻り先の命令より前の命令の結果だけが残る
         expect_interrupt_jump(regs[KRET_ADDR]);
-        if (!(0 < regs[KRET_ADDR] && regs[KRET_ADDR] < 15))
+        // 戻り先が命令列の先頭か，命令列を終えた後なら，命令列の途中で割り込まれたことにならない
+        if (
+            // 戻り先が命令列の先頭である
+            regs[KRET_ADDR] == 0
+            // または，命令列を終えた後である
+            || regs[KRET_ADDR] >= 15
+        ) begin
             fail($sformatf("命令列の途中で割り込まれていない(戻り先%0d)", regs[KRET_ADDR]));
+        end
         expect_numbered_movs_until(regs[KRET_ADDR], 15);
 
         // 割り込みハンドラ(ROMのPC 6)で，戻り先をRAXへ控え，間隔を0にしてSYSRETで戻る
@@ -2108,8 +2138,15 @@ module cpu_tb;
         // 命令列の途中で割り込まれ，戻った後に残りの命令を実行してユーザーモードで正常終了する
         expect_end();
         expect_kernel_mode(1'b0);
-        if (!(0 < regs[RAX_ADDR] && regs[RAX_ADDR] < 15))
+        // 控えた戻り先が命令列の先頭か，命令列を終えた後なら，命令列の途中で割り込まれたことにならない
+        if (
+            // 控えた戻り先が命令列の先頭である
+            regs[RAX_ADDR] == 0
+            // または，命令列を終えた後である
+            || regs[RAX_ADDR] >= 15
+        ) begin
             fail($sformatf("命令列の途中で割り込まれていない(戻り先%0d)", regs[RAX_ADDR]));
+        end
         expect_numbered_movs_until(15, 15);
 
         // 間隔を2サイクルにしてから，カーネルモードで数命令を実行し，ユーザーモードへ移る．割り込みハンドラはROMのPC 9に置く
@@ -2125,51 +2162,65 @@ module cpu_tb;
         // 長い間隔では，割り込まれる前に正常終了する
         `BEGIN_TEST("割り算の実行中に間隔が経っても，割り算を完了してから，次の命令を取得する前に受け付ける");
         interrupted_after_div = 0;
+        // 間隔を2サイクルずつ長くしながら実行する
         for (int interval = 10; interval <= 150; interval += 2) begin
             user_code = '{movi(1, 32'd100), movi(2, 32'd7), div(1, 2, 3, NO_IMM), movi(4, 32'd4), movi(5, 32'd5)};
             run({movi(IENTRY_ADDR, 32'd6), movi(TINTERVAL_ADDR, interval), enter_user_mode()});
-            // 割り込まれずに正常終了しなければ，割り込みハンドラへ飛んでいる
+            // 止めた命令のPCを求める(正常終了した場合は，命令列を終えた位置とする)
             stop_pc = (outcome == ENDED) ? user_code.size() : regs[KRET_ADDR];
-            if (outcome != ENDED)
+            // 正常終了した場合を除き，割り込みハンドラへ飛んでいる
+            if (outcome != ENDED) begin
                 expect_interrupt_jump(stop_pc);
+            end
             // どの間隔でも，止めた命令より前の命令の結果だけが残る(割り算は商を書き込んで完了している)
             expect_reg(1, (stop_pc > 0) ? 32'd100 : 32'd0);
             expect_reg(2, (stop_pc > 1) ? 32'd7 : 32'd0);
             expect_reg(3, (stop_pc > 2) ? 32'd14 : 32'd0);
             expect_reg(4, (stop_pc > 3) ? 32'd4 : 32'd0);
             expect_reg(5, (stop_pc > 4) ? 32'd5 : 32'd0);
-            if (stop_pc == 3)
+            // 割り算の次の命令で止めたら，その間隔を数える
+            if (stop_pc == 3) begin
                 interrupted_after_div++;
+            end
         end
         // 割り算は30サイクル以上かかるため，その間に間隔が経つ多くの間隔で，割り算の次の命令を取得する前に割り込まれる
-        if (interrupted_after_div < 10)
+        if (interrupted_after_div < 10) begin
             fail($sformatf("割り算の次の命令を取得する前に割り込まれた間隔の数が少ない(%0d)", interrupted_after_div));
+        end
 
         // ジャンプの直後に間隔が経つ場合を含むよう，間隔を変えながら，PC 1でPC 3へジャンプする命令列をユーザーモードで実行する．
         // 割り込みハンドラはROMのPC 6に置く．長い間隔では，割り込まれる前に正常終了する
         `BEGIN_TEST("ジャンプの直後に割り込まれると，戻り先はジャンプの飛び先になる");
         interrupted_after_jump = 0;
+        // 間隔を1サイクルずつ長くしながら実行する
         for (int interval = 10; interval <= 60; interval++) begin
             user_code = '{movi(1, 32'd1), jmp(6'h00, im(32'd3)), movi(2, 32'd2), movi(3, 32'd3), movi(4, 32'd4)};
             run({movi(IENTRY_ADDR, 32'd6), movi(TINTERVAL_ADDR, interval), enter_user_mode()});
-            // 割り込まれずに正常終了しなければ，割り込みハンドラへ飛んでいる
+            // 止めた命令のPCを求める(正常終了した場合は，命令列を終えた位置とする)
             stop_pc = (outcome == ENDED) ? user_code.size() : regs[KRET_ADDR];
-            if (outcome != ENDED)
+            // 正常終了した場合を除き，割り込みハンドラへ飛んでいる
+            if (outcome != ENDED) begin
                 expect_interrupt_jump(stop_pc);
-            // 飛び越えた命令が戻り先になることはなく，実行もされない
-            if (stop_pc == 2)
+            end
+            // 戻り先は飛び越えた命令以外の命令である
+            if (stop_pc == 2) begin
                 fail($sformatf("ジャンプで飛び越えた命令が戻り先になった(間隔%0d)", interval));
+            end
+            // 飛び越えた命令の代入の値は残らない
             expect_reg(2, 32'd0);
             // 止めた命令より前の命令の結果だけが残る
             expect_reg(1, (stop_pc > 0) ? 32'd1 : 32'd0);
             expect_reg(3, (stop_pc > 3) ? 32'd3 : 32'd0);
             expect_reg(4, (stop_pc > 4) ? 32'd4 : 32'd0);
-            if (stop_pc == 3)
+            // ジャンプの飛び先の命令で止めたら，その間隔を数える
+            if (stop_pc == 3) begin
                 interrupted_after_jump++;
+            end
         end
         // ジャンプの飛び先を取得する前に割り込まれる間隔がある
-        if (interrupted_after_jump == 0)
+        if (interrupted_after_jump == 0) begin
             fail($sformatf("ジャンプの飛び先の命令を取得する前に割り込まれた間隔がない"));
+        end
 
         // 間隔を1サイクルにして要求を保留したまま，領域の外のPCへSYSRETで移る．
         // 割り込みハンドラ(ROMのPC 7)は，間隔を0にし，戻り先をRAXへ控えてSYSRETで戻る．例外ハンドラ(ROMのPC 10)は戻り先と原因を読む
@@ -2200,6 +2251,7 @@ module cpu_tb;
         // 間隔を変えながら，メモリの読み書き・CALL・RETを含む命令列をユーザーモードで実行する．
         // 割り込みハンドラ(ROMのPC 7)は，RAXに1を足し，間隔を変えずにSYSRETで戻る．短い間隔では，命令列の途中で何度も割り込まれる
         `BEGIN_TEST("間隔が経つたびに割り込まれても，割り込みハンドラから戻るたびに止めた命令から再開し，命令列の結果は割り込まれない場合と同じになる");
+        // 間隔を4サイクルずつ長くしながら実行する
         for (int interval = 40; interval <= 120; interval += 4) begin
             user_code = '{movi(SP_ADDR, USER_SIZE_DEFAULT), movi(1, 32'h55), wm(4'hf, 6'h00, 1, im(32'h100)), rm(4'hf, 6'h00, 2, im(32'h100)),
                           call(6'h00, im(32'd8)), movi(4, 32'd4), jmp(6'h00, im(32'd10)), nop(), movi(3, 32'd3), ret()};
@@ -2215,8 +2267,14 @@ module cpu_tb;
             expect_reg(SP_ADDR, USER_SIZE_DEFAULT);
             expect_mem32(USER_BASE_DEFAULT + 32'h100, 32'h55);
             // 最も短い間隔では，命令列の途中で2回以上割り込まれる(間隔が経つたびに要求する)
-            if (interval == 40 && regs[RAX_ADDR] < 2)
+            if (
+                // 最も短い間隔である
+                interval == 40
+                // かつ，割り込まれた回数が1回以下である
+                && regs[RAX_ADDR] < 2
+            ) begin
                 fail($sformatf("間隔%0dで2回以上割り込まれていない(%0d回)", interval, regs[RAX_ADDR]));
+            end
         end
 
         // ユーザーモードのPC 0でシステムコールを呼ぶ．システムコールハンドラ(ROMのPC 6)は，間隔を2サイクルにし，数命令を実行してからSYSRETで戻る．
@@ -2301,7 +2359,7 @@ module cpu_tb;
         `BEGIN_TEST("タイマー割り込みの間隔へ同じ値を書き込み直すと，0から数え直す");
         user_code = '{movi(1, 32'd1)};
         run({movi(IENTRY_ADDR, 32'd17), movi(TINTERVAL_ADDR, 32'd300), kernel_busy_loop(40), movi(TINTERVAL_ADDR, 32'd300), kernel_busy_loop(40), enter_user_mode()});
-        // 書き込み直してからは間隔が経たず，割り込まれずにユーザーモードで正常終了する
+        // 書き込み直してから間隔が経つ前に，ユーザーモードで正常終了する
         expect_end();
         expect_kernel_mode(1'b0);
         expect_reg(1, 32'd1);
