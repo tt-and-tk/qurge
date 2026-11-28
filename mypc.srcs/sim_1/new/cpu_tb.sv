@@ -9,6 +9,7 @@
 // - テストケース: 1つの命令列を実行し，その結果を期待値と比較する単位．合否はテストケースごとに数える
 // - 正常終了: 命令列の末尾に置いた，自分自身へジャンプし続ける命令の実行に入ること(仕様上のプログラムの終わり方)
 // - 例外: 実行できない命令や範囲外の番地など，CPUが検出して命令をそのまま実行しない事象
+// - タイマー割り込み: タイマー割り込みの間隔のレジスタに書き込んだサイクル数が経つたびに，CPUがユーザーモードの実行を止める仕組み
 // - 停止: カーネルモードで例外を検出したCPUが実行を止めること
 // - 例外ハンドラへ飛ぶ: ユーザーモードで例外を検出したCPUが，例外を起こした命令のPCと原因を書き込み，カーネルモードで例外ハンドラの番地へ飛ぶこと
 // - 割り込みハンドラへ飛ぶ: ユーザーモードでタイマー割り込みを受け付けたCPUが，取得しようとした命令のPCを書き込み，カーネルモードで割り込みハンドラの番地へ飛ぶこと
@@ -510,7 +511,7 @@ module cpu_tb;
 
     // 直前の実行が，指定したPCの命令を取得する前に割り込みを受け付け，割り込みハンドラへ飛んで終わったことを確かめる．
     // 戻り先のレジスタ，カーネルモードへの切り替え，割り込みハンドラの番地からの取得し直しを確かめる．
-    // 例外の原因のレジスタは割り込みでは書き換わらないため，2番目の引数(割り込みハンドラへ飛ぶ前の例外の原因．既定値は例外なし)のままであることを確かめる
+    // 例外の原因のレジスタは割り込みでは書き換わらないため，引数で指定した例外の原因(割り込みハンドラへ飛ぶ前の値．既定値は例外なし)のままであることを確かめる
     function automatic void expect_interrupt_jump(input int pc, input exception_cause_enum cause = EXCEPTION_NONE);
         // 割り込みハンドラへ飛んで終わっていない
         if (outcome != JUMPED_TO_HANDLER || !jumped_by_interrupt) begin
@@ -2028,23 +2029,33 @@ module cpu_tb;
         expect_reg(ECAUSE_ADDR, EXCEPTION_NONE);
     endtask
 
-    // r1から順に，PCがiの命令がr(i+1)へi+1を代入する，count命令の命令列
-    function automatic machine_queue_t numbered_movs(input int count);
-        machine_queue_t instructions;
-        for (int i = 0; i < count; i++)
+    // 番号を付けて代入する命令列．PCがpの命令は，汎用レジスタr(p+1)へp+1を代入する
+    function automatic machine_queue_t numbered_movs(
+        input int count  // 命令数
+    );
+        machine_queue_t instructions;  // 作る命令列
+        // 命令を1つずつ加える
+        for (int i = 0; i < count; i++) begin
             instructions.push_back(movi(i + 1, i + 1));
+        end
         return instructions;
     endfunction
 
-    // 直前の実行で，numbered_movs(count)の命令列のうちPCがstop_pcより前の命令だけを実行したことを確かめる
-    function automatic void expect_numbered_movs_until(input int stop_pc, input int count);
-        for (int i = 0; i < count; i++)
+    // 直前の実行で，番号を付けて代入する命令列のうち，指定したPCより前の命令だけを実行したことを確かめる
+    function automatic void expect_numbered_movs_until(
+        input int stop_pc,  // 実行していない最初の命令のPC
+        input int count     // 命令列の命令数
+    );
+        // 命令ごとに，実行したならその代入の値，実行していないなら0が残ることを確かめる
+        for (int i = 0; i < count; i++) begin
             expect_reg(i + 1, (i < stop_pc) ? i + 1 : 0);
+        end
     endfunction
 
-    // カーネルモードで，r10を0からiterationsまで1ずつ増やすループの命令列(r11・r12も使う)．
-    // 割り込みの要求が立つまでの時間をカーネルモードで過ごすために使う
-    function automatic machine_queue_t kernel_busy_loop(input int iterations);
+    // カーネルモードで決まった回数だけ繰り返すループの命令列．汎用レジスタr10〜r12を使う
+    function automatic machine_queue_t kernel_busy_loop(
+        input int iterations  // 繰り返す回数
+    );
         return '{movi(10, 0), movi(11, 1), movi(12, iterations), add(10, 11, 10), ne(10, 12, im(32'hffff_ffff))};
     endfunction
 
@@ -2285,7 +2296,7 @@ module cpu_tb;
         // 2回目のループの間に間隔が経ち，ユーザーモードの最初の命令を取得する前に割り込む
         expect_interrupt_jump(0);
 
-        // 前のテストケースと同じ命令列で，2回のループの間に間隔へ同じ値を書き込み直す．
+        // 間隔を300サイクルにしてから，カーネルモードで40回のループを2回過ごし，その間に間隔へ同じ値を書き込み直してユーザーモードへ移る．
         // 書き込み直してからユーザーモードの命令列を終えるまでは，約200サイクルのループと数十サイクルで，間隔より約70サイクル短い
         `BEGIN_TEST("タイマー割り込みの間隔へ同じ値を書き込み直すと，0から数え直す");
         user_code = '{movi(1, 32'd1)};
