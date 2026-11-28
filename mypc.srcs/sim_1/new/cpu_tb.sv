@@ -2054,14 +2054,6 @@ module cpu_tb;
         int interrupted_after_jump;  // ジャンプの飛び先の命令を取得する前に割り込まれた間隔の数
         int stop_pc;                 // 間隔を変えながら実行するテストケースで，割り込みで止めた命令のPC(割り込まれずに正常終了した場合は，正常終了を表す命令のPC)
 
-        // r1・r2へ0以外を入れてから，書き込む前の割り込みハンドラの番地とタイマー割り込みの間隔を読み出す
-        `BEGIN_TEST("リセット直後の割り込みハンドラの番地とタイマー割り込みの間隔は0である");
-        run('{movi(1, 32'h77), movi(2, 32'h77), movr(1, IENTRY_ADDR), movr(2, TINTERVAL_ADDR)});
-        // どちらも0が読める
-        expect_end();
-        expect_reg(1, 32'h0);
-        expect_reg(2, 32'h0);
-
         // 割り込みハンドラの番地とタイマー割り込みの間隔へ値を書き込んでから読み出す
         `BEGIN_TEST("カーネルモードで割り込みハンドラの番地とタイマー割り込みの間隔を読み書きできる");
         run('{movi(IENTRY_ADDR, 32'h8765_4321), movi(TINTERVAL_ADDR, 32'hfedc_ba98), movr(1, IENTRY_ADDR), movr(2, TINTERVAL_ADDR)});
@@ -2069,6 +2061,14 @@ module cpu_tb;
         expect_end();
         expect_reg(1, 32'h8765_4321);
         expect_reg(2, 32'hfedc_ba98);
+
+        // 前のテストケースで0以外を書き込んだ後にリセットし，r1・r2へ0以外を入れてから，書き込む前の割り込みハンドラの番地とタイマー割り込みの間隔を読み出す
+        `BEGIN_TEST("リセット直後の割り込みハンドラの番地とタイマー割り込みの間隔は0である");
+        run('{movi(1, 32'h77), movi(2, 32'h77), movr(1, IENTRY_ADDR), movr(2, TINTERVAL_ADDR)});
+        // どちらも0が読める
+        expect_end();
+        expect_reg(1, 32'h0);
+        expect_reg(2, 32'h0);
 
         // 割り込みハンドラを正常終了を表す命令(ROMのPC 6)にし，間隔を0にしてユーザーモードで15命令を実行する
         `BEGIN_TEST("タイマー割り込みの間隔が0なら，ユーザーモードの実行は割り込まれない");
@@ -2208,6 +2208,24 @@ module cpu_tb;
                 fail($sformatf("間隔%0dで2回以上割り込まれていない(%0d回)", interval, regs[RAX_ADDR]));
         end
 
+        // ユーザーモードのPC 0でシステムコールを呼ぶ．システムコールハンドラ(ROMのPC 6)は，間隔を2サイクルにし，数命令を実行してからSYSRETで戻る．
+        // 割り込みハンドラはROMのPC 11(正常終了を表す命令)に置く
+        `BEGIN_TEST("システムコールハンドラの実行中に間隔が経つと，SYSRETで戻った直後，戻り先の命令を取得する前に受け付ける");
+        user_code = '{syscall(), movi(1, 32'd1)};
+        run({movi(KENTRY_ADDR, 32'd6), movi(IENTRY_ADDR, 32'd11), enter_user_mode(),
+             movi(TINTERVAL_ADDR, 32'd2), nop(), nop(), nop(), sysret()});
+        // システムコールの戻り先(PC 1)の命令を取得する前に割り込まれ，その命令は実行しない
+        expect_interrupt_jump(1);
+        expect_reg(1, 32'd0);
+
+        // 割り込みハンドラの番地をROMの命令がない番地にして，間隔を1サイクルにしてからユーザーモードへ移る
+        `BEGIN_TEST("割り込みハンドラの番地がROMの命令がない番地なら，割り込みの後にカーネルモードで停止する");
+        user_code = '{movi(1, 32'd1)};
+        run({movi(IENTRY_ADDR, 32'd100), movi(TINTERVAL_ADDR, 32'd1), enter_user_mode()}, 1'b1, 1'b0, 1'b0);
+        // 割り込みハンドラの番地で停止し，ユーザーモードの命令は実行しない
+        expect_halt(100);
+        expect_reg(1, 32'd0);
+
         // 間隔を長くしてカーネルモードで間隔の何倍もの時間を過ごしてから，ユーザーモードへ移る．
         // 割り込みハンドラ(ROMのPC 12)は，RAXに1を足してSYSRETで戻る
         `BEGIN_TEST("受け付ける前に間隔が何回経っても，割り込みの要求は1回分だけ保留する");
@@ -2228,6 +2246,27 @@ module cpu_tb;
         expect_end();
         expect_kernel_mode(1'b0);
         expect_reg(1, 32'd1);
+
+        // メモリの0x100番地に1000を置き，間隔を1サイクルにして要求を保留してから，メモリから読み込んだ値を間隔へ書き込んでユーザーモードへ移る．
+        // 割り込みハンドラはROMのPC 10(正常終了を表す命令)に置く
+        `BEGIN_TEST("メモリから読み込んだ値でタイマー割り込みの間隔へ書き込んでも，保留中の要求を取り消す");
+        user_code = '{movi(1, 32'd1)};
+        run({movi(1, 32'd1000), wm(4'hf, 6'h00, 1, im(32'h100)), movi(IENTRY_ADDR, 32'd10), movi(TINTERVAL_ADDR, 32'd1), nop(),
+             rm(4'hf, 6'h00, TINTERVAL_ADDR, im(32'h100)), enter_user_mode()});
+        // 割り込まれずに，ユーザーモードで正常終了する
+        expect_end();
+        expect_kernel_mode(1'b0);
+        expect_reg(TINTERVAL_ADDR, 32'd1000);
+
+        // 間隔を1サイクルにして要求を保留してから，同時実行の2番目になる並び(単純な演算の次)で間隔へ書き込み，ユーザーモードへ移る．
+        // 割り込みハンドラはROMのPC 9(正常終了を表す命令)に置く
+        `BEGIN_TEST("同時実行の2番目の命令でタイマー割り込みの間隔へ書き込んでも，保留中の要求を取り消す");
+        user_code = '{movi(1, 32'd1)};
+        run({movi(IENTRY_ADDR, 32'd9), movi(TINTERVAL_ADDR, 32'd1), nop(), add(5, 6, 7), movi(TINTERVAL_ADDR, 32'd1000), enter_user_mode()});
+        // 割り込まれずに，ユーザーモードで正常終了する
+        expect_end();
+        expect_kernel_mode(1'b0);
+        expect_reg(TINTERVAL_ADDR, 32'd1000);
 
         // 間隔を1サイクルにして要求を保留してから，間隔を長い値に書き換えてユーザーモードへ移る．割り込みハンドラはROMのPC 9(正常終了を表す命令)に置く
         `BEGIN_TEST("タイマー割り込みの間隔へ0以外の値を書き込んでも，保留中の要求を取り消す");
