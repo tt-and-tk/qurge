@@ -1,10 +1,13 @@
 Required Notice: Copyright tt-and-tk (https://github.com/tt-and-tk)
 
-Vivadoが生成した次のファイルは，Xilinx, Inc.とAdvanced Micro Devices, Inc.の著作物を含みうるため，このライセンスの対象外とする．
+次のファイルは，第三者の著作物を含みうる．それらの著作物はこのライセンスの対象外とし，それぞれの著作権者が定める条件に従う．
 
-- `mypc.xpr`
-- `mypc.srcs/sources_1/bd/`の下のファイル
-- `mypc.srcs/sources_1/imports/`の下のファイル
+- Vivadoが生成したファイル(Xilinx, Inc.とAdvanced Micro Devices, Inc.の著作物を含みうる)
+    - `mypc.xpr`
+    - `mypc.srcs/sources_1/bd/`の下のファイル
+    - `mypc.srcs/sources_1/imports/`の下のファイル
+- PYNQ-Z2用に配布されている制約ファイルを基にしたファイル
+    - `mypc.srcs/constrs_1/new/top.xdc`
 
 # PolyForm Noncommercial License 1.0.0
 
