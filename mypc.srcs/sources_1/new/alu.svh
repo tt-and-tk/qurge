@@ -71,7 +71,7 @@ package alu_p;
         else if (addr == 6'h17) begin
             is_readable = util_p::TRUE;
         end
-        // タイマー割り込みの間隔
+        // 割り込み周期
         else if (addr == 6'h18) begin
             is_readable = util_p::TRUE;
         end
@@ -174,7 +174,7 @@ package alu_p;
         else if (addr == 6'h17) begin
             is_writable = util_p::TRUE;
         end
-        // タイマー割り込みの間隔
+        // 割り込み周期
         else if (addr == 6'h18) begin
             is_writable = util_p::TRUE;
         end
@@ -279,7 +279,7 @@ package alu_p;
         else if (addr == 6'h17) begin
             used_bits = '1;
         end
-        // タイマー割り込みの間隔
+        // 割り込み周期
         else if (addr == 6'h18) begin
             used_bits = '1;
         end
@@ -385,7 +385,7 @@ package alu_p;
             || addr == 6'h15 || addr == 6'h16
             // または，割り込みハンドラの番地(ユーザーモードのプログラムに，割り込みの飛び先を変えさせない)
             || addr == 6'h17
-            // または，タイマー割り込みの間隔(ユーザーモードのプログラムに，割り込みを止めさせない)
+            // または，割り込み周期(ユーザーモードのプログラムに，割り込みを止めさせない)
             || addr == 6'h18
             // または，周辺機器のレジスタ(OSが状態を持つため，実行ファイルに書き換えさせない)
             || addr >= 6'h20;
