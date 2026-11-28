@@ -10,7 +10,7 @@
 package ram_p;
     // 定数
     localparam int RAM_SIZE = 131072;           // メモリの実容量(バイト)．範囲外番地をアドレスバス幅で判定するため2のべき乗とする
-    localparam int KERNEL_MEMORY_SIZE = 32768;  // カーネル用の範囲(0番地から始まり，カーネルモードのプログラムが変数とスタックを置く範囲．カーネルモードのCALL/RETはこの範囲にだけ戻り先を積み下ろしする)の大きさ．SPの初期値(範囲の末尾の直後の番地)にも使う．範囲に収まるかをビット幅で判定するため2のべき乗とする
+    localparam int KERNEL_MEMORY_SIZE = 32768;  // 0番地から始まるカーネル用の範囲の大きさ．範囲に収まるかをビット幅で判定するため2のべき乗とする
 
     // 変数型
     typedef logic [$clog2(RAM_SIZE)-1:0] address_bus_t;  // アドレスバス幅
