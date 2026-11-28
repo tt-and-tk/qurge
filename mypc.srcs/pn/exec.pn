@@ -245,6 +245,7 @@ static void exec_interrupt_entry(void) {
 
 // ハンドラの番地と割り込み周期をCPUへ設定し，タイマー割り込みを有効にする
 // タイマーは止めない(カーネルモードの間は割り込まれないため，割り込まれるのは実行ファイルを動かす間だけである)
+// カーネルモードの間もタイマーは数えるため，起動した実行ファイルが先頭の命令を実行する前や，システムコールから戻った直後に，割り込みハンドラへ飛ぶことがある
 void exec_init(void) {
     KENTRY = (unsigned int)exec_syscall_entry;
     EENTRY = (unsigned int)exec_exception_entry;

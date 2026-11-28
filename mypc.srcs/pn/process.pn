@@ -23,7 +23,7 @@ const int PROCESS_TABLE_FULL = 1;  // プロセステーブルに空いている
 const int PROCESS_NO_MEMORY = 2;   // 必要な大きさの領域が空きに収まらない
 
 // プロセステーブルの要素．1つのプロセスを表す
-// 再開するための値は，プロセスがシステムコールの命令かタイマー割り込みでカーネルへ入るたびに控え，プロセスへ戻るときに戻す
+// 再開するための値は，プロセスがシステムコールの命令かタイマー割り込みでカーネルモードへ入るたびに控える．プロセスを起動するとき，子が終わって親へ戻るとき，割り込みで止めたプロセスへ戻るときに，ここから戻す
 // (子の終了を待つ親や，割り込みで止めたプロセスを，CPUのレジスタとグローバル変数が別のプロセスの値に変わった後も再開できるようにするため)
 struct Process {
     int used;                                        // 要素を使っているか(1: 使っている / 0: 空いている)
@@ -151,7 +151,7 @@ int process_create(unsigned int code_size, unsigned int reserve_size, unsigned i
     process_table[index].base = base;
     process_table[index].size = size;
     // 実行ファイルを先頭の命令から，レジスタをすべて0にして始めるための値を書く
-    // (SPとカーネルモードのSPは，実行ファイルへ入るときに決めて上書きする)
+    // (SPとカーネルモードのSPはここでは0とし，実行ファイルへ入るときに決めた値を，最初にカーネルモードへ入ったときに控える)
     process_table[index].sp = 0;
     process_table[index].pc = 0;
     for (int i = 0; i < PROCESS_REGISTER_COUNT; i++) {
