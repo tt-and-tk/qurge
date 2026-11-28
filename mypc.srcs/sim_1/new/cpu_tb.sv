@@ -2084,8 +2084,8 @@ module cpu_tb;
 
     // タイマー割り込みと，IENTRY・TINTERVAL
     task automatic test_interrupt();
-        int interrupted_after_div;   // 割り算の次の命令を取得する前に割り込まれた，割り込み周期の設定値の数
-        int interrupted_after_jump;  // ジャンプの飛び先の命令を取得する前に割り込まれた，割り込み周期の設定値の数
+        int interrupted_after_div;   // 割り込み周期を変えながら実行したうち，割り算の次の命令を取得する前に割り込まれた回数
+        int interrupted_after_jump;  // 割り込み周期を変えながら実行したうち，ジャンプの飛び先の命令を取得する前に割り込まれた回数
         int stop_pc;                 // 割り算・ジャンプを含む命令列を割り込み周期を変えながら実行するテストケースで，割り込みで止めた命令のPC(割り込まれずに正常終了した場合は，正常終了を表す命令のPC)
 
         // 0以外を書き込んで実行した後に，リセットしてから読み出す(リセットで0に戻ることを確かめるため)．
@@ -2212,14 +2212,14 @@ module cpu_tb;
             expect_reg(3, (stop_pc > 2) ? 32'd14 : 32'd0);
             expect_reg(4, (stop_pc > 3) ? 32'd4 : 32'd0);
             expect_reg(5, (stop_pc > 4) ? 32'd5 : 32'd0);
-            // 割り算の次の命令で止めたら，その設定値を数える
+            // 割り算の次の命令で止めたら，割り込まれた回数に数える
             if (stop_pc == 3) begin
                 interrupted_after_div++;
             end
         end
-        // 割り算は30サイクル以上かかるため，その間に割り込み周期に達する多くの設定値で，割り算の次の命令を取得する前に割り込まれる
+        // 割り算は30サイクル以上かかり，その間にタイマーが割り込み周期に達しやすいため，多くの割り込み周期で，割り算の次の命令を取得する前に割り込まれる
         if (interrupted_after_div < 10) begin
-            fail($sformatf("割り算の次の命令を取得する前に割り込まれた，割り込み周期の設定値の数が少ない(%0d)", interrupted_after_div));
+            fail($sformatf("割り算の次の命令を取得する前に割り込まれた回数が少ない(%0d)", interrupted_after_div));
         end
 
         // ジャンプの直後にタイマーが割り込み周期に達する場合を含むよう，割り込み周期を変えながら，PC 1でPC 3へジャンプする命令列をユーザーモードで実行する．
@@ -2246,14 +2246,14 @@ module cpu_tb;
             expect_reg(1, (stop_pc > 0) ? 32'd1 : 32'd0);
             expect_reg(3, (stop_pc > 3) ? 32'd3 : 32'd0);
             expect_reg(4, (stop_pc > 4) ? 32'd4 : 32'd0);
-            // ジャンプの飛び先の命令で止めたら，その設定値を数える
+            // ジャンプの飛び先の命令で止めたら，割り込まれた回数に数える
             if (stop_pc == 3) begin
                 interrupted_after_jump++;
             end
         end
-        // ジャンプの飛び先を取得する前に割り込まれる，割り込み周期の設定値がある
+        // ジャンプの飛び先を取得する前に割り込まれる割り込み周期がある
         if (interrupted_after_jump == 0) begin
-            fail($sformatf("ジャンプの飛び先の命令を取得する前に割り込まれた，割り込み周期の設定値がない"));
+            fail($sformatf("ジャンプの飛び先の命令を取得する前に割り込まれた回数が0である"));
         end
 
         // 割り込み周期を2サイクルにしてから，カーネルモードで数命令を実行し，ユーザーモードへ移る．割り込みハンドラはROMのPC 9に置く
@@ -2303,7 +2303,7 @@ module cpu_tb;
 
         // 割り込み周期を長くしてカーネルモードで割り込み周期の何倍もの時間を過ごしてから，ユーザーモードへ移る．
         // 割り込みハンドラ(ROMのPC 12)は，RAXに1を足してSYSRETで戻る
-        `BEGIN_TEST("割り込みハンドラへ飛ぶ前にタイマーが何回割り込み周期に達しても，保留中の割り込みは1つだけである");
+        `BEGIN_TEST("割り込みハンドラへ飛ぶ前にタイマーが割り込み周期に何回達しても，保留中の割り込みは1つだけである");
         user_code = '{movi(1, 32'd1)};
         run({movi(IENTRY_ADDR, 32'd12), movi(TINTERVAL_ADDR, 32'd200), movi(RSI_ADDR, 32'd1), kernel_busy_loop(300), enter_user_mode(),
              add(RAX_ADDR, RSI_ADDR, RAX_ADDR), sysret()}, 1'b1, 1'b0, 1'b0);
@@ -2357,7 +2357,7 @@ module cpu_tb;
         `BEGIN_TEST("TINTERVALへ同じ値を書き込み直さなければ，書き込んでからタイマーが割り込み周期に達すると割り込む");
         user_code = '{movi(1, 32'd1)};
         run({movi(IENTRY_ADDR, 32'd17), movi(TINTERVAL_ADDR, 32'd300), kernel_busy_loop(40), nop(), kernel_busy_loop(40), enter_user_mode()});
-        // 2回目のループの間にタイマーが割り込み周期に達し，ユーザーモードの最初の命令を取得する前に割り込む
+        // 2つ目のループの間にタイマーが割り込み周期に達し，ユーザーモードの最初の命令を取得する前に割り込む
         expect_interrupt_jump(0);
 
         // 割り込み周期を300サイクルにしてから，40回繰り返すループを2つ実行し，2つのループの間でTINTERVALへ同じ値を書き込み直してユーザーモードへ移る．

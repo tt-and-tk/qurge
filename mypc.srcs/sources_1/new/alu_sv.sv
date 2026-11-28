@@ -2312,7 +2312,7 @@ module alu_sv (
                 timer_count       <= '0;
                 interrupt_pending <= 1'b0;
             end
-            // このサイクルで割り込み周期に達するなら，0から数え直し，割り込みを保留中にする
+            // このサイクルでタイマーが割り込み周期に達するなら，0から数え直し，割り込みを保留中にする
             else if (timer_count == register[TINTERVAL_ADDR] - 1) begin
                 timer_count       <= '0;
                 interrupt_pending <= 1'b1;
