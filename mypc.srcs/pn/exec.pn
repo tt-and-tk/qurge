@@ -1,12 +1,21 @@
 // プロセスを，領域の中でユーザーモードとして動かす処理．次のものを置く
 // - 実行ファイルを起動し，終わるまで待つ処理(実行中のプロセスがあれば，その子として起動する)
-// - 実行ファイルがシステムコールの命令を実行した場合に，CPUがカーネルモードへ移って飛ぶ先の関数(システムコールハンドラ)
-// - 実行ファイルが例外を起こした場合に，CPUがカーネルモードへ移って飛ぶ先の関数(例外ハンドラ)
+// - CPUがカーネルモードへ移って飛ぶ先の関数(以下，ハンドラ)．実行ファイルがシステムコールの命令を実行した場合のシステムコールハンドラ，
+//   タイマー割り込みで止められた場合の割り込みハンドラ，例外を起こした場合の例外ハンドラの3つである
+// - ハンドラの番地と割り込み周期をCPUへ設定する処理
 // - プロセスを終わらせた例外の原因を出力する処理
-// プロセスへ入る前と，システムコールハンドラ・例外ハンドラでカーネルモードへ移った後は，SPをカーネルモードのスタック(カーネル用の範囲の末尾から下へ伸びる)に置く．
-// 子を起動するシステムコールでは，親のシステムコールを処理している途中のカーネルモードのスタックの上に，子を実行する関数のフレームを積む．子が終わるとそこへ戻り，親のシステムコールの処理を続ける
-// SPを書き換える関数は，フレームの大きさが0になるよう，引数・ローカル変数を持たず，値はグローバル変数に置く
-// (フレームを持つ関数は，書き換えた後のSPを基準にフレームを読み書きしてしまうため，コンパイラがSPの書き換えを禁止している)
+// プロセスのSP・PC・r0〜r15・RSI・RAXと，そのプロセスが終わったときに戻るカーネルモードのSPを，再開するための値と呼び，次のように控えて戻す
+// - 控える: システムコールハンドラと割り込みハンドラは，飛んできた直後に，実行中のプロセスの再開するための値を変数へ控え，プロセステーブルの実行中のプロセスの要素へ写す．例外ハンドラは控えずにプロセスを終わらせる
+// - 戻る: 変数からSP・r0〜r15・RSI・RAXを読み込み，ユーザーモードへ移る．プロセスを起動するとき，子が終わって親へ戻るとき，割り込みで止めたプロセスへ戻るときは，先に要素から変数へ戻す
+// - 変数を経るのは，asm文の入力にはコンパイル時に決まる番地しか書けず，実行中のプロセスの要素の番地を書けないためである
+// プロセスへ入る前と，CPUがハンドラへ飛んだ後は，SPをカーネルモードのスタック(カーネル用の範囲の末尾から下へ伸びる)に置く
+// - ハンドラは，SPをカーネルモードのスタックへ切り替えるまで関数を呼ばない．飛んできた直後のSPは領域の中の番地のままで，カーネルモードのcallは戻り先を積めないためである
+//   このため，SPの控えと切り替えは関数に切り出さず，各ハンドラのasm文に書く
+// - 子を起動するシステムコールでは，親のシステムコールを処理している途中のカーネルモードのスタックの上に，子を実行する関数のフレームを積む．子が終わるとそこへ戻り，親のシステムコールの処理を続ける
+// 次の関数は，フレームの大きさが0になるよう，引数・ローカル変数を持たず，値はグローバル変数に置く
+// - SPを書き換える関数(フレームを持つ関数は，書き換えた後のSPを基準にフレームを読み書きしてしまうため．コンパイラはSPへ代入する式を，フレームを持つ関数では禁止している)
+// - 飛んできた時点のレジスタをasm文で読み書きする関数(フレームを確保する命令が，asm文より前にレジスタを書き換えるため)
+// - 実行ファイルへ入る関数(控えるSPが，この関数の戻り先を指すようにするため)
 #pragma once
 #include "args.pn"
 #include "console.pn"
@@ -18,6 +27,7 @@
 
 // argvの配列に取る要素数．1行から取り出せる文字列の数が最も多い場合(1文字と空白が交互に並ぶ場合)の数に，末尾のnullptrの1つを足す
 static const int EXEC_ARGV_SIZE = CONSOLE_LINE_SIZE / 2 + 1;
+static const unsigned int EXEC_INTERRUPT_PERIOD = 1000000;  // 割り込み周期(クロックのサイクル数．100MHzで10ms．割り込みハンドラにかかるサイクル数より十分大きくし，戻った直後にまた割り込まれて実行ファイルが進まなくなることを防ぐ)
 
 // プロセスの終わり方
 struct ExecResult {
@@ -26,9 +36,11 @@ struct ExecResult {
     unsigned int exception_pc;  // 例外を起こした命令のPC(例外で終わった場合だけ意味を持つ)
 };
 
-static unsigned int exec_start_sp;                 // 実行ファイルへ入るときのSP(領域の中の番地)
-static unsigned int exec_kernel_sp;                // 実行中のプロセスへ入るときに控えておく，カーネルモードのSP．実行ファイルへ入る関数の戻り先を指す
-static unsigned int exec_user_sp;                  // 実行中のプロセスがシステムコールの命令でカーネルモードへ移った時点のSP(領域の中の番地)
+// 実行中のプロセスの再開するための値を置く変数(PCはKRETが持つ．並びはプロセステーブルの要素と同じ)
+static unsigned int exec_user_sp;                                 // SP(領域の中の番地)
+static unsigned int exec_user_registers[PROCESS_REGISTER_COUNT];  // r0〜r15・RSI・RAX
+static unsigned int exec_kernel_sp;                               // 実行中のプロセスが終わったときに戻るカーネルモードのSP(実行ファイルへ入る関数の戻り先を指す)
+
 static int exec_exit_status;                       // プロセスが終了のシステムコールで伝えた終了状態
 static int exec_exception_cause = EXCEPTION_NONE;  // プロセスを終わらせた例外の原因の番号(例外で終わったプロセスの終わり方を，子を実行する関数が受け取るまでの間だけ0以外)
 static unsigned int exec_exception_pc;             // プロセスを終わらせた例外を起こした命令のPC(例外で終わった場合だけ意味を持つ)
@@ -85,44 +97,170 @@ static unsigned int exec_place_args(char *line) {
     return sp;
 }
 
-// 実行ファイルの先頭の命令から，SPを実行ファイルへ入るときの値(コマンド名と引数を置いて決めた値)にしてユーザーモードで実行する(フレームの大きさは0)
+// 実行中のプロセスの再開するための値と，再開する命令のPC(KRET)を，プロセステーブルの要素へ写す
+// process: 写す先の要素のプロセステーブルでの位置
+static void exec_save_context(int process) {
+    // SPと，再開する命令のPCを写す
+    process_table[process].sp = exec_user_sp;
+    process_table[process].pc = KRET;
+
+    // r0〜r15・RSI・RAXを，並びの順に写す
+    for (int i = 0; i < PROCESS_REGISTER_COUNT; i++) {
+        process_table[process].registers[i] = exec_user_registers[i];
+    }
+
+    // 終わったときに戻るカーネルモードのSPを写す
+    process_table[process].kernel_sp = exec_kernel_sp;
+}
+
+// プロセステーブルの要素から，領域(UBASE・USIZE)と再開する命令のPC(KRET)をCPUへ，再開するための値を変数へ戻す
+// process: 戻す元の要素のプロセステーブルでの位置
+static void exec_restore_context(int process) {
+    // 領域を設定する
+    UBASE = process_table[process].base;
+    USIZE = process_table[process].size;
+    // 再開する命令のPCと，SPを戻す
+    KRET = process_table[process].pc;
+    exec_user_sp = process_table[process].sp;
+
+    // r0〜r15・RSI・RAXを，並びの順に戻す
+    for (int i = 0; i < PROCESS_REGISTER_COUNT; i++) {
+        exec_user_registers[i] = process_table[process].registers[i];
+    }
+
+    // 終わったときに戻るカーネルモードのSPを戻す
+    exec_kernel_sp = process_table[process].kernel_sp;
+}
+
+// 実行中のプロセスのr0〜r15・RSI・RAXを，再開するための値を置く変数へ控える(フレームの大きさは0)
+// SPがカーネルモードのスタックを指し，r0〜r15・RSI・RAXがハンドラへ飛んできた時点のままの状態で，asm文のcallで呼ぶ
+static void exec_save_registers(void) {
+    // 各レジスタを，並びの位置へ書き込む
+    asm("wm fh r0 r0 %0\n"    // r0
+        "wm fh r0 r1 %1\n"    // r1
+        "wm fh r0 r2 %2\n"    // r2
+        "wm fh r0 r3 %3\n"    // r3
+        "wm fh r0 r4 %4\n"    // r4
+        "wm fh r0 r5 %5\n"    // r5
+        "wm fh r0 r6 %6\n"    // r6
+        "wm fh r0 r7 %7\n"    // r7
+        "wm fh r0 r8 %8\n"    // r8
+        "wm fh r0 r9 %9\n"    // r9
+        "wm fh r0 r10 %10\n"  // r10
+        "wm fh r0 r11 %11\n"  // r11
+        "wm fh r0 r12 %12\n"  // r12
+        "wm fh r0 r13 %13\n"  // r13
+        "wm fh r0 r14 %14\n"  // r14
+        "wm fh r0 r15 %15\n"  // r15
+        "wm fh r0 r29 %16\n"  // RSI
+        "wm fh r0 r30 %17"    // RAX
+        : : "i"(&exec_user_registers[0]), "i"(&exec_user_registers[1]), "i"(&exec_user_registers[2]), "i"(&exec_user_registers[3]),
+            "i"(&exec_user_registers[4]), "i"(&exec_user_registers[5]), "i"(&exec_user_registers[6]), "i"(&exec_user_registers[7]),
+            "i"(&exec_user_registers[8]), "i"(&exec_user_registers[9]), "i"(&exec_user_registers[10]), "i"(&exec_user_registers[11]),
+            "i"(&exec_user_registers[12]), "i"(&exec_user_registers[13]), "i"(&exec_user_registers[14]), "i"(&exec_user_registers[15]),
+            "i"(&exec_user_registers[PROCESS_REGISTER_RSI]), "i"(&exec_user_registers[PROCESS_REGISTER_RAX]));
+}
+
+// 再開するための値を置く変数からSPとr0〜r15・RSI・RAXを読み込み，KRETの命令からユーザーモードで実行する(フレームの大きさは0)
+// SPがカーネルモードのスタックを指す状態で呼ぶ．呼び出し元へは戻らない(callで積んだ戻り先は使われず，次にカーネルモードへ入ったときに上書きされる)
+static void exec_resume(void) {
+    // 各レジスタを並びの位置から読み込み，最後にSPを読み込んでユーザーモードへ移る(SPを読み込んだ後は，SPを使う命令を置かない)
+    asm("rm fh r0 r0 %0\n"    // r0
+        "rm fh r0 r1 %1\n"    // r1
+        "rm fh r0 r2 %2\n"    // r2
+        "rm fh r0 r3 %3\n"    // r3
+        "rm fh r0 r4 %4\n"    // r4
+        "rm fh r0 r5 %5\n"    // r5
+        "rm fh r0 r6 %6\n"    // r6
+        "rm fh r0 r7 %7\n"    // r7
+        "rm fh r0 r8 %8\n"    // r8
+        "rm fh r0 r9 %9\n"    // r9
+        "rm fh r0 r10 %10\n"  // r10
+        "rm fh r0 r11 %11\n"  // r11
+        "rm fh r0 r12 %12\n"  // r12
+        "rm fh r0 r13 %13\n"  // r13
+        "rm fh r0 r14 %14\n"  // r14
+        "rm fh r0 r15 %15\n"  // r15
+        "rm fh r0 r29 %16\n"  // RSI
+        "rm fh r0 r30 %17\n"  // RAX
+        "rm fh r0 r16 %18\n"  // SP
+        "sysret"              // KRETの命令へ移る
+        : : "i"(&exec_user_registers[0]), "i"(&exec_user_registers[1]), "i"(&exec_user_registers[2]), "i"(&exec_user_registers[3]),
+            "i"(&exec_user_registers[4]), "i"(&exec_user_registers[5]), "i"(&exec_user_registers[6]), "i"(&exec_user_registers[7]),
+            "i"(&exec_user_registers[8]), "i"(&exec_user_registers[9]), "i"(&exec_user_registers[10]), "i"(&exec_user_registers[11]),
+            "i"(&exec_user_registers[12]), "i"(&exec_user_registers[13]), "i"(&exec_user_registers[14]), "i"(&exec_user_registers[15]),
+            "i"(&exec_user_registers[PROCESS_REGISTER_RSI]), "i"(&exec_user_registers[PROCESS_REGISTER_RAX]), "i"(&exec_user_sp));
+}
+
+// 実行ファイルへ入り，領域の先頭の命令からユーザーモードで実行する(フレームの大きさは0)
+// 領域・再開する命令のPC(KRET)と再開するための値を置く変数に，起動するプロセスの値を置いてから呼ぶ
 // この関数の呼び出し元へは，次のどちらかの場合に，システムコールハンドラか例外ハンドラがSPを戻してから直接戻る．このため，どちらの場合もこの関数の末尾の命令は実行されない
 // - 実行ファイルが終了のシステムコールを実行した場合: システムコールハンドラが，終了状態を返して戻る
 // - 実行ファイルが例外を起こした場合: 例外ハンドラが，例外の原因とPCを控えて戻る(戻り値は不定)
 static int exec_enter(void) {
     // システムコールハンドラ・例外ハンドラが呼び出し元へ戻れるよう，戻り先を指すSPを控える
     exec_kernel_sp = SP;
-    // 実行ファイルのスタックへ切り替え，戻り先(領域の先頭の命令)へユーザーモードで移る
-    SP = exec_start_sp;
-    sysret();
+    // 変数に置いた値で，KRETの命令(領域の先頭の命令)へユーザーモードで移る
+    exec_resume();
 }
 
-// システムコールハンドラ．実行ファイルがシステムコールの命令を実行すると，カーネルモードへ移ってここへ飛ぶ(フレームの大きさは0)
-// 終了を求められれば，終了状態を返して実行ファイルへ入る関数の呼び出し元へ戻る．それ以外は機能を実行して実行ファイルへ戻る
+// システムコールハンドラ．実行ファイルがシステムコールの命令を実行すると，CPUがカーネルモードへ移ってここへ飛ぶ(フレームの大きさは0)
+// 再開するための値を控えてから機能を実行する．終了を求められれば，終了状態を返して実行ファイルへ入る関数の呼び出し元へ戻る．それ以外は，控えた値で実行ファイルへ戻る
 static int exec_syscall_entry(void) {
-    // 実行ファイルのSPを控え，カーネルモードのスタックへ切り替える
-    // (切り替えるまでは，SPが領域の中の番地のままで，カーネルモードではそのまま使えないため，関数を呼ばない)
-    exec_user_sp = SP;
-    SP = exec_kernel_sp;
-    // 機能を実行し，終了を求められていれば，SPを実行ファイルへ入るときに控えた値へ戻した状態のまま，実行ファイルへ入る関数の呼び出し元へ戻る
+    // SPを控えてカーネルモードのスタックへ切り替え，r0〜r15・RSI・RAXを控える(コンパイラの命令がレジスタを書き換える前に行うため，本体の最初の文にする)
+    asm("wm fh r0 r16 %0\n"  // SPを控える
+        "rm fh r0 r16 %1\n"  // カーネルモードのスタックへ切り替える
+        "call %2"            // r0〜r15・RSI・RAXを控える
+        : : "i"(&exec_user_sp), "i"(&exec_kernel_sp), "i"(exec_save_registers));
+    // 控えた値を，実行中のプロセスの要素へ写す(子を起動する機能では，子を実行すると変数が子の値に変わるため，親の値を要素に残しておく)
+    exec_save_context(process_current);
+
+    // 機能を実行する．終了を求められていれば，SPを実行ファイルへ入るときに控えた値へ戻した状態のまま，実行ファイルへ入る関数の呼び出し元へ戻る
     if (syscall_handle(exec_user_sp, &exec_exit_status)) {
         return exec_exit_status;
     }
-    // 実行ファイルのスタックへ戻し，システムコールの命令の次の命令へユーザーモードで戻る
-    SP = exec_user_sp;
-    sysret();
+
+    // 変数に置いた値で，システムコールの命令の次の命令へユーザーモードで戻る(子を起動した場合は，子が終わった後に変数を親の値へ戻してある)
+    exec_resume();
 }
 
-// 例外ハンドラ．実行ファイルが例外を起こすと，カーネルモードへ移ってここへ飛ぶ(フレームの大きさは0)
+// 割り込みハンドラ．実行ファイルがタイマー割り込みで止められると，CPUがカーネルモードへ移ってここへ飛ぶ(フレームの大きさは0)
+// 再開するための値を控えてから戻し，割り込みで止めた命令から同じプロセスを続ける
+static void exec_interrupt_entry(void) {
+    // SPを控えてカーネルモードのスタックへ切り替え，r0〜r15・RSI・RAXを控える(コンパイラの命令がレジスタを書き換える前に行うため，本体の最初の文にする)
+    asm("wm fh r0 r16 %0\n"  // SPを控える
+        "rm fh r0 r16 %1\n"  // カーネルモードのスタックへ切り替える
+        "call %2"            // r0〜r15・RSI・RAXを控える
+        : : "i"(&exec_user_sp), "i"(&exec_kernel_sp), "i"(exec_save_registers));
+    // 控えた値を実行中のプロセスの要素へ写し，同じ要素から変数へ戻す
+    // (戻す値は控えた値と同じだが，割り込みで止めたプロセスの再開を，起動するときや親へ戻るときと同じく要素の値から行うため)
+    exec_save_context(process_current);
+    exec_restore_context(process_current);
+    // 割り込みで止めた命令(KRETの命令)へユーザーモードで戻る
+    exec_resume();
+}
+
+// 例外ハンドラ．実行ファイルが例外を起こすと，CPUがカーネルモードへ移ってここへ飛ぶ(フレームの大きさは0)
 // 例外の原因と例外を起こした命令のPCを控え，実行ファイルへ入る関数の呼び出し元へ戻る．例外を起こした命令から先は実行しない
 static void exec_exception_entry(void) {
     // SPを実行ファイルへ入るときに控えた値へ戻し，カーネルモードのスタックへ切り替える
-    // (切り替えるまでは，SPが領域の中の番地のままで，カーネルモードではそのまま使えないため，関数を呼ばない)
     SP = exec_kernel_sp;
     // 例外の原因と，例外を起こした命令のPCを控える
     exec_exception_cause = (int)ECAUSE;
     exec_exception_pc = KRET;
     return;
+}
+
+// ハンドラの番地と割り込み周期をCPUへ設定し，タイマー割り込みを有効にする
+void exec_init(void) {
+    // 3つのハンドラの番地を書き込む
+    KENTRY = (unsigned int)exec_syscall_entry;
+    IENTRY = (unsigned int)exec_interrupt_entry;
+    EENTRY = (unsigned int)exec_exception_entry;
+    // 割り込み周期を書き込み，タイマー割り込みを有効にする
+    // タイマーはこの後止めず，カーネルモードの間もサイクル数を数える．CPUはカーネルモードの間は割り込まず，その間に割り込み周期に達した分は，次にユーザーモードへ移った直後に割り込む
+    // このため，割り込まれるのは実行ファイルを動かす間だけだが，起動された実行ファイルが先頭の命令を実行する前や，システムコールから戻った直後にも割り込まれうる
+    TINTERVAL = EXEC_INTERRUPT_PERIOD;
 }
 
 // プロセスを終わらせた例外の原因と，例外を起こした命令のPCを，resultから"<原因のメッセージ> (pc 0x????????)"の形式で改行を付けて出力する
@@ -160,23 +298,13 @@ void exec_print_exception(struct ExecResult *result) {
 static void exec_run(int process, char *line, struct ExecResult *result) {
     int parent = process_table[process].parent;  // 親のプロセステーブルでの位置(シェルが起動したプロセスは，どのプロセスも指さない位置)
 
-    // 親があれば，親を再開するための値を控える(親は子を起動するシステムコールを処理している途中であり，子を実行するとCPUのレジスタとグローバル変数が子の値に変わるため)
-    if (parent != PROCESS_NONE) {
-        process_table[parent].sp = exec_user_sp;
-        process_table[parent].pc = KRET;
-        process_table[parent].kernel_sp = exec_kernel_sp;
-    }
-
-    // 子を実行中のプロセスにし，領域と，システムコールの命令・例外でCPUが飛ぶ先を設定する
+    // 起動するプロセスを実行中のプロセスにし，その要素から，領域と再開するための値(先頭の命令からレジスタを0として始める値)を戻す
+    // (親がある場合，親の再開するための値は，子を起動するシステムコールでカーネルモードへ入ったときに親の要素へ控えてある．このため，変数が子の値に変わっても，子が終わった後に戻せる)
     process_current = process;
-    UBASE = process_table[process].base;
-    USIZE = process_table[process].size;
-    KENTRY = (unsigned int)exec_syscall_entry;
-    EENTRY = (unsigned int)exec_exception_entry;
-    // 実行ファイルへ入る先を，領域の先頭の命令(領域の中のPC 0)にする
-    KRET = 0;
+    exec_restore_context(process);
+
     // コマンド名と引数を領域の末尾に置き，実行ファイルへ入るときのSPを決める
-    exec_start_sp = exec_place_args(line);
+    exec_user_sp = exec_place_args(line);
     // 実行ファイルへ入り，システムコールハンドラか例外ハンドラから戻ってきた値を終了状態とする
     result->exit_status = exec_enter();
     // 例外の原因とPCを写し，次に終わるプロセスの終わり方を見分けられるよう，例外の原因を例外で終わっていないことを表す番号へ戻す
@@ -187,11 +315,7 @@ static void exec_run(int process, char *line, struct ExecResult *result) {
     // 親を実行中のプロセスへ戻し，親があれば，控えた値を戻して親のシステムコールの処理を続けられるようにする
     process_current = parent;
     if (parent != PROCESS_NONE) {
-        UBASE = process_table[parent].base;
-        USIZE = process_table[parent].size;
-        KRET = process_table[parent].pc;
-        exec_user_sp = process_table[parent].sp;
-        exec_kernel_sp = process_table[parent].kernel_sp;
+        exec_restore_context(parent);
     }
 }
 
