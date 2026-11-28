@@ -6,7 +6,6 @@ mypc.gen/
 mypc.hw/
 mypc.ip_user_files/
 mypc.runs/
-mypc.sim/
 
 # Vivadoログ・ジャーナル
 vivado*.log
@@ -14,6 +13,9 @@ vivado*.jou
 
 # BOOT.BINとその材料(FSBL・ハードウェアの情報)．mypc.srcs/boot/のスクリプトで作り直せる
 mypc.boot/
+
+# テストベンチのコンパイル結果とログ．mypc.srcs/sim_1/のバッチファイル(run_*_tb.bat)で作り直せる
+mypc.sim/
 
 # 合成・実装をやり直せば再生成されるデザインチェックポイント
 mypc.srcs/utils_1/
